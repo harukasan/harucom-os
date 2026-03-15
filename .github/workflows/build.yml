@@ -20,6 +20,11 @@ jobs:
         submodules: recursive
         fetch-depth: 0
 
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '4.0.1'
+
     - name: Install ARM toolchain
       run: |
         sudo apt-get update
