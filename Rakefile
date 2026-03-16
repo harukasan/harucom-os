@@ -11,7 +11,7 @@ task default: :uf2
 
 desc "Run cmake configure"
 task :configure do
-  sh "cmake -B #{BUILD_DIR}"
+  sh "cmake -B #{BUILD_DIR} -G Ninja"
 end
 
 desc "Build firmware"

@@ -64,6 +64,16 @@ message(STATUS "harucom_os version: ${HARUCOM_VERSION} (${HARUCOM_BUILD_DATE})")
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+# --- Ruby (for PicoRuby build) ---
+find_package(Ruby QUIET)
+if(NOT Ruby_EXECUTABLE)
+    message(FATAL_ERROR "Ruby interpreter not found.")
+endif()
+get_filename_component(_ruby_bindir "${Ruby_EXECUTABLE}" DIRECTORY)
+find_program(RAKE rake HINTS "${_ruby_bindir}" REQUIRED)
+
+get_filename_component(_toolchain_bindir "${CMAKE_C_COMPILER}" DIRECTORY)
+
 # --- PicoRuby ---
 set(PICORUBY_ROOT ${CMAKE_CURRENT_LIST_DIR}/lib/picoruby)
 set(PICORUBY_BUILD_CONFIG harucom-os-pico2)
@@ -71,7 +81,8 @@ set(PICORUBY_BUILD_CONFIG harucom-os-pico2)
 # Build libmruby.a
 add_custom_command(
     OUTPUT ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a
-    COMMAND rake MRUBY_CONFIG=${CMAKE_CURRENT_LIST_DIR}/build_config/${PICORUBY_BUILD_CONFIG}.rb
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${_toolchain_bindir}:${_ruby_bindir}:$ENV{PATH}"
+        ${RAKE} MRUBY_CONFIG=${CMAKE_CURRENT_LIST_DIR}/build_config/${PICORUBY_BUILD_CONFIG}.rb
     WORKING_DIRECTORY ${PICORUBY_ROOT}
     COMMENT "Building PicoRuby (libmruby.a)..."
 )
