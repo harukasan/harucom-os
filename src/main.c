@@ -9,6 +9,7 @@
 
 #include "pico/stdlib.h"
 #include "picoruby.h"
+#include "dvi_output.h"
 #include "psram.h"
 
 static const char ruby_code[] = "led = GPIO.new(23, GPIO::OUT)\n"
@@ -22,14 +23,18 @@ static const char ruby_code[] = "led = GPIO.new(23, GPIO::OUT)\n"
 mrb_state *global_mrb = NULL;
 
 int main(void) {
+  /* Clock must be configured first (372 MHz for DVI 720p) */
+  dvi_init_clock();
+
+  /* PSRAM timing is calculated from sys_clk, so init after clock change */
+  size_t heap_size;
+  void *heap_pool = psram_init(&heap_size);
+
   stdio_init_all();
   sleep_ms(2000); /* Wait for UART to stabilize */
 
   printf("Harucom OS %s (built %s)\n", HARUCOM_VERSION, HARUCOM_BUILD_DATE);
 
-  /* 1. Initialize PSRAM */
-  size_t heap_size;
-  void *heap_pool = psram_init(&heap_size);
   if (!heap_pool) {
     printf("PSRAM init failed\n");
     return 1;

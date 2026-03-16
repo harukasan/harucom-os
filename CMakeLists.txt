@@ -96,6 +96,16 @@ set_target_properties(mruby PROPERTIES
     IMPORTED_LOCATION ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a
 )
 
+# --- DVI driver library (timing-critical, always -O2) ---
+add_library(picoruby-dvi
+    mrbgems/picoruby-dvi/ports/rp2350/dvi_clock.c
+)
+target_include_directories(picoruby-dvi PUBLIC
+    mrbgems/picoruby-dvi/ports/rp2350
+)
+target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_vreg)
+target_compile_options(picoruby-dvi PRIVATE -O2)
+
 # --- Executable ---
 add_executable(harucom_os
     src/main.c
@@ -156,6 +166,7 @@ target_link_libraries(harucom_os
     hardware_flash
     hardware_sync
     mruby
+    picoruby-dvi
 )
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS "-Wl,--print-memory-usage")
