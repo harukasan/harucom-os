@@ -9,9 +9,7 @@
 
 #include "pico/stdlib.h"
 #include "picoruby.h"
-
-#define HEAP_SIZE (256 * 1024)
-static uint8_t heap_pool[HEAP_SIZE] __attribute__((aligned(8)));
+#include "psram.h"
 
 static const char ruby_code[] = "led = GPIO.new(23, GPIO::OUT)\n"
                                 "loop do\n"
@@ -28,20 +26,28 @@ int main(void) {
   sleep_ms(2000); /* Wait for UART to stabilize */
 
   printf("Harucom OS %s (built %s)\n", HARUCOM_VERSION, HARUCOM_BUILD_DATE);
-  printf("Heap size: %d bytes\n", HEAP_SIZE);
 
-  /* 1. Initialize VM */
-  mrb_state *mrb = mrb_open_with_custom_alloc(heap_pool, HEAP_SIZE);
+  /* 1. Initialize PSRAM */
+  size_t heap_size;
+  void *heap_pool = psram_init(&heap_size);
+  if (!heap_pool) {
+    printf("PSRAM init failed\n");
+    return 1;
+  }
+  printf("PSRAM heap: %u bytes at %p\n", (unsigned)heap_size, heap_pool);
+
+  /* 2. Initialize VM */
+  mrb_state *mrb = mrb_open_with_custom_alloc(heap_pool, heap_size);
   if (!mrb) {
     printf("mrb_open failed\n");
     return 1;
   }
   global_mrb = mrb;
 
-  /* 2. Create compiler context */
+  /* 3. Create compiler context */
   mrc_ccontext *cc = mrc_ccontext_new(mrb);
 
-  /* 3. Compile Ruby code on-the-fly */
+  /* 4. Compile Ruby code on-the-fly */
   const uint8_t *src = (const uint8_t *)ruby_code;
   mrc_irep *irep = mrc_load_string_cxt(cc, &src, strlen(ruby_code));
   if (!irep) {
@@ -51,7 +57,7 @@ int main(void) {
 
   printf("Compile OK\n");
 
-  /* 4. Create task and run */
+  /* 5. Create task and run */
   mrb_value name = mrb_str_new_cstr(mrb, "blink");
   mrb_value task = mrc_create_task(cc, irep, name, mrb_nil_value(),
                                    mrb_obj_value(mrb->top_self));

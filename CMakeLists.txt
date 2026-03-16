@@ -100,6 +100,7 @@ set_target_properties(mruby PROPERTIES
 add_executable(harucom_os
     src/main.c
     src/hal.c
+    src/psram.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
 )
 
@@ -152,6 +153,8 @@ target_link_libraries(harucom_os
     pico_stdlib
     hardware_timer
     hardware_gpio
+    hardware_flash
+    hardware_sync
     mruby
 )
 
