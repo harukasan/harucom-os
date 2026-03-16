@@ -17,11 +17,18 @@ rake clean    # remove build/
 rake distclean # remove build/ and PicoRuby build
 ```
 
+## Documentation
+
+Design documents and implementation notes are in `doc/`:
+
+- [doc/psram.md](doc/psram.md) — PSRAM driver (APS6404L, QMI CS1 initialization, XIP mapping)
+
 ## Code style
 
 - Follow `.editorconfig` for indentation and whitespace rules
 - Use C11, K&R brace style
 - Keep HAL functions prefixed with `hal_` or `mrb_hal_`
+- Write documents in `doc/` in English
 
 ## Commit messages
 
