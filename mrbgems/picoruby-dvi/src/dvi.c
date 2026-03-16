@@ -4,8 +4,8 @@
 
 #include "mruby/dvi.c"
 
-#elif defined(PICORB_VM_MRUBYC)
+#else
 
-#include "mrubyc/dvi.c"
+#error "picoruby-dvi only supports mruby VM"
 
 #endif
