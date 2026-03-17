@@ -70,9 +70,9 @@ default 125 MHz is not an integer multiple of 12 MHz.)
 
 Changing `clk_sys` does **not** affect:
 
-- **clk_usb** — sourced from PLL_USB (48 MHz), unchanged
-- **clk_peri** — sourced from PLL_USB (48 MHz) by default
-- **PLL_USB** — not touched by `set_sys_clock_pll()`
+- **clk_usb** - sourced from PLL_USB (48 MHz), unchanged
+- **clk_peri** - sourced from PLL_USB (48 MHz) by default
+- **PLL_USB** - not touched by `set_sys_clock_pll()`
 
 UART baud rates are derived from `clk_peri`, so they remain correct after
 the clock change.
@@ -95,4 +95,4 @@ stdio_init_all();   // UART/USB CDC at 372 MHz peripheral clock
 
 - [RP2350 datasheet §4.8 "HSTX"](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf)
 - [CEA-861 720p timing](https://en.wikipedia.org/wiki/720p)
-- PicoLibSDK `_display/disphstx` — alternative HSTX DVI implementation
+- PicoLibSDK `_display/disphstx` - alternative HSTX DVI implementation
