@@ -21,11 +21,14 @@
 #include "picoruby.h"
 #include "psram.h"
 
-static const char ruby_code[] = "i = 0\n"
-                                "loop do\n"
-                                "  i = i + 1\n"
-                                "  sleep_ms(100)\n"
-                                "end\n";
+static const char ruby_code[] =
+    "led = GPIO.new(23, GPIO::OUT)\n"
+    "loop do\n"
+    "  led.write(1)\n"
+    "  sleep_ms(500)\n"
+    "  led.write(0)\n"
+    "  sleep_ms(500)\n"
+    "end\n";
 
 // Draw a red/blue checkerboard (80x90 pixel blocks) on the 640x360 framebuffer.
 // RGB332: bits 7-5 = R (0-7), bits 4-2 = G (0-7), bits 1-0 = B (0-3)
@@ -74,6 +77,43 @@ static void core1_dvi_entry(void) {
   }
 }
 
+/*
+ * run_mruby: compile and run a Ruby script on the mruby task scheduler.
+ *
+ * The alarm IRQ registered by mrb_hal_task_init fires on the calling core
+ * (core 0), so mrb_task_disable_irq (cpsid i) correctly serialises the
+ * alarm handler vs the task scheduler without touching core 1's DVI IRQ.
+ */
+static void run_mruby(void) {
+  printf("Starting PicoRuby...\n");
+  mrb_state *mrb = mrb_open_with_custom_alloc(heap_pool_g, heap_size_g);
+  if (!mrb) {
+    printf("mrb_open failed\n");
+    return;
+  }
+  global_mrb = mrb;
+
+  mrc_ccontext *cc = mrc_ccontext_new(mrb);
+  const uint8_t *src = (const uint8_t *)ruby_code;
+  mrc_irep *irep = mrc_load_string_cxt(cc, &src, strlen(ruby_code));
+  if (!irep) {
+    printf("compile failed\n");
+    return;
+  }
+  printf("compile OK\n");
+
+  mrb_value name = mrb_str_new_cstr(mrb, "blink");
+  mrb_value task = mrc_create_task(cc, irep, name, mrb_nil_value(),
+                                   mrb_obj_value(mrb->top_self));
+  if (mrb_nil_p(task)) {
+    printf("create_task failed\n");
+    return;
+  }
+
+  printf("running task scheduler\n");
+  mrb_task_run(mrb);
+}
+
 int main(void) {
   /* Overclock to 372 MHz for DVI 720p */
   dvi_init_clock();
@@ -110,35 +150,10 @@ int main(void) {
   printf("DVI IRQ max cycles: %u, last: %u\n", dvi_irq_max_cycles,
          dvi_irq_last_cycles);
 
-  /* --- Animation + PSRAM stress test on core 0 --- */
-  uint8_t *fb = dvi_get_framebuffer();
-  uint8_t *psram = (uint8_t *)heap_pool;
-  uint32_t frame = 0;
+  /* Run mruby on core 0 (has default alarm pool, stdio, timers) */
+  run_mruby();
 
-  dvi_irq_max_cycles = 0;
-  printf("Starting animation + PSRAM stress test\n");
-  while (1) {
-    /* Scroll checkerboard horizontally */
-    int off = frame % (CHECKER_W * 2);
-    for (int y = 0; y < DVI_FRAME_HEIGHT; y++) {
-      int row = y / CHECKER_H;
-      for (int x = 0; x < DVI_FRAME_WIDTH; x++) {
-        int col = (x + off) / CHECKER_W;
-        fb[y * DVI_FRAME_WIDTH + x] = ((row + col) & 1) ? 0xe0 : 0x03;
-      }
-    }
-
-    /* Stress PSRAM: write and read back 64 KB per frame */
-    for (int i = 0; i < 65536; i++)
-      psram[i] = (uint8_t)(frame + i);
-    volatile uint8_t sum = 0;
-    for (int i = 0; i < 65536; i++)
-      sum += psram[i];
-    (void)sum;
-
-    dvi_wait_vsync();
-
-    if (++frame % 300 == 0)
-      printf("frame=%u irq_max=%u\n", frame, dvi_irq_max_cycles);
-  }
+  /* run_mruby returns only on error */
+  for (;;)
+    __asm volatile("wfe");
 }
