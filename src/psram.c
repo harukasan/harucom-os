@@ -174,12 +174,22 @@ static void __no_inline_not_in_flash_func(set_psram_timing)(void)
     uint8_t max_select = PSRAM_MAX_SELECT_FS / fs_per_cycle;
     uint8_t min_deselect = (PSRAM_MIN_DESELECT_FS + fs_per_cycle - 1) / fs_per_cycle;
 
+    /*
+     * RXDELAY: read sample delay in half sys_clk cycles.
+     * Must be ≥ tCKQS (PSRAM data output valid time, ~6 ns).
+     * At 125 MHz (8 ns/cycle): rxdelay=1 → 4 ns (OK, plus inherent CLKDIV margin).
+     * At 372 MHz (2.7 ns/cycle): rxdelay=3 → 4 ns.
+     */
+    uint32_t half_period_ps = 500000000u / (sys_hz / 1000);  /* ps per half cycle */
+    uint8_t rxdelay = (4000 + half_period_ps - 1) / half_period_ps;
+    if (rxdelay < 1) rxdelay = 1;
+
     uint32_t save = save_and_disable_interrupts();
     qmi_hw->m[1].timing =
           (2u << QMI_M1_TIMING_PAGEBREAK_LSB)      /* 1024-byte page boundary */
         | (3u << QMI_M1_TIMING_SELECT_HOLD_LSB)    /* 3 extra hold cycles */
         | (1u << QMI_M1_TIMING_COOLDOWN_LSB)       /* sequential burst reuse */
-        | (1u << QMI_M1_TIMING_RXDELAY_LSB)        /* ½ sys_clk sample delay */
+        | (rxdelay << QMI_M1_TIMING_RXDELAY_LSB)
         | (max_select << QMI_M1_TIMING_MAX_SELECT_LSB)
         | (min_deselect << QMI_M1_TIMING_MIN_DESELECT_LSB)
         | (clkdiv << QMI_M1_TIMING_CLKDIV_LSB);

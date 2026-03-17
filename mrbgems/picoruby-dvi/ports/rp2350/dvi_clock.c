@@ -39,4 +39,5 @@ void __not_in_flash_func(dvi_init_clock)(void) {
     clock_configure(clk_hstx, 0,
                     CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLK_SYS,
                     sys_freq, sys_freq);
+
 }
