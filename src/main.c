@@ -1,26 +1,27 @@
 /*
- * Harucom OS — PicoRuby firmware for Harucom Board
- *
- * Compiles and executes a Ruby script that blinks the on-board LED (GPIO 23).
+ * Harucom OS — DVI output test
  */
 
 #include <stdio.h>
-#include <string.h>
 
 #include "pico/stdlib.h"
-#include "picoruby.h"
 #include "dvi_output.h"
 #include "psram.h"
 
-static const char ruby_code[] = "led = GPIO.new(23, GPIO::OUT)\n"
-                                "loop do\n"
-                                "  led.write 1\n"
-                                "  sleep_ms 500\n"
-                                "  led.write 0\n"
-                                "  sleep_ms 500\n"
-                                "end\n";
-
-mrb_state *global_mrb = NULL;
+// Draw a red/blue checkerboard (80x90 pixel blocks) on the 640x360 framebuffer.
+// RGB332: bits 7-5 = R (0-7), bits 4-2 = G (0-7), bits 1-0 = B (0-3)
+#define CHECKER_W 80  // block width  (640 / 8 blocks)
+#define CHECKER_H 90  // block height (360 / 4 blocks)
+static void draw_checkerboard(uint8_t *fb) {
+    for (int y = 0; y < DVI_FRAME_HEIGHT; y++) {
+        int row = y / CHECKER_H;
+        for (int x = 0; x < DVI_FRAME_WIDTH; x++) {
+            int col = x / CHECKER_W;
+            fb[y * DVI_FRAME_WIDTH + x] = ((row + col) & 1) ? 0xe0 : 0x03;
+            //                                                  red       blue
+        }
+    }
+}
 
 int main(void) {
   /* Overclock to 372 MHz for DVI 720p */
@@ -31,7 +32,7 @@ int main(void) {
 
   printf("Harucom OS %s (built %s)\n", HARUCOM_VERSION, HARUCOM_BUILD_DATE);
 
-  /* Initialize PSRAM (timing auto-calculated for current sys_clk) */
+  /* Initialize PSRAM */
   size_t heap_size;
   void *heap_pool = psram_init(&heap_size);
   if (!heap_pool) {
@@ -40,41 +41,20 @@ int main(void) {
   }
   printf("PSRAM heap: %u bytes at %p\n", (unsigned)heap_size, heap_pool);
 
-  /* 2. Initialize VM */
-  mrb_state *mrb = mrb_open_with_custom_alloc(heap_pool, heap_size);
-  if (!mrb) {
-    printf("mrb_open failed\n");
-    return 1;
-  }
-  global_mrb = mrb;
+  /* Start DVI output with checkerboard test pattern */
+  draw_checkerboard(dvi_get_framebuffer());
+  dvi_start();
+  printf("DVI output started\n");
 
-  /* 3. Create compiler context */
-  mrc_ccontext *cc = mrc_ccontext_new(mrb);
+  /* Verify DVI IRQ is running: frame_count should reach ~30 after 500ms */
+  sleep_ms(500);
+  printf("DVI frame_count after 500ms: %u (expect ~30)\n", dvi_get_frame_count());
+  printf("DVI IRQ max cycles: %u, last: %u\n",
+         dvi_irq_max_cycles, dvi_irq_last_cycles);
 
-  /* 4. Compile Ruby code on-the-fly */
-  const uint8_t *src = (const uint8_t *)ruby_code;
-  mrc_irep *irep = mrc_load_string_cxt(cc, &src, strlen(ruby_code));
-  if (!irep) {
-    printf("compile failed\n");
-    return 1;
+  for (;;) {
+    dvi_wait_vsync();
   }
 
-  printf("Compile OK\n");
-
-  /* 5. Create task and run */
-  mrb_value name = mrb_str_new_cstr(mrb, "blink");
-  mrb_value task = mrc_create_task(cc, irep, name, mrb_nil_value(),
-                                   mrb_obj_value(mrb->top_self));
-  if (mrb_nil_p(task)) {
-    printf("create_task failed\n");
-    return 1;
-  }
-
-  printf("Starting Ruby task...\n");
-  mrb_task_run(mrb);
-
-  /* Should not reach here (infinite loop in Ruby) */
-  mrb_close(mrb);
-  mrc_ccontext_free(cc);
   return 0;
 }

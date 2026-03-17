@@ -99,11 +99,12 @@ set_target_properties(mruby PROPERTIES
 # --- DVI driver library (timing-critical, always -O2) ---
 add_library(picoruby-dvi
     mrbgems/picoruby-dvi/ports/rp2350/dvi_clock.c
+    mrbgems/picoruby-dvi/ports/rp2350/dvi_output.c
 )
 target_include_directories(picoruby-dvi PUBLIC
     mrbgems/picoruby-dvi/ports/rp2350
 )
-target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_vreg)
+target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_vreg hardware_dma)
 target_compile_options(picoruby-dvi PRIVATE -O2)
 
 # --- Executable ---
