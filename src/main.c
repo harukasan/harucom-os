@@ -23,11 +23,15 @@
 
 static const char ruby_code[] =
     "led = GPIO.new(23, GPIO::OUT)\n"
-    "loop do\n"
-    "  led.write(1)\n"
-    "  sleep_ms(500)\n"
-    "  led.write(0)\n"
-    "  sleep_ms(500)\n"
+    "x = 0\n"
+    "while true\n"
+    "  led.write(x & 1)\n"
+    "  DVI.set_pixel(x, 180, 0xff)\n"
+    "  DVI.wait_vsync\n"
+    "  x = x + 1\n"
+    "  if x >= DVI::WIDTH\n"
+    "    x = 0\n"
+    "  end\n"
     "end\n";
 
 // Draw a red/blue checkerboard (80x90 pixel blocks) on the 640x360 framebuffer.
@@ -71,7 +75,7 @@ static uint32_t dvi_stack_mem[DVI_STACK_SIZE / sizeof(uint32_t)];
 static void core1_dvi_entry(void) {
   dvi_start();
 
-  __asm volatile("msr basepri, %0" :: "r"(0x20u) : "memory");
+  __asm volatile("msr basepri, %0" ::"r"(0x20u) : "memory");
   while (1) {
     __asm volatile("wfi" ::: "memory");
   }

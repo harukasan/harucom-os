@@ -91,26 +91,9 @@ add_custom_target(build_picoruby
     DEPENDS ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a
 )
 
-# Place mruby vm.o in SRAM to eliminate XIP flash cache misses during VM
-# dispatch, which otherwise disrupt the HSTX DVI signal at 372 MHz.
-# vm.o (.text.* sections, ~27 KB) is renamed to .time_critical.* so
-# pico-sdk's linker script copies it from flash to SRAM at boot.
-set(_LIBMRUBY  ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a)
-set(_VM_OBJ    ${CMAKE_BINARY_DIR}/mruby_vm_orig.o)
-set(_VM_RAM_O  ${CMAKE_BINARY_DIR}/mruby_vm_ram.o)
-set(_LIBMRUBY_NOVM ${CMAKE_BINARY_DIR}/libmruby_novm.a)
-
-add_custom_command(
-    OUTPUT ${_VM_OBJ} ${_VM_RAM_O} ${_LIBMRUBY_NOVM}
-    COMMAND bash ${CMAKE_CURRENT_LIST_DIR}/scripts/vm_to_ram.sh
-        ${_LIBMRUBY} ${_LIBMRUBY_NOVM} ${_VM_OBJ} ${_VM_RAM_O}
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    DEPENDS build_picoruby
-    COMMENT "Moving mruby vm.o to SRAM (.time_critical sections)"
-)
-
-add_custom_target(mruby_vm_in_ram
-    DEPENDS ${_VM_OBJ} ${_VM_RAM_O} ${_LIBMRUBY_NOVM}
+add_library(mruby STATIC IMPORTED)
+set_target_properties(mruby PROPERTIES
+    IMPORTED_LOCATION ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a
 )
 
 # --- DVI driver library (timing-critical, always -O2) ---
@@ -119,6 +102,7 @@ add_library(picoruby-dvi
     mrbgems/picoruby-dvi/ports/rp2350/dvi_output.c
 )
 target_include_directories(picoruby-dvi PUBLIC
+    mrbgems/picoruby-dvi/include
     mrbgems/picoruby-dvi/ports/rp2350
 )
 target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_vreg hardware_dma)
@@ -132,7 +116,7 @@ add_executable(harucom_os
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
 )
 
-add_dependencies(harucom_os mruby_vm_in_ram)
+add_dependencies(harucom_os build_picoruby)
 
 pico_set_program_name(harucom_os "harucom_os")
 pico_set_program_version(harucom_os "${HARUCOM_VERSION}")
@@ -184,8 +168,7 @@ target_link_libraries(harucom_os
     hardware_gpio
     hardware_flash
     hardware_sync
-    ${_VM_RAM_O}
-    ${_LIBMRUBY_NOVM}
+    mruby
     picoruby-dvi
 )
 
