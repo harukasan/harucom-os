@@ -235,7 +235,19 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
     qmi_hw->direct_csr = 30 << QMI_DIRECT_CSR_CLKDIV_LSB | QMI_DIRECT_CSR_EN_BITS;
     while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) {}
 
-    const uint8_t cmds[] = { CMD_RESET_ENABLE, CMD_RESET, CMD_QUAD_ENABLE };
+    /*
+     * Command values must live in RAM, not flash, because QMI direct
+     * mode suspends XIP and makes flash unreadable.  An aggregate
+     * initializer (e.g. `uint8_t cmds[] = {0x66, ...}`) would cause
+     * the compiler to emit a template in .rodata (flash) and copy it
+     * to the stack at runtime, crashing during the copy.  Individual
+     * assignments generate immediate MOV instructions that stay in RAM.
+     */
+    uint8_t cmds[3];
+    cmds[0] = CMD_RESET_ENABLE;
+    cmds[1] = CMD_RESET;
+    cmds[2] = CMD_QUAD_ENABLE;
+
     for (int i = 0; i < 3; i++) {
         qmi_hw->direct_csr |= QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
         qmi_hw->direct_tx = cmds[i];
