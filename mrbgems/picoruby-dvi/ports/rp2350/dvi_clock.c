@@ -16,17 +16,24 @@ void __not_in_flash_func(dvi_init_clock)(void) {
     // 1. Increase QMI flash clock divider BEFORE overclocking.
     //    Boot stage 2 sets CLKDIV=2 (SCK = sys_clk/2 = 62.5 MHz).
     //    At 372 MHz with CLKDIV=2, SCK=186 MHz exceeds flash max (~133 MHz).
-    //    CLKDIV=4: SCK = 372/4 = 93 MHz (within spec).
+    //    CLKDIV=4: SCK = 93 MHz (within spec), but mruby VM's large code footprint
+    //    causes constant XIP cache misses at 93 MHz, disrupting DVI signal quality.
+    //    CLKDIV=8: SCK = 46.5 MHz reduces both switching frequency and QMI
+    //    transaction rate (slower execution = fewer cache misses per second).
     hw_write_masked(&qmi_hw->m[0].timing,
-                    4u << QMI_M0_TIMING_CLKDIV_LSB,
+                    8u << QMI_M0_TIMING_CLKDIV_LSB,
                     QMI_M0_TIMING_CLKDIV_BITS);
     // Dummy read via non-cached window to ensure the QMI bus access actually
     // occurs (XIP_BASE would hit cache and not reach QMI hardware).
     (void)*(volatile uint32_t *)XIP_NOCACHE_NOALLOC_BASE;
     __dsb();
 
-    // 2. Raise VREG voltage for stable operation at 372 MHz.
-    vreg_set_voltage(VREG_VOLTAGE_1_30);
+    // 2. Raise VREG voltage for stable operation at 372 MHz under dual-core load.
+    //    1.30 V is stable for core 0 alone, but dual-core mruby execution causes
+    //    enough voltage droop to destabilize PLL_SYS, disrupting HSTX output.
+    //    vreg_disable_voltage_limit() unlocks RP2350-only voltages above 1.30 V.
+    vreg_disable_voltage_limit();
+    vreg_set_voltage(VREG_VOLTAGE_1_35);
     sleep_ms(10);
 
     // 3. Reconfigure PLL: 12 MHz × 93 = 1116 MHz VCO, /3/1 = 372 MHz.

@@ -213,6 +213,7 @@ void __scratch_x("") dma_irq_handler(void) {
     if (++cur_line >= MODE_V_TOTAL_LINES) {
         cur_line = 0;
         frame_count++;
+        __asm volatile("sev");  // wake other core's WFE in dvi_wait_vsync
     }
 
     // Build descriptors for the scanline after the one we just started,
@@ -355,9 +356,21 @@ uint32_t dvi_get_frame_count(void) {
     return frame_count;
 }
 
+uint32_t dvi_get_hstx_csr(void) {
+    return hstx_ctrl_hw->csr;
+}
+
+uint32_t dvi_get_hsync_cmd0(void) {
+    return hsync_cmd[0];
+}
+
+uint32_t dvi_get_fifo_stat(void) {
+    return hstx_fifo_hw->stat;
+}
+
 void dvi_wait_vsync(void) {
     uint32_t last = frame_count;
     while (frame_count == last) {
-        __wfi();
+        asm volatile("wfe" ::: "memory");
     }
 }

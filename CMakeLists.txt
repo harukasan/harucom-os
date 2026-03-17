@@ -91,9 +91,26 @@ add_custom_target(build_picoruby
     DEPENDS ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a
 )
 
-add_library(mruby STATIC IMPORTED)
-set_target_properties(mruby PROPERTIES
-    IMPORTED_LOCATION ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a
+# Place mruby vm.o in SRAM to eliminate XIP flash cache misses during VM
+# dispatch, which otherwise disrupt the HSTX DVI signal at 372 MHz.
+# vm.o (.text.* sections, ~27 KB) is renamed to .time_critical.* so
+# pico-sdk's linker script copies it from flash to SRAM at boot.
+set(_LIBMRUBY  ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a)
+set(_VM_OBJ    ${CMAKE_BINARY_DIR}/mruby_vm_orig.o)
+set(_VM_RAM_O  ${CMAKE_BINARY_DIR}/mruby_vm_ram.o)
+set(_LIBMRUBY_NOVM ${CMAKE_BINARY_DIR}/libmruby_novm.a)
+
+add_custom_command(
+    OUTPUT ${_VM_OBJ} ${_VM_RAM_O} ${_LIBMRUBY_NOVM}
+    COMMAND bash ${CMAKE_CURRENT_LIST_DIR}/scripts/vm_to_ram.sh
+        ${_LIBMRUBY} ${_LIBMRUBY_NOVM} ${_VM_OBJ} ${_VM_RAM_O}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    DEPENDS build_picoruby
+    COMMENT "Moving mruby vm.o to SRAM (.time_critical sections)"
+)
+
+add_custom_target(mruby_vm_in_ram
+    DEPENDS ${_VM_OBJ} ${_VM_RAM_O} ${_LIBMRUBY_NOVM}
 )
 
 # --- DVI driver library (timing-critical, always -O2) ---
@@ -115,7 +132,7 @@ add_executable(harucom_os
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
 )
 
-add_dependencies(harucom_os build_picoruby)
+add_dependencies(harucom_os mruby_vm_in_ram)
 
 pico_set_program_name(harucom_os "harucom_os")
 pico_set_program_version(harucom_os "${HARUCOM_VERSION}")
@@ -162,13 +179,19 @@ pico_enable_stdio_usb(harucom_os 1)
 
 target_link_libraries(harucom_os
     pico_stdlib
+    pico_multicore
     hardware_timer
     hardware_gpio
     hardware_flash
     hardware_sync
-    mruby
+    ${_VM_RAM_O}
+    ${_LIBMRUBY_NOVM}
     picoruby-dvi
 )
+
+# Core 0 needs 32 KB stack for mruby compiler (mrc_load_string_cxt).
+# Default __STACK_SIZE is 0x800 (2 KB), which is insufficient.
+target_link_options(harucom_os PRIVATE -Wl,--defsym=__STACK_SIZE=0x8000)
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS "-Wl,--print-memory-usage")
 

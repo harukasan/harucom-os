@@ -32,4 +32,14 @@ void dvi_wait_vsync(void);
 extern volatile uint32_t dvi_irq_max_cycles;
 extern volatile uint32_t dvi_irq_last_cycles;
 
+// Diagnostic: return current HSTX CSR register value.
+uint32_t dvi_get_hstx_csr(void);
+
+// Diagnostic: return hsync_cmd[0] to detect command table corruption.
+uint32_t dvi_get_hsync_cmd0(void);
+
+// Diagnostic: return HSTX FIFO STAT register.
+// Bits [7:0] = LEVEL, bit [8] = FULL, bit [9] = EMPTY, bit [10] = WOF (write-when-full, sticky).
+uint32_t dvi_get_fifo_stat(void);
+
 #endif

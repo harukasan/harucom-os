@@ -87,11 +87,17 @@
  *   tCEM  (max CS# low)  = 8 µs   → 8e6 ns → 8e15 fs / 64 = 125e6 fs
  *   tCPH  (min CS# high) = 50 ns  → 50e6 fs
  *   fmax  (VDD = 3.3 V)  = 109 MHz (Wrapped Burst)
+ *
+ * PSRAM_MAX_SCK_HZ is intentionally set below the hardware maximum.
+ * At 372 MHz sys_clk with CLKDIV=4, PSRAM SCK = 93 MHz.  The 8th harmonic
+ * (744 MHz) coincides with the HSTX DVI bit clock, causing interference on
+ * the QSPI bus that disrupts DVI output.  Lowering SCK to ~46 MHz
+ * (CLKDIV=8) reduces all harmonics and eliminates the disruption.
  */
 #define SEC_TO_FS             1000000000000000ll
 #define PSRAM_MAX_SELECT_FS   125000000  /* tCEM / 64 (QMI MAX_SELECT unit) */
 #define PSRAM_MIN_DESELECT_FS 50000000   /* tCPH */
-#define PSRAM_MAX_SCK_HZ      109000000  /* max SCK at 3.3 V */
+#define PSRAM_MAX_SCK_HZ      46000000   /* limited to avoid DVI interference */
 
 /* ------------------------------------------------------------------ */
 
