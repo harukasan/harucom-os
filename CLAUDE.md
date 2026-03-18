@@ -22,6 +22,8 @@ rake distclean # remove build/ and PicoRuby build
 Design documents and implementation notes are in `doc/`:
 
 - [doc/psram.md](doc/psram.md) — PSRAM driver (APS6404L, QMI CS1 initialization, XIP mapping)
+- [doc/dvi.md](doc/dvi.md) — DVI output (HSTX, DMA, text/pixel modes, stability analysis)
+- [doc/dvi/batch-rendering.md](doc/dvi/batch-rendering.md) — Batch scanline rendering (N=4, line buffers, descriptor layout)
 
 ## Code style
 
@@ -29,6 +31,7 @@ Design documents and implementation notes are in `doc/`:
 - Use C11, K&R brace style
 - Keep HAL functions prefixed with `hal_` or `mrb_hal_`
 - Write documents in `doc/` in English
+- Documents describe the current state only, not historical changes or comparisons with previous implementations
 
 ## Commit messages
 

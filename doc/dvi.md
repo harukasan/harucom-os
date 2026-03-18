@@ -143,24 +143,18 @@ that wakes WFE on any core:
 
 ## DMA architecture
 
-Per-scanline CMD-to-DATA DMA with double-buffered descriptor buffers.
+Two-channel CMD-to-DATA DMA with double-buffered descriptor buffers.
 
 - **Channel 0 (CMD)**: reads 4-word descriptors, writes to channel 1's
-  Alias 3 registers via RING_WRITE
+  Alias 3 registers via RING_WRITE (size = 4, 2^4 = 16 bytes)
 - **Channel 1 (DATA)**: executes transfers to HSTX FIFO, chains back to
   CMD after each descriptor
 - **NULL stop**: zero-length descriptor triggers DMA_IRQ_1
 
-Each scanline uses 3 descriptor groups (12 words):
-
-```
-Group 0 (sync):  DMA_SIZE_32, DREQ_HSTX -> hsync_cmd (7 words)
-Group 1 (pixel): DMA_SIZE_8 or DMA_SIZE_32, DREQ_HSTX -> pixel/line data
-Group 2 (stop):  DREQ_FORCE, NULL address -> triggers IRQ
-```
-
-The IRQ handler triggers the next pre-prepared buffer, then builds
-descriptors for two scanlines ahead.
+Active scanlines are batched 4-at-a-time (N=4, 120 batches per frame).
+Blanking lines remain single (45 IRQs per frame).  See
+[doc/dvi/batch-rendering.md](dvi/batch-rendering.md) for descriptor
+layout, line buffer design, and measured performance.
 
 ## Text mode rendering
 
@@ -228,8 +222,7 @@ Four render paths selected by `row_has_wide[]` and `row_uniform_attr[]`:
 | Uniform-attr mixed | has wide, uniform attr | ~20 narrow / ~25 wide | ~2,080 |
 | Non-uniform-attr mixed | has wide, mixed attrs | ~23 narrow / ~28 wide | ~2,200 |
 
-Cycle counts include IRQ overhead. The FIFO-augmented budget is 2,240
-cycles (1,600 blanking + 640 FIFO margin).
+Cycle counts are per-line render time.
 
 Key render-loop optimizations:
 
@@ -247,8 +240,8 @@ flash instruction fetch during rendering.
 | Region | Size | Contents |
 |---|---|---|
 | Flash (XIP) | ~920 KB | Firmware, font data (~400 KB), mruby library |
-| Main SRAM | ~182 KB | text_vram (15.7 KB), narrow_row_cache (6.6 KB), wide_row_cache (26 KB), line_buf (1.3 KB), framebuf (75 KB), stacks, BSS |
-| SCRATCH_X | ~3.4 KB | IRQ handler + render code |
+| Main SRAM | ~192 KB | text_vram (15.7 KB), narrow_row_cache (6.6 KB), wide_row_cache (26 KB), line_buf (5.2 KB), framebuf (75 KB), stacks, BSS |
+| SCRATCH_X | ~3.6 KB | IRQ handler + render code |
 | SCRATCH_Y | 4 KB | font_byte_mask (2 KB) + pico-sdk default stack (2 KB, unused after BSS stack switch) |
 | PSRAM (QMI CS1) | 8 MB | mruby heap |
 
@@ -257,10 +250,11 @@ flash instruction fetch during rendering.
 Main SRAM has 8 banks striped at 4-byte boundaries. Two buffers at offset N
 share the same bank when N % 32 = 0.
 
-`line_buf[2][640]` has a natural offset of 640 bytes (640 % 32 = 0), so both
-buffers always hit the same bank, causing 100% DMA/CPU bank collision.
-Padding each buffer to 644 bytes shifts buf[1] by 1 bank position
-(644 / 4 % 8 = 1), reducing same-bank collisions from 100% to 1/8.
+Each line buffer is padded to 644 bytes (640 + 4). The word offset between
+consecutive buffers is 161, so buf[i] maps to SRAM bank (161*i % 8).  With
+8 buffers (2N for batch rendering), all buffers land on different banks
+{0,1,2,3,4,5,6,7}, giving zero bank collisions between any pair of
+simultaneously-active buffers.
 
 ## Stability analysis
 
@@ -280,18 +274,14 @@ At sys_clk = clk_hstx (1:1 ratio), DMA and CPU compete for main SRAM bus
 bandwidth on every cycle. The 2:1 ratio (250 MHz sys_clk, 125 MHz clk_hstx)
 reduces contention enough for the render to fit within the scanline budget.
 
-Measured render cycles at 250 MHz:
+Measured per-line render cycles at 250 MHz:
 
-| Workload | render_last | fifo_empty |
-|----------|-------------|------------|
-| Narrow-only (uniform attr) | ~1,763 | 0 |
-| Narrow-only (mixed attr) | ~2,050 | 0 |
-| Full-screen CJK (uniform attr) | ~2,080 | 0 |
+| Workload | Cycles |
+|----------|--------|
+| Narrow-only (uniform attr) | ~1,837 |
+| Mixed-attr spike | ~2,321 |
 
-The blanking interval provides 1,600 cycles. The 8-entry HSTX FIFO extends
-the effective budget to 2,240 cycles (1,600 + 640 FIFO margin).
-
-The following techniques keep the render within this budget:
+The following techniques keep the per-line render time low:
 
 1. **font_byte_mask table in SCRATCH_Y**: maps font byte (0-255) to
    pre-computed (mask_hi, mask_lo) pairs. A single ldrd from SRAM9
@@ -319,12 +309,14 @@ The following techniques keep the render within this budget:
 
 ### Diagnostic instrumentation
 
-The driver includes counters readable via `dvi_output.h`:
+The driver includes counters readable via `dvi_output.h` (gated by
+`DVI_DIAGNOSTICS`):
 
-- `dvi_irq_max_cycles` / `dvi_irq_last_cycles`: DWT cycle count for the
-  IRQ handler
-- `dvi_render_max_cycles` / `dvi_render_last_cycles`: cycle count for the
-  scanline render
+- `dvi_irq_max_cycles`: DWT cycle count for prepare_batch_dma
+- `dvi_render_max/min/last_cycles`: per-line render timing
+- `dvi_batch_render_max/last_cycles`: total batch render time (sum of
+  BATCH_SIZE line renders)
+- `dvi_irq_interval_min/max`: IRQ-to-IRQ interval in cycles
 - `dvi_fifo_empty_count`: HSTX FIFO empty events at IRQ entry
 - `dvi_fifo_empty_log[]`: scanline numbers of the last 8 empty events
 - `dvi_fifo_min_level`: minimum FIFO level per diagnostic interval
