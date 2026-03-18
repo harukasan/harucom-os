@@ -82,11 +82,30 @@ static void core1_dvi_entry(void) {
 }
 
 /* Periodic DVI diagnostic output (called from timer IRQ on core 0) */
+static uint32_t prev_fifo_empty = 0;
 static bool dvi_diagnostic_callback(struct repeating_timer *t) {
     (void)t;
-    printf("DVI: frames=%u fifo_empty=%u irq_max=%u render_max=%u render_last=%u\n",
-           dvi_get_frame_count(), dvi_get_fifo_empty_count(),
-           dvi_irq_max_cycles, dvi_render_max_cycles, dvi_render_last_cycles);
+    uint32_t contested, access;
+    dvi_read_bus_counters(&contested, &access);
+    uint32_t empty = dvi_get_fifo_empty_count();
+    printf("DVI: frames=%u fifo_empty=%u irq_max=%u render_last=%u fifo_min=%u s9c=%u s9a=%u",
+           dvi_get_frame_count(), empty,
+           dvi_irq_max_cycles, dvi_render_last_cycles,
+           (unsigned)dvi_fifo_min_level, contested, access);
+    // Print FIFO empty log if new events occurred
+    if (empty > prev_fifo_empty) {
+        printf(" lines=[");
+        uint32_t log_count = dvi_fifo_empty_log_idx;
+        if (log_count > DVI_FIFO_EMPTY_LOG_SIZE)
+            log_count = DVI_FIFO_EMPTY_LOG_SIZE;
+        for (uint32_t i = 0; i < log_count; i++)
+            printf("%s%u", i ? "," : "", (unsigned)dvi_fifo_empty_log[i]);
+        printf("]");
+    }
+    prev_fifo_empty = empty;
+    // Reset min level each interval
+    dvi_fifo_min_level = 0xFF;
+    printf("\n");
     return true;
 }
 

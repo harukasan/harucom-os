@@ -40,4 +40,13 @@ uint32_t dvi_get_fifo_empty_count(void);
 // Bits [7:0] = LEVEL, bit [8] = FULL, bit [9] = EMPTY, bit [10] = WOF (write-when-full, sticky).
 uint32_t dvi_get_fifo_stat(void);
 
+// Diagnostic: read and clear SRAM9 (SCRATCH_Y) bus performance counters.
+void dvi_read_bus_counters(uint32_t *contested, uint32_t *access);
+
+// FIFO underflow diagnostics
+#define DVI_FIFO_EMPTY_LOG_SIZE 8
+extern volatile uint32_t dvi_fifo_empty_log[DVI_FIFO_EMPTY_LOG_SIZE];
+extern volatile uint32_t dvi_fifo_empty_log_idx;
+extern volatile uint32_t dvi_fifo_min_level;
+
 #endif

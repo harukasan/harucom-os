@@ -124,15 +124,17 @@ static dvi_mode_t active_mode;
 #define DMACH_CMD  0
 #define DMACH_DATA 1
 
-// Per-scanline command buffers (double-buffered, in SCRATCH_Y).
+// Per-scanline command buffers (double-buffered).
+// In main SRAM to avoid SCRATCH_Y contention with CPU ctrl word accesses.
+// CMD DMA reads these in brief bursts (4 words per group, DREQ_FORCE).
 #define DMA_SCANLINE_BUF_WORDS 12
-static uint32_t __scratch_y("") dma_scanline_buf[2][DMA_SCANLINE_BUF_WORDS] __attribute__((aligned(16)));
+static uint32_t dma_scanline_buf[2][DMA_SCANLINE_BUF_WORDS] __attribute__((aligned(16)));
 
-// DMA control words
-static uint32_t __scratch_y("") ctrl_sync;
-static uint32_t __scratch_y("") ctrl_pixel;       // DMA_SIZE_8 for pixel mode (byte replication = 2x)
-static uint32_t __scratch_y("") ctrl_text_pixel;   // DMA_SIZE_32 for text mode (4 packed pixels)
-static uint32_t __scratch_y("") ctrl_stop;
+// DMA control words (read by CPU in prepare_scanline_dma)
+static uint32_t ctrl_sync;
+static uint32_t ctrl_pixel;       // DMA_SIZE_8 for pixel mode (byte replication = 2x)
+static uint32_t ctrl_text_pixel;   // DMA_SIZE_32 for text mode (4 packed pixels)
+static uint32_t ctrl_stop;
 
 static volatile uint32_t frame_count = 0;
 
@@ -149,8 +151,18 @@ volatile uint32_t dvi_fifo_empty_count = 0;
 volatile uint32_t dvi_render_max_cycles  = 0;
 volatile uint32_t dvi_render_last_cycles = 0;
 
-static int __scratch_y("") cur_line = 0;
-static int __scratch_y("") cur_desc_idx = 0;
+// FIFO underflow diagnostics
+#define FIFO_EMPTY_LOG_SIZE 8
+volatile uint32_t dvi_fifo_empty_log[FIFO_EMPTY_LOG_SIZE]; // scanline numbers
+volatile uint32_t dvi_fifo_empty_log_idx = 0;
+volatile uint32_t dvi_fifo_min_level = 0xFF;  // minimum FIFO level seen at IRQ entry
+
+// Bus fabric performance counters (SRAM9 = SCRATCH_Y)
+volatile uint32_t dvi_sram9_contested = 0;
+volatile uint32_t dvi_sram9_access = 0;
+
+static int cur_line = 0;
+static int cur_desc_idx = 0;
 
 // ----------------------------------------------------------------------------
 // Pixel mode data
@@ -164,8 +176,12 @@ static dvi_text_cell_t text_vram[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
 static int text_cols = DVI_TEXT_MAX_COLS;
 static int text_rows = DVI_TEXT_MAX_ROWS;
 
-// Double-buffered scanline output in SCRATCH_Y (DMA reads from here).
-static uint8_t __scratch_y("") line_buf[2][MODE_H_ACTIVE_PIXELS]
+// Double-buffered scanline output in main SRAM (8-bank striped).
+// Stride = 644 bytes (640 data + 4 padding) so buf[0] and buf[1] map to
+// different SRAM banks: 644/4 % 8 = 1, giving 7/8 non-conflicting accesses
+// between DMA reads (buf[A]) and CPU writes (buf[B]).
+#define LINE_BUF_STRIDE (MODE_H_ACTIVE_PIXELS + 4)
+static uint8_t line_buf[2][LINE_BUF_STRIDE]
     __attribute__((aligned(4)));
 static int line_buf_idx = 0;
 
@@ -569,9 +585,22 @@ static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, i
 void __scratch_x("") dma_irq_handler(void) {
     dma_hw->ints1 = 1u << DMACH_DATA;
 
-    // Check FIFO empty flag for diagnostics (bit 9 = EMPTY)
-    if (hstx_fifo_hw->stat & (1u << 9))
+    // Read FIFO status for diagnostics
+    uint32_t fifo_stat = hstx_fifo_hw->stat;
+    uint32_t fifo_level = fifo_stat & 0xFF;
+
+    // Track minimum FIFO level (how close to underflow)
+    if (fifo_level < dvi_fifo_min_level)
+        dvi_fifo_min_level = fifo_level;
+
+    // Log scanline number on FIFO empty
+    if (fifo_stat & (1u << 9)) {
         dvi_fifo_empty_count++;
+        uint32_t idx = dvi_fifo_empty_log_idx;
+        if (idx < FIFO_EMPTY_LOG_SIZE)
+            dvi_fifo_empty_log[idx] = cur_line;
+        dvi_fifo_empty_log_idx = idx + 1;
+    }
 
     // Start the next pre-prepared descriptor buffer
     int next_idx = cur_desc_idx ^ 1;
@@ -610,6 +639,13 @@ void dvi_start_mode(dvi_mode_t mode) {
     *DEMCR     |= (1u << 24);  // TRCENA: enable DWT
     *DWT_CTRL  |= 1u;          // CYCCNTENA: enable cycle counter
     *DWT_CYCCNT = 0;
+
+    // Enable bus fabric performance counters for SRAM9 (SCRATCH_Y) monitoring
+    bus_ctrl_hw->perfctr_en = 1;
+    bus_ctrl_hw->counter[0].sel = 0x12;  // SRAM9_ACCESS_CONTESTED
+    bus_ctrl_hw->counter[0].value = 0;
+    bus_ctrl_hw->counter[1].sel = 0x13;  // SRAM9_ACCESS
+    bus_ctrl_hw->counter[1].value = 0;
 
     // Configure HSTX's TMDS encoder for RGB332
     hstx_ctrl_hw->expand_tmds =
@@ -762,6 +798,14 @@ uint32_t dvi_get_hsync_cmd0(void) {
 
 uint32_t dvi_get_fifo_stat(void) {
     return hstx_fifo_hw->stat;
+}
+
+void dvi_read_bus_counters(uint32_t *contested, uint32_t *access) {
+    *contested = bus_ctrl_hw->counter[0].value;
+    *access = bus_ctrl_hw->counter[1].value;
+    // Clear after read
+    bus_ctrl_hw->counter[0].value = 0;
+    bus_ctrl_hw->counter[1].value = 0;
 }
 
 void dvi_wait_vsync(void) {
