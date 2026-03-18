@@ -72,20 +72,21 @@ GP16 D1-   GP17 D1+   (Lane 1: green)
 GP18 D2-   GP19 D2+   (Lane 2: red)
 ```
 
-## System clock: 375 MHz
+## System clock: 250 MHz
 
 Text mode rendering requires sys_clk > clk_hstx. At a 1:1 ratio, DMA and
 CPU compete for main SRAM bus bandwidth every cycle, inflating render time
-beyond the scanline budget. A 3:1 ratio (375 MHz sys_clk, 125 MHz clk_hstx)
-gives the CPU enough free cycles between DMA transactions for stable
-operation. See [stability analysis](#stability-analysis) below.
+beyond the scanline budget. A 2:1 ratio (250 MHz sys_clk, 125 MHz clk_hstx)
+combined with render loop optimizations (expanded nibble table in SCRATCH_Y,
+uniform-attribute fast path) keeps the render within the blanking budget.
+See [stability analysis](#stability-analysis) below.
 
 ### HSTX serialization
 
 | Parameter | Value |
 |---|---|
-| clk_sys | 375 MHz |
-| clk_hstx | 125 MHz (clk_sys / 3) |
+| clk_sys | 250 MHz |
+| clk_hstx | 125 MHz (clk_sys / 2) |
 | CLKDIV | 5 |
 | N_SHIFTS | 5 |
 | SHIFT | 2 bits |
@@ -95,21 +96,9 @@ operation. See [stability analysis](#stability-analysis) below.
 
 ```
 VCO     = 12 MHz x 125 = 1500 MHz
-sys_clk = 1500 / 4 / 1 = 375 MHz
-VREG    = 1.30 V
+sys_clk = 1500 / 6 / 1 = 250 MHz
+VREG    = 1.15 V
 ```
-
-### QMI flash timing
-
-QMI flash clock divider is increased before overclocking:
-
-| Clock | CLKDIV | SCK | Note |
-|---|---|---|---|
-| 150 MHz (default) | 2 | 75 MHz | Boot stage 2 default |
-| 375 MHz (DVI) | 4 | 93.75 MHz | Within flash spec (~133 MHz max) |
-
-The divider change runs from SRAM (`__not_in_flash_func`) to avoid
-executing from flash while QMI timing changes.
 
 ### Peripheral clocks
 
@@ -208,10 +197,13 @@ inline ARM Thumb-2 assembly. Branchless pixel selection via nibble-mask LUT:
 pixel = bg4 ^ (xor4 & nibble_mask[nibble])
 ```
 
-Two fast paths selected by `row_has_wide[]` flag:
+Three render paths selected by `row_has_wide[]` and `row_uniform_attr[]`:
 
-- Narrow-only: ldrd pair processing (2 cells per iteration)
-- Mixed: single-cell dispatch with narrow/wide sub-paths
+- Uniform-attr narrow-only: pre-computed bg/xor, expanded nibble table in
+  SCRATCH_Y, no per-cell attr checks. ~1,763 cycles including IRQ overhead.
+- Mixed-attr narrow-only: expanded nibble table with per-cell attr checks.
+  ~2,050 cycles including IRQ overhead.
+- Mixed (narrow + wide): single-cell dispatch with narrow/wide sub-paths.
 
 The render function and IRQ handler are placed in SCRATCH_X to avoid
 flash instruction fetch during rendering.
@@ -222,8 +214,8 @@ flash instruction fetch during rendering.
 |---|---|---|
 | Flash (XIP) | ~920 KB | Firmware, font data (~400 KB), mruby library |
 | Main SRAM | ~156 KB | text_vram (15.7 KB), narrow_row_cache (6.6 KB), line_buf (1.3 KB), framebuf (75 KB), stacks, BSS |
-| SCRATCH_X | ~3.3 KB | IRQ handler + render code |
-| SCRATCH_Y | ~2 KB | pico-sdk default stack (unused after BSS stack switch) |
+| SCRATCH_X | ~3.4 KB | IRQ handler + render code |
+| SCRATCH_Y | 4 KB | expanded_nibble (2 KB) + pico-sdk default stack (2 KB, unused after BSS stack switch) |
 | PSRAM (QMI CS1) | 8 MB | mruby heap |
 
 ### Main SRAM bank-offset technique
@@ -255,22 +247,37 @@ Impact on text mode:
 At sys_clk = clk_hstx (1:1 ratio), DMA and CPU compete for main SRAM bus
 bandwidth on every cycle. Measured effects:
 
-| sys_clk | ratio | budget | render_last | fifo_empty | result |
-|---------|-------|--------|-------------|------------|--------|
-| 125 MHz | 1:1 | 4,000 | 4,555 | >500/sec | unstable |
-| 250 MHz | 2:1 | 8,000 | 2,137 | ~1/10 sec | nearly stable |
-| 375 MHz | 3:1 | 12,000 | 2,137 | 0 | fully stable |
+| sys_clk | ratio | render_last | fifo_empty | fifo_min | result |
+|---------|-------|-------------|------------|----------|--------|
+| 125 MHz | 1:1 | 4,555 | >500/sec | -- | unstable |
+| 250 MHz | 2:1 | 2,137 | ~1/10 sec | -- | nearly stable (pre-optimization) |
+| 375 MHz | 3:1 | 2,137 | 0 | -- | fully stable |
+| 250 MHz | 2:1 | 1,763 | 0 | 7 | **fully stable (optimized)** |
 
-The 2:1 ratio (250 MHz) was investigated using RP2350 bus fabric performance
-counters (PERFSEL: SRAM9_ACCESS_CONTESTED). SCRATCH_Y contention was
-eliminated by moving all data to main SRAM, but rare FIFO underflows
-persisted due to multi-master main SRAM bank contention between Core 0
-(mruby), Core 1 (render), and DMA. FIFO empty events occurred at random
-scanlines (~1 per 10 seconds), confirming statistical bus contention rather
-than a structural timing issue.
+The initial 250 MHz attempt (2:1 ratio) suffered rare FIFO underflows due
+to multi-master main SRAM bank contention between Core 0 (mruby), Core 1
+(render), and DMA. The render (~2,137 cycles) exceeded the blanking budget
+(1,600 cycles), spilling into the active pixel period where DMA reads
+caused additional bus stalls.
 
-The 3:1 ratio (375 MHz) provides enough CPU cycles between DMA transactions
-that even worst-case bus contention cannot drain the 8-entry HSTX FIFO.
+Three optimizations brought the render within the blanking budget at 250 MHz:
+
+1. **Pre-expanded nibble table in SCRATCH_Y**: maps font byte (0-255) to
+   pre-computed (mask_hi, mask_lo) pairs. Replaces two nibble_mask lookups
+   (Main SRAM) with a single ldrd from SRAM9 (separate bus port, zero DMA
+   contention). 256 entries x 8 bytes = 2 KB.
+
+2. **Uniform-attribute fast path**: tracks per-row attribute uniformity via
+   `row_uniform_attr[]`. When all cells share the same attr, pre-computes
+   bg4/xor4 once and skips all per-cell ubfx+cmp+bne attr checks.
+
+3. **DMA trigger reordering**: moves the DMA descriptor trigger to
+   immediately after IRQ acknowledgment, before FIFO diagnostics. Recovers
+   ~20 cycles of blanking margin.
+
+Combined savings: ~2,137 to ~1,484 cycles (pure render), ~1,763 cycles
+including IRQ overhead. The 8-entry HSTX FIFO (fifo_min=7) absorbs any
+residual Core 0 vs DMA contention during the active pixel period.
 
 ### Diagnostic instrumentation
 
@@ -288,7 +295,7 @@ The driver includes counters readable via `dvi_output.h`:
 ## Initialization order
 
 ```c
-dvi_init_clock();           // 375 MHz, VREG 1.30V, QMI CLKDIV=4
+dvi_init_clock();           // 250 MHz, VREG 1.15V
 stdio_init_all();           // UART/USB CDC on core 0
 psram_init();               // PSRAM timing at 375 MHz
 dvi_text_set_font(...);     // configure fonts before DVI starts

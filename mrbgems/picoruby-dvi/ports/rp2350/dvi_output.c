@@ -202,11 +202,20 @@ static uint8_t narrow_row_cache[TEXT_GLYPH_HEIGHT_12WIDE * NARROW_CACHE_STRIDE];
 // Per-row wide character flag for narrow-only / mixed path dispatch.
 static uint8_t row_has_wide[DVI_TEXT_MAX_ROWS];
 
+// Per-row uniform attribute: the common attr byte, or 0xFF if mixed.
+// Enables skipping per-cell attr checks in the render loop.
+static uint8_t row_uniform_attr[DVI_TEXT_MAX_ROWS];
+
 // Pre-expanded palette: RGB332 byte replicated to all 4 lanes.
 static uint32_t text_palette32[16];
 
 // 4-bit nibble -> 32-bit byte mask LUT. Non-const to keep in SRAM.
 static uint32_t nibble_mask[16];
+
+// Pre-expanded nibble mask table in SCRATCH_Y (SRAM9, separate bus port).
+// Maps font byte (0-255) to pre-computed (mask_hi, mask_lo) pair.
+// Eliminates 2 Main SRAM reads per char by moving lookups off the DMA bus.
+static uint32_t expanded_nibble[256][2] __attribute__((section(".scratch_y.expanded_nibble"), aligned(8)));
 
 // VGA-compatible default palette
 static const uint8_t default_palette[16] = {
@@ -231,6 +240,13 @@ static const uint8_t default_palette[16] = {
 static void update_palette32(void) {
     for (int i = 0; i < 16; i++)
         text_palette32[i] = text_palette[i] * 0x01010101u;
+}
+
+static void init_expanded_nibble(void) {
+    for (int b = 0; b < 256; b++) {
+        expanded_nibble[b][0] = nibble_mask[b >> 4];
+        expanded_nibble[b][1] = nibble_mask[b & 0x0C];
+    }
 }
 
 // Render function pointer: selected based on font glyph_width.
@@ -303,11 +319,70 @@ static void __scratch_x("")
     uint32_t t1, t2;
 
     if (!row_has_wide[text_row]) {
-        // NARROW-ONLY FAST PATH (ldrd pair processing)
-        // ldrd loads 2 cells per iteration, loop control once per pair.
-        // Requires even column count (106).
-        // Bold via 512-stride SRAM cache (ch bit 8 selects bold region).
-        uint32_t t3;
+        uint8_t uattr = row_uniform_attr[text_row];
+        if (uattr != 0xFF) {
+        // UNIFORM-ATTR + EXPANDED NIBBLE FAST PATH
+        // All cells share the same attr: pre-compute bg/xor once, skip
+        // per-cell attr checks. Nibble mask lookups go to SCRATCH_Y
+        // (expanded_nibble) instead of Main SRAM (nibble_mask), eliminating
+        // DMA bus contention during active pixel overlap.
+        // Per pair: ~27 cycles (vs ~43 in the attr-checking path).
+        bg4 = text_palette32[uattr & 0x0F];
+        xor4 = bg4 ^ text_palette32[uattr >> 4];
+        const uint32_t *exp = (const uint32_t *)expanded_nibble;
+        uint32_t t3, t4;
+        __asm__ volatile(
+
+            "20:\n\t"
+            "ldrd   %[t1], %[t3], [%[cell]]\n\t"
+            "adds   %[cell], #8\n\t"
+
+            // First character (12 cycles)
+            "uxth   %[t2], %[t1]\n\t"
+            "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+            "adds   %[out], #12\n\t"
+            "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+            "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+            "and.w  %[t1], %[t1], %[xor]\n\t"
+            "eor.w  %[t1], %[t1], %[bg]\n\t"
+            "str    %[t1], [%[out], #-12]\n\t"
+            "and.w  %[t4], %[t4], %[xor]\n\t"
+            "eor.w  %[t4], %[t4], %[bg]\n\t"
+            "str    %[t4], [%[out], #-8]\n\t"
+
+            // Second character (12 cycles, cmp fills ldrb bubble)
+            "uxth   %[t2], %[t3]\n\t"
+            "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+            "cmp    %[end], %[cell]\n\t"
+            "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+            "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+            "and.w  %[t1], %[t1], %[xor]\n\t"
+            "eor.w  %[t1], %[t1], %[bg]\n\t"
+            "str    %[t1], [%[out], #-6]\n\t"
+            "and.w  %[t4], %[t4], %[xor]\n\t"
+            "eor.w  %[t4], %[t4], %[bg]\n\t"
+            "str    %[t4], [%[out], #-2]\n\t"
+            "bhi    20b\n\t"
+
+            : [cell] "+r"(cell),
+              [out] "+r"(out),
+              [t1] "=&r"(t1),
+              [t2] "=&r"(t2),
+              [t3] "=&r"(t3),
+              [t4] "=&r"(t4)
+            : [end] "r"(end),
+              [nrow] "r"(narrow_row),
+              [exp] "r"(exp),
+              [bg] "r"(bg4),
+              [xor] "r"(xor4)
+            : "cc", "memory");
+
+        } else {
+        // NARROW-ONLY PATH WITH ATTR CHECKS (expanded nibble)
+        // Handles rows with mixed attributes. Uses expanded_nibble in
+        // SCRATCH_Y for reduced Main SRAM contention.
+        const uint32_t *exp = (const uint32_t *)expanded_nibble;
+        uint32_t t3, t4;
         __asm__ volatile(
 
             // Loop top: load 2 cells via ldrd
@@ -323,16 +398,14 @@ static void __scratch_x("")
             "uxth   %[t2], %[t1]\n\t"
             "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
             "adds   %[out], #6\n\t"
-            "lsrs   %[t1], %[t2], #4\n\t"
-            "ldr    %[t1], [%[nmask], %[t1], lsl #2]\n\t"
-            "and    %[t2], %[t2], #0x0C\n\t"
-            "ands   %[t1], %[xor]\n\t"
-            "eors   %[t1], %[bg]\n\t"
+            "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+            "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+            "and.w  %[t1], %[t1], %[xor]\n\t"
+            "eor.w  %[t1], %[t1], %[bg]\n\t"
             "str    %[t1], [%[out], #-6]\n\t"
-            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
-            "and.w  %[t2], %[t2], %[xor]\n\t"
-            "eor.w  %[t2], %[t2], %[bg]\n\t"
-            "str    %[t2], [%[out], #-2]\n\t"
+            "and.w  %[t4], %[t4], %[xor]\n\t"
+            "eor.w  %[t4], %[t4], %[bg]\n\t"
+            "str    %[t4], [%[out], #-2]\n\t"
 
             // Second character attr check
             "ubfx   %[t2], %[t3], #16, #8\n\t"
@@ -344,17 +417,15 @@ static void __scratch_x("")
             "uxth   %[t2], %[t3]\n\t"
             "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
             "adds   %[out], #6\n\t"
-            "lsrs   %[t1], %[t2], #4\n\t"
-            "ldr    %[t1], [%[nmask], %[t1], lsl #2]\n\t"
-            "and    %[t2], %[t2], #0x0C\n\t"
-            "ands   %[t1], %[xor]\n\t"
-            "eors   %[t1], %[bg]\n\t"
+            "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+            "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+            "and.w  %[t1], %[t1], %[xor]\n\t"
+            "eor.w  %[t1], %[t1], %[bg]\n\t"
             "str    %[t1], [%[out], #-6]\n\t"
-            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
+            "and.w  %[t4], %[t4], %[xor]\n\t"
             "cmp    %[end], %[cell]\n\t"
-            "and.w  %[t2], %[t2], %[xor]\n\t"
-            "eor.w  %[t2], %[t2], %[bg]\n\t"
-            "str    %[t2], [%[out], #-2]\n\t"
+            "eor.w  %[t4], %[t4], %[bg]\n\t"
+            "str    %[t4], [%[out], #-2]\n\t"
             "bhi    10b\n\t"
             "b      16f\n\t"
 
@@ -387,12 +458,14 @@ static void __scratch_x("")
               [prev] "+r"(prev_attr),
               [t1] "=&r"(t1),
               [t2] "=&r"(t2),
-              [t3] "=&r"(t3)
+              [t3] "=&r"(t3),
+              [t4] "=&r"(t4)
             : [end] "r"(end),
-              [nmask] "r"(nmask),
+              [exp] "r"(exp),
               [nrow] "r"(narrow_row),
               [pal] "r"(pal32)
             : "cc", "memory");
+        }
 
     } else {
         // MIXED PATH (narrow 6px + wide 12px)
@@ -585,15 +658,18 @@ static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, i
 void __scratch_x("") dma_irq_handler(void) {
     dma_hw->ints1 = 1u << DMACH_DATA;
 
-    // Read FIFO status for diagnostics
+    // Start the next pre-prepared descriptor buffer FIRST (time-critical).
+    // Every cycle before this trigger eats into the blanking budget.
+    int next_idx = cur_desc_idx ^ 1;
+    dma_hw->ch[DMACH_CMD].al3_read_addr_trig = (uintptr_t)dma_scanline_buf[next_idx];
+    int free_idx = cur_desc_idx;
+    cur_desc_idx = next_idx;
+
+    // FIFO diagnostics (non-critical, after trigger)
     uint32_t fifo_stat = hstx_fifo_hw->stat;
     uint32_t fifo_level = fifo_stat & 0xFF;
-
-    // Track minimum FIFO level (how close to underflow)
     if (fifo_level < dvi_fifo_min_level)
         dvi_fifo_min_level = fifo_level;
-
-    // Log scanline number on FIFO empty
     if (fifo_stat & (1u << 9)) {
         dvi_fifo_empty_count++;
         uint32_t idx = dvi_fifo_empty_log_idx;
@@ -601,14 +677,6 @@ void __scratch_x("") dma_irq_handler(void) {
             dvi_fifo_empty_log[idx] = cur_line;
         dvi_fifo_empty_log_idx = idx + 1;
     }
-
-    // Start the next pre-prepared descriptor buffer
-    int next_idx = cur_desc_idx ^ 1;
-    dma_hw->ch[DMACH_CMD].al3_read_addr_trig = (uintptr_t)dma_scanline_buf[next_idx];
-
-    // The old descriptor buffer is now free to prepare
-    int free_idx = cur_desc_idx;
-    cur_desc_idx = next_idx;
 
     // Advance scanline counter
     if (++cur_line >= MODE_V_TOTAL_LINES) {
@@ -731,11 +799,13 @@ void dvi_start_mode(dvi_mode_t mode) {
         };
         memcpy(nibble_mask, nibble_mask_init, sizeof(nibble_mask));
     }
+    init_expanded_nibble();
 
     // Initialize text mode state
     memcpy(text_palette, default_palette, sizeof(default_palette));
     update_palette32();
     memset(text_vram, 0, sizeof(text_vram));
+    memset(row_uniform_attr, 0, sizeof(row_uniform_attr));
     memset(line_buf, 0, sizeof(line_buf));
     line_buf_idx = 0;
 
@@ -894,6 +964,8 @@ void dvi_text_put_char(int col, int row, char ch, uint8_t attr) {
     c->ch = (uint8_t)ch;
     c->attr = attr;
     c->flags = 0;
+    if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
+        row_uniform_attr[row] = 0xFF;
 }
 
 void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
@@ -903,6 +975,8 @@ void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
     c->ch = (uint8_t)ch | 0x100;  // bit 8 = bold indicator for 512-stride cache
     c->attr = attr;
     c->flags = DVI_CELL_FLAG_BOLD;
+    if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
+        row_uniform_attr[row] = 0xFF;
 }
 
 void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
@@ -917,6 +991,8 @@ void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
     right->attr = attr;
     right->flags = DVI_CELL_FLAG_WIDE_R;
     row_has_wide[row] = 1;
+    if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
+        row_uniform_attr[row] = 0xFF;
 }
 
 void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
@@ -931,6 +1007,8 @@ void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
     right->attr = attr;
     right->flags = DVI_CELL_FLAG_WIDE_R | DVI_CELL_FLAG_BOLD;
     row_has_wide[row] = 1;
+    if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
+        row_uniform_attr[row] = 0xFF;
 }
 
 // Decode one UTF-8 character from str, store codepoint in *cp.
@@ -1074,4 +1152,5 @@ void dvi_text_clear(uint8_t attr) {
         text_vram[i].flags = 0;
     }
     memset(row_has_wide, 0, sizeof(row_has_wide));
+    memset(row_uniform_attr, attr, text_rows);
 }
