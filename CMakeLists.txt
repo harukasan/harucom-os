@@ -108,6 +108,7 @@ target_include_directories(picoruby-dvi PUBLIC
 )
 target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_dma)
 target_compile_options(picoruby-dvi PRIVATE -O2)
+target_compile_definitions(picoruby-dvi PRIVATE DVI_DIAGNOSTICS)
 
 # --- Executable ---
 add_executable(harucom_os

@@ -34,14 +34,25 @@
 #include "fonts/font_mplus_j12_combined.h"
 
 static const char ruby_code[] =
+    "# Full-screen CJK stress test: rewrite all 37 rows every frame\n"
+    "lines = [\n"
+    "  \"あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん\",\n"
+    "  \"アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン\",\n"
+    "  \"一二三四五六七八九十百千万億兆京垓秭穣溝澗正載極恒河沙阿僧祇那由他不可思議無量大数\",\n"
+    "  \"東京大阪名古屋福岡札幌仙台広島横浜神戸京都奈良金沢長崎熊本鹿児島沖縄函館青森秋田山形\",\n"
+    "  \"春夏秋冬月火水木金土日山川海空風雲雨雪花鳥魚虫石草森林田畑道橋船車馬牛犬猫鶴亀松竹梅\",\n"
+    "  \"赤青黄緑白黒紫橙茶桃金銀銅鉄鋼玉珠宝石光闇影夢幻泡雷電炎氷霜霧露虹星月太陽地球天国\",\n"
+    "  \"剣盾弓矢槍斧鎧兜城壁塔門窓階段柱梁床壁屋根瓦煙突煙霞雲海波浪潮流渦巻嵐台風竜巻雹霰\",\n"
+    "]\n"
+    "colors = [0xE0, 0xF0, 0xB0, 0xA0, 0x90, 0xC0, 0xD0]\n"
     "count = 0\n"
     "loop do\n"
-    "  DVI.text_put_string(0, 20, \"frame: #{count}    \", 0xF0)\n"
-    "  DVI.text_put_string(0, 21, \"Hello from Ruby!\", 0xA0)\n"
-    "  DVI.text_put_string(0, 22, \"Testing flash contention...\", 0xE0)\n"
-    "  col = count % 106\n"
-    "  row = 24 + (count / 106) % 10\n"
-    "  DVI.text_put_char(col, row, 0x41 + count % 26, 0xB0)\n"
+    "  37.times do |row|\n"
+    "    idx = (row + count) % 7\n"
+    "    DVI.text_put_string(0, row, lines[idx], colors[idx])\n"
+    "  end\n"
+    "  # Overwrite row 0 with frame counter\n"
+    "  DVI.text_put_string(0, 0, \"frame:#{count} \", 0xF0)\n"
     "  count = count + 1\n"
     "  DVI.wait_vsync\n"
     "end\n";
@@ -147,6 +158,15 @@ static void setup_text_demo(void) {
     dvi_text_put_string(0, 12, "Bold text:", attr_cyan);
     dvi_text_put_string_bold(0, 13, "The quick brown fox jumps over the lazy dog.", attr_white);
     dvi_text_put_string(0, 14, "The quick brown fox jumps over the lazy dog.", attr_white);
+
+    // Wide character test (rendered before mruby starts, no PSRAM contention)
+    dvi_text_put_string(0, 16, "Wide characters (C):", attr_cyan);
+    dvi_text_put_string(0, 17,
+        "ハルコム OS テキストモード",
+        attr_yellow);
+    dvi_text_put_string(0, 18,
+        "全角文字とHalf-widthの混在テスト",
+        attr_white);
 }
 
 /*

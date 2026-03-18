@@ -27,6 +27,9 @@
 
 #include <string.h>
 
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
 #include "fonts/uni2jis_table.h"
 
 // ----------------------------------------------------------------------------
@@ -202,6 +205,23 @@ static uint8_t narrow_row_cache[TEXT_GLYPH_HEIGHT_12WIDE * NARROW_CACHE_STRIDE];
 // Per-row wide character flag for narrow-only / mixed path dispatch.
 static uint8_t row_has_wide[DVI_TEXT_MAX_ROWS];
 
+// Wide glyph row cache in SRAM (eliminates flash XIP access during rendering).
+// Row-major layout: wide_row_cache[glyph_y * WIDE_CACHE_STRIDE + slot].
+// Regular at slots 0..WIDE_CACHE_SLOTS-1, bold at WIDE_CACHE_SLOTS..2*WIDE_CACHE_SLOTS-1.
+#define WIDE_CACHE_SLOTS 512
+#define WIDE_CACHE_STRIDE (WIDE_CACHE_SLOTS * 2)
+static uint16_t wide_row_cache[TEXT_GLYPH_HEIGHT_12WIDE * WIDE_CACHE_STRIDE];
+
+// Hash table: linear JIS index -> cache slot. Open addressing, power-of-2 size.
+#define WIDE_HASH_SIZE 1024
+#define WIDE_HASH_EMPTY 0xFFFF
+static uint16_t wide_hash_key[WIDE_HASH_SIZE];
+static uint16_t wide_hash_slot[WIDE_HASH_SIZE];
+static uint16_t wide_cache_next_slot;
+
+// Reverse mapping: cache slot -> linear JIS index (for cache rebuild).
+static uint16_t wide_cache_jis[WIDE_CACHE_SLOTS];
+
 // Per-row uniform attribute: the common attr byte, or 0xFF if mixed.
 // Enables skipping per-cell attr checks in the render loop.
 static uint8_t row_uniform_attr[DVI_TEXT_MAX_ROWS];
@@ -247,6 +267,102 @@ static void init_expanded_nibble(void) {
         expanded_nibble[b][0] = nibble_mask[b >> 4];
         expanded_nibble[b][1] = nibble_mask[b & 0x0C];
     }
+}
+
+// Reset the wide glyph cache (hash table + slot allocator).
+static void wide_cache_reset(void) {
+    for (int i = 0; i < WIDE_HASH_SIZE; i++)
+        wide_hash_key[i] = WIDE_HASH_EMPTY;
+    wide_cache_next_slot = 0;
+}
+
+// Look up a linear JIS index in the wide cache. Returns the cache slot,
+// or WIDE_HASH_EMPTY if not found.
+static uint16_t wide_cache_lookup(uint16_t linear_jis) {
+    uint16_t idx = linear_jis & (WIDE_HASH_SIZE - 1);
+    for (int i = 0; i < WIDE_HASH_SIZE; i++) {
+        if (wide_hash_key[idx] == linear_jis)
+            return wide_hash_slot[idx];
+        if (wide_hash_key[idx] == WIDE_HASH_EMPTY)
+            return WIDE_HASH_EMPTY;
+        idx = (idx + 1) & (WIDE_HASH_SIZE - 1);
+    }
+    return WIDE_HASH_EMPTY;
+}
+
+// Copy a single glyph's bitmap from flash to the SRAM row cache at the given slot.
+static void wide_cache_load_glyph(uint16_t slot, uint16_t linear_jis) {
+    if (!text_wide_font)
+        return;
+    int bytes_per_glyph = text_wide_font->glyph_height * 2;
+    int stride = bytes_per_glyph * 2;
+    const uint8_t *src = text_wide_font->bitmap +
+                         (linear_jis - text_wide_font->first_char) * stride;
+    for (int y = 0; y < TEXT_GLYPH_HEIGHT_12WIDE; y++) {
+        int cache_row = y * WIDE_CACHE_STRIDE;
+        const uint16_t *reg = (const uint16_t *)&src[y * 2];
+        const uint16_t *bold = (const uint16_t *)&src[bytes_per_glyph + y * 2];
+        // Direct 16-bit copy preserves byte order for ldrh (little-endian)
+        wide_row_cache[cache_row + slot] = *reg;
+        wide_row_cache[cache_row + WIDE_CACHE_SLOTS + slot] = *bold;
+    }
+}
+
+// Insert a glyph into the wide cache. Copies all 13 scanline rows (regular +
+// bold) from the flash font bitmap into the SRAM row cache. Returns the
+// allocated cache slot, or WIDE_HASH_EMPTY on failure.
+static uint16_t wide_cache_insert(uint16_t linear_jis) {
+    if (wide_cache_next_slot >= WIDE_CACHE_SLOTS) {
+        // Cache full: rebuild by scanning VRAM.
+        // Save reverse map (slot -> JIS) before reset.
+        uint16_t old_jis[WIDE_CACHE_SLOTS];
+        uint16_t old_count = wide_cache_next_slot;
+        memcpy(old_jis, wide_cache_jis, old_count * sizeof(uint16_t));
+        wide_cache_reset();
+
+        // Scan VRAM, collect unique JIS indices from old slots
+        int total = text_rows * text_cols;
+        for (int i = 0; i < total; i++) {
+            dvi_text_cell_t *c = &text_vram[i];
+            if (!(c->flags & DVI_CELL_FLAG_WIDE_L))
+                continue;
+            uint16_t old_slot = c->ch;
+            if (old_slot >= old_count)
+                continue;
+            uint16_t jis = old_jis[old_slot];
+            uint16_t new_slot = wide_cache_lookup(jis);
+            if (new_slot == WIDE_HASH_EMPTY) {
+                // Not yet re-inserted: allocate new slot and copy glyph
+                new_slot = wide_cache_next_slot++;
+                uint16_t idx = jis & (WIDE_HASH_SIZE - 1);
+                while (wide_hash_key[idx] != WIDE_HASH_EMPTY)
+                    idx = (idx + 1) & (WIDE_HASH_SIZE - 1);
+                wide_hash_key[idx] = jis;
+                wide_hash_slot[idx] = new_slot;
+                wide_cache_jis[new_slot] = jis;
+                wide_cache_load_glyph(new_slot, jis);
+            }
+            c->ch = new_slot;
+        }
+
+        // Now try to insert the requested glyph
+        if (wide_cache_next_slot >= WIDE_CACHE_SLOTS)
+            return WIDE_HASH_EMPTY;  // still full after rebuild
+    }
+
+    uint16_t slot = wide_cache_next_slot++;
+
+    // Insert into hash table
+    uint16_t idx = linear_jis & (WIDE_HASH_SIZE - 1);
+    while (wide_hash_key[idx] != WIDE_HASH_EMPTY)
+        idx = (idx + 1) & (WIDE_HASH_SIZE - 1);
+    wide_hash_key[idx] = linear_jis;
+    wide_hash_slot[idx] = slot;
+    wide_cache_jis[slot] = linear_jis;
+
+    wide_cache_load_glyph(slot, linear_jis);
+
+    return slot;
 }
 
 
@@ -437,11 +553,13 @@ static void __scratch_x("")
 
     } else {
         // MIXED PATH (narrow 6px + wide 12px)
-        // Precomputed wide font base: hot loop uses wbase + ch * 52 (+26 for bold).
-        const uintptr_t wbase =
-            (uintptr_t)text_wide_font->bitmap + glyph_y * 2 -
-            (text_wide_font->first_char * (TEXT_GLYPH_HEIGHT_12WIDE * 2 * 2));
+        // Wide glyphs read from SRAM row cache (slot-indexed, no flash access).
+        // Narrow uses expanded_nibble (SCRATCH_Y) to reduce Main SRAM contention.
+        const uint16_t *wcache =
+            wide_row_cache + glyph_y * WIDE_CACHE_STRIDE;
+        const uint32_t *exp = (const uint32_t *)expanded_nibble;
 
+        uint32_t t3, t4;
         __asm__ volatile(
 
             // Loop top: load 1 cell
@@ -457,48 +575,56 @@ static void __scratch_x("")
             "tst    %[t1], #0x03000000\n\t"
             "bne    4f\n\t"
 
-            // Narrow (6px) sub-path
+            // Narrow (6px) sub-path using expanded_nibble (SCRATCH_Y)
             "uxth   %[t2], %[t1]\n\t"
             "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
             "adds   %[out], #6\n\t"
-            "lsrs   %[t1], %[t2], #4\n\t"
-            "ldr    %[t1], [%[nmask], %[t1], lsl #2]\n\t"
-            "and    %[t2], %[t2], #0x0C\n\t"
-            "ands   %[t1], %[xor]\n\t"
-            "eors   %[t1], %[bg]\n\t"
+            "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+            "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+            "and.w  %[t1], %[t1], %[xor]\n\t"
+            "eor.w  %[t1], %[t1], %[bg]\n\t"
             "str    %[t1], [%[out], #-6]\n\t"
-            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
+            "and.w  %[t4], %[t4], %[xor]\n\t"
             "cmp    %[end], %[cell]\n\t"
-            "and.w  %[t2], %[t2], %[xor]\n\t"
-            "eor.w  %[t2], %[t2], %[bg]\n\t"
-            "str    %[t2], [%[out], #-2]\n\t"
+            "eor.w  %[t4], %[t4], %[bg]\n\t"
+            "str    %[t4], [%[out], #-2]\n\t"
             "bhi    1b\n\t"
             "b      6f\n\t"
 
             // Wide (12px) sub-path
-            // Interleaved font: regular at ch*52, bold at ch*52+26.
+            // SRAM cache: regular at slot, bold at slot + WIDE_CACHE_SLOTS.
+            // 12 pixels from 3 nibbles in glyph row (ldrh little-endian):
+            //   bits[7:4] = pixels 0-3, bits[3:0] = pixels 4-7,
+            //   bits[15:12] = pixels 8-11, bits[11:8] = 0 (padding).
+            // All lookups via expanded_nibble in SCRATCH_Y:
+            //   nibble_mask[n] = expanded_nibble[n << 4][0]
             "4:\n\t"
-            "tst    %[t1], #0x80000000\n\t"
             "uxth   %[t2], %[t1]\n\t"
-            "mov.w  %[t1], #52\n\t"
-            "mul    %[t2], %[t1], %[t2]\n\t"
+            "tst    %[t1], #0x80000000\n\t"
             "it     ne\n\t"
-            "addne  %[t2], #26\n\t"
-            "ldrh   %[t1], [%[wbase], %[t2]]\n\t"
+            "addne  %[t2], %[t2], #" STR(WIDE_CACHE_SLOTS) "\n\t"
+            "ldrh   %[t1], [%[wcache], %[t2], lsl #1]\n\t"
             "adds   %[cell], #4\n\t"
             "adds   %[out], #12\n\t"
-            "ubfx   %[t2], %[t1], #4, #4\n\t"
-            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
-            "ands   %[t2], %[xor]\n\t"
-            "eors   %[t2], %[bg]\n\t"
-            "str    %[t2], [%[out], #-12]\n\t"
+            // Pixels 0-3: expanded_nibble[low_byte][0] = nibble_mask[bits[7:4]]
+            "uxtb   %[t2], %[t1]\n\t"
+            "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+            "ldr    %[t3], [%[t2]]\n\t"
+            "and.w  %[t3], %[t3], %[xor]\n\t"
+            "eor.w  %[t3], %[t3], %[bg]\n\t"
+            "str    %[t3], [%[out], #-12]\n\t"
+            // Pixels 4-7: nibble_mask[bits[3:0]] = expanded_nibble[bits[3:0] << 4][0]
             "and    %[t2], %[t1], #0x0F\n\t"
-            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
-            "lsrs   %[t1], %[t1], #12\n\t"
-            "ands   %[t2], %[xor]\n\t"
-            "eors   %[t2], %[bg]\n\t"
+            "add    %[t2], %[exp], %[t2], lsl #7\n\t"
+            "ldr    %[t2], [%[t2]]\n\t"
+            "and.w  %[t2], %[t2], %[xor]\n\t"
+            "eor.w  %[t2], %[t2], %[bg]\n\t"
             "str    %[t2], [%[out], #-8]\n\t"
-            "ldr    %[t1], [%[nmask], %[t1], lsl #2]\n\t"
+            // Pixels 8-11: expanded_nibble[high_byte][0] = nibble_mask[bits[15:12]]
+            // bits[11:8]=0 so high_byte = bits[15:12]<<4, lookup is correct.
+            "lsrs   %[t1], %[t1], #8\n\t"
+            "add    %[t1], %[exp], %[t1], lsl #3\n\t"
+            "ldr    %[t1], [%[t1]]\n\t"
             "cmp    %[end], %[cell]\n\t"
             "and.w  %[t1], %[t1], %[xor]\n\t"
             "eor.w  %[t1], %[t1], %[bg]\n\t"
@@ -524,11 +650,13 @@ static void __scratch_x("")
               [xor] "+r"(xor4),
               [prev] "+r"(prev_attr),
               [t1] "=&r"(t1),
-              [t2] "=&r"(t2)
+              [t2] "=&r"(t2),
+              [t3] "=&r"(t3),
+              [t4] "=&r"(t4)
             : [end] "r"(end),
-              [nmask] "r"(nmask),
+              [exp] "r"(exp),
               [nrow] "r"(narrow_row),
-              [wbase] "r"(wbase),
+              [wcache] "r"(wcache),
               [pal] "r"(pal32)
             : "cc", "memory");
     }
@@ -569,12 +697,16 @@ static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, i
         // Text mode: render glyph scanline into line_buf
         int idx = line_buf_idx;
         line_buf_idx ^= 1;
+#ifdef DVI_DIAGNOSTICS
         uint32_t cyc0 = *DWT_CYCCNT;
+#endif
         render_text_scanline_12wide(line, line_buf[idx]);
+#ifdef DVI_DIAGNOSTICS
         uint32_t elapsed = *DWT_CYCCNT - cyc0;
         dvi_render_last_cycles = elapsed;
         if (elapsed > dvi_render_max_cycles)
             dvi_render_max_cycles = elapsed;
+#endif
         if (line < 2) {
             buf[0] = ctrl_sync;
             buf[1] = fifo;
@@ -621,6 +753,7 @@ void __scratch_x("") dma_irq_handler(void) {
     int free_idx = cur_desc_idx;
     cur_desc_idx = next_idx;
 
+#ifdef DVI_DIAGNOSTICS
     // FIFO diagnostics (non-critical, after trigger)
     uint32_t fifo_stat = hstx_fifo_hw->stat;
     uint32_t fifo_level = fifo_stat & 0xFF;
@@ -633,6 +766,7 @@ void __scratch_x("") dma_irq_handler(void) {
             dvi_fifo_empty_log[idx] = cur_line;
         dvi_fifo_empty_log_idx = idx + 1;
     }
+#endif
 
     // Advance scanline counter
     if (++cur_line >= MODE_V_TOTAL_LINES) {
@@ -645,12 +779,16 @@ void __scratch_x("") dma_irq_handler(void) {
     int next_line = cur_line + 1;
     if (next_line >= MODE_V_TOTAL_LINES)
         next_line = 0;
+#ifdef DVI_DIAGNOSTICS
     uint32_t cyc0 = *DWT_CYCCNT;
+#endif
     prepare_scanline_dma(dma_scanline_buf[free_idx], next_line);
+#ifdef DVI_DIAGNOSTICS
     uint32_t elapsed = *DWT_CYCCNT - cyc0;
     dvi_irq_last_cycles = elapsed;
     if (elapsed > dvi_irq_max_cycles)
         dvi_irq_max_cycles = elapsed;
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -659,6 +797,7 @@ void __scratch_x("") dma_irq_handler(void) {
 void dvi_start_mode(dvi_mode_t mode) {
     active_mode = mode;
 
+#ifdef DVI_DIAGNOSTICS
     // Enable DWT cycle counter for IRQ timing measurement
     *DEMCR     |= (1u << 24);  // TRCENA: enable DWT
     *DWT_CTRL  |= 1u;          // CYCCNTENA: enable cycle counter
@@ -670,6 +809,7 @@ void dvi_start_mode(dvi_mode_t mode) {
     bus_ctrl_hw->counter[0].value = 0;
     bus_ctrl_hw->counter[1].sel = 0x13;  // SRAM9_ACCESS
     bus_ctrl_hw->counter[1].value = 0;
+#endif
 
     // Configure HSTX's TMDS encoder for RGB332
     hstx_ctrl_hw->expand_tmds =
@@ -756,6 +896,7 @@ void dvi_start_mode(dvi_mode_t mode) {
         memcpy(nibble_mask, nibble_mask_init, sizeof(nibble_mask));
     }
     init_expanded_nibble();
+    wide_cache_reset();
 
     // Initialize text mode state
     memcpy(text_palette, default_palette, sizeof(default_palette));
@@ -938,9 +1079,13 @@ void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
 void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
     if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows)
         return;
+    // Resolve cache slot (populate from flash if first use)
+    uint16_t slot = wide_cache_lookup(ch);
+    if (slot == WIDE_HASH_EMPTY)
+        slot = wide_cache_insert(ch);
     dvi_text_cell_t *left = &text_vram[row * text_cols + col];
     dvi_text_cell_t *right = &text_vram[row * text_cols + col + 1];
-    left->ch = ch;
+    left->ch = slot;  // cache slot, not JIS index
     left->attr = attr;
     left->flags = DVI_CELL_FLAG_WIDE_L;
     right->ch = 0;
@@ -954,9 +1099,13 @@ void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
 void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
     if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows)
         return;
+    // Resolve cache slot (populate from flash if first use)
+    uint16_t slot = wide_cache_lookup(ch);
+    if (slot == WIDE_HASH_EMPTY)
+        slot = wide_cache_insert(ch);
     dvi_text_cell_t *left = &text_vram[row * text_cols + col];
     dvi_text_cell_t *right = &text_vram[row * text_cols + col + 1];
-    left->ch = ch;
+    left->ch = slot;  // cache slot, not JIS index
     left->attr = attr;
     left->flags = DVI_CELL_FLAG_WIDE_L | DVI_CELL_FLAG_BOLD;
     right->ch = 0;
@@ -1109,4 +1258,5 @@ void dvi_text_clear(uint8_t attr) {
     }
     memset(row_has_wide, 0, sizeof(row_has_wide));
     memset(row_uniform_attr, attr, text_rows);
+    wide_cache_reset();
 }
