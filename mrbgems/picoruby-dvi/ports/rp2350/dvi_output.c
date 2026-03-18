@@ -232,8 +232,6 @@ static uint32_t text_palette32[16];
 // 4-bit nibble -> 32-bit byte mask LUT. Non-const to keep in SRAM.
 static uint32_t nibble_mask[16];
 
-// Per-row dirty flag: set by Core 0 (text write), may be used for future optimizations.
-static volatile uint8_t row_dirty[DVI_TEXT_MAX_ROWS];
 
 // Pre-expanded nibble mask table in SCRATCH_Y (SRAM9, separate bus port).
 // Maps font byte (0-255) to pre-computed (mask_hi, mask_lo) pair.
@@ -376,8 +374,8 @@ static uint16_t wide_cache_insert(uint16_t linear_jis) {
 // (JIS X 0208) glyphs at 640x480 native resolution. Half-width characters
 // occupy 1 cell (6px), full-width characters occupy 2 cells (12px).
 //
-// Rendering formula (branchless pixel selection via nibble mask LUT):
-//   pixel = bg4 ^ (xor4 & nibble_mask[nibble])
+// Rendering formula (branchless pixel selection via expanded_nibble LUT):
+//   pixel = bg4 ^ (xor4 & expanded_nibble[byte][0..1])
 //
 // Two fast paths:
 //   Narrow-only: ldrd pair processing (2 cells/iter, ~16 insns/char)
@@ -398,7 +396,6 @@ static void __scratch_x("")
         narrow_row_cache + (glyph_y * NARROW_CACHE_STRIDE);
 
     const uint32_t *pal32 = text_palette32;
-    const uint32_t *nmask = nibble_mask;
 
     // Force first attr lookup (bitwise NOT guarantees mismatch).
     uint32_t prev_attr = ~(uint32_t)(uint8_t)(*cell >> 16);
@@ -1144,7 +1141,6 @@ void dvi_text_put_char(int col, int row, char ch, uint8_t attr) {
     c->flags = 0;
     if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
         row_uniform_attr[row] = 0xFF;
-    row_dirty[row] = 1;
 }
 
 void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
@@ -1156,7 +1152,6 @@ void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
     c->flags = DVI_CELL_FLAG_BOLD;
     if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
         row_uniform_attr[row] = 0xFF;
-    row_dirty[row] = 1;
 }
 
 void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
@@ -1177,7 +1172,6 @@ void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
     row_has_wide[row] = 1;
     if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
         row_uniform_attr[row] = 0xFF;
-    row_dirty[row] = 1;
 }
 
 void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
@@ -1199,7 +1193,6 @@ void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
     row_has_wide[row] = 1;
     if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
         row_uniform_attr[row] = 0xFF;
-    row_dirty[row] = 1;
 }
 
 // Decode one UTF-8 character from str, store codepoint in *cp.
@@ -1345,6 +1338,4 @@ void dvi_text_clear(uint8_t attr) {
     memset(row_has_wide, 0, sizeof(row_has_wide));
     memset(row_uniform_attr, attr, text_rows);
     wide_cache_reset();
-    for (int i = 0; i < text_rows; i++)
-        row_dirty[i] = 1;
 }
