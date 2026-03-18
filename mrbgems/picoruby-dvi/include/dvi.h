@@ -34,6 +34,9 @@ typedef enum {
 // Font data structure (defined in dvi_font.h)
 #include "dvi_font.h"
 
+// Mode switch (applied at next VBlank by DMA IRQ handler)
+void dvi_set_mode(dvi_mode_t mode);
+
 // Common API
 uint8_t *dvi_get_framebuffer(void);
 uint32_t dvi_get_frame_count(void);

@@ -6,6 +6,18 @@
 #include "dvi.h"
 
 /*
+ * DVI.set_mode(mode)
+ */
+static mrb_value
+mrb_dvi_set_mode(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int mode;
+  mrb_get_args(mrb, "i", &mode);
+  dvi_set_mode((dvi_mode_t)mode);
+  return mrb_nil_value();
+}
+
+/*
  * DVI.wait_vsync
  */
 static mrb_value
@@ -137,7 +149,13 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                       mrb_fixnum_value(DVI_TEXT_MAX_COLS));
   mrb_define_const_id(mrb, class_DVI, MRB_SYM(TEXT_ROWS),
                       mrb_fixnum_value(DVI_TEXT_MAX_ROWS));
+  mrb_define_const_id(mrb, class_DVI, MRB_SYM(TEXT_MODE),
+                      mrb_fixnum_value(DVI_MODE_TEXT));
+  mrb_define_const_id(mrb, class_DVI, MRB_SYM(GRAPHICS_MODE),
+                      mrb_fixnum_value(DVI_MODE_PIXEL));
 
+  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(set_mode),
+                             mrb_dvi_set_mode, MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(wait_vsync),
                              mrb_dvi_wait_vsync, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(frame_count),

@@ -115,6 +115,7 @@ static uint32_t vsync_cmd[] = {
 // Mode state
 
 static dvi_mode_t active_mode;
+static volatile int next_mode = -1; // -1 = no pending switch
 
 // ----------------------------------------------------------------------------
 // DMA logic
@@ -833,6 +834,29 @@ void __scratch_x("") dma_irq_handler(void) {
     __asm volatile("sev"); // wake Core 0 WFE
   }
 
+  // Apply mode switch during VSync pulse, when HSTX FIFO is guaranteed
+  // empty (only sync words, no pixel data to misinterpret).
+  if (cur_line == MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH) {
+    int pending = next_mode;
+    if (pending >= 0) {
+      next_mode = -1;
+      active_mode = (dvi_mode_t)pending;
+      if (active_mode == DVI_MODE_TEXT) {
+        hstx_ctrl_hw->expand_shift =
+            4 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
+            8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
+            1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
+            0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
+      } else {
+        hstx_ctrl_hw->expand_shift =
+            2 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
+            8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
+            1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
+            0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
+      }
+    }
+  }
+
   // Build descriptors for the scanline after the one we just started
   int next_line = cur_line + 1;
   if (next_line >= MODE_V_TOTAL_LINES)
@@ -976,7 +1000,9 @@ void dvi_start_mode(dvi_mode_t mode) {
   dma_hw->ch[DMACH_CMD].al3_read_addr_trig = (uintptr_t)dma_scanline_buf[0];
 }
 
-void dvi_start(void) { dvi_start_mode(DVI_MODE_PIXEL); }
+void dvi_set_mode(dvi_mode_t mode) {
+  next_mode = (int)mode;
+}
 
 uint8_t *dvi_get_framebuffer(void) { return framebuf; }
 
