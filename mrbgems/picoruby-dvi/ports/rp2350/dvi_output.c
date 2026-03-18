@@ -254,35 +254,6 @@ typedef void (*render_fn_t)(int scanline, uint8_t *out);
 static render_fn_t render_scanline_fn;
 
 // ----------------------------------------------------------------------------
-// 8px-wide renderer (80 columns, fallback)
-
-static void __scratch_x("") render_text_scanline_8(int scanline, uint8_t *out) {
-    int gw = text_font->glyph_height;
-    int text_row = scanline / gw;
-    int glyph_y = scanline % gw;
-    const dvi_text_cell_t *row = &text_vram[text_row * text_cols];
-    const uint8_t *bitmap_base =
-        text_font->bitmap + glyph_y - (text_font->first_char * gw);
-    uint32_t *out32 = (uint32_t *)out;
-
-    for (int col = 0; col < text_cols; col++) {
-        uint8_t ch = row[col].ch;
-        uint8_t attr = row[col].attr;
-        uint32_t fg4 = text_palette32[attr >> 4];
-        uint32_t bg4 = text_palette32[attr & 0x0F];
-        uint32_t xor4 = fg4 ^ bg4;
-
-        uint8_t bits = bitmap_base[ch * gw];
-
-        uint32_t m0 = nibble_mask[bits >> 4];
-        uint32_t m1 = nibble_mask[bits & 0x0F];
-        out32[0] = bg4 ^ (xor4 & m0);
-        out32[1] = bg4 ^ (xor4 & m1);
-        out32 += 2;
-    }
-}
-
-// ----------------------------------------------------------------------------
 // 12px mixed-width renderer (6px half-width + 12px full-width, 106 columns)
 //
 // Renders a scanline using 6px half-width (ISO 8859-1) and 12px full-width
@@ -574,12 +545,8 @@ static void __scratch_x("")
 // Renderer selection
 
 static void update_renderer(void) {
-    if (text_wide_font && text_font && text_font->glyph_width == 6) {
-        render_scanline_fn = render_text_scanline_12wide;
-        return;
-    }
     if (text_font)
-        render_scanline_fn = render_text_scanline_8;
+        render_scanline_fn = render_text_scanline_12wide;
 }
 
 // ----------------------------------------------------------------------------
