@@ -127,11 +127,17 @@ static volatile int next_mode = -1; // -1 = no pending switch
 #define DMACH_CMD 0
 #define DMACH_DATA 1
 
-// Per-scanline command buffers (double-buffered).
+// Batch rendering constants
+#define BATCH_SIZE 4
+#define LINE_BUF_COUNT (BATCH_SIZE * 2)
+
+// Per-batch command buffers (double-buffered).
 // In main SRAM to avoid SCRATCH_Y contention with CPU ctrl word accesses.
 // CMD DMA reads these in brief bursts (4 words per group, DREQ_FORCE).
-#define DMA_SCANLINE_BUF_WORDS 12
-static uint32_t dma_scanline_buf[2][DMA_SCANLINE_BUF_WORDS]
+// Batch layout for N=4 active lines: N x 8 words (sync+pixel) + 4 (stop) = 36.
+// Single-line (blanking) uses only the first 12 words.
+#define DMA_BATCH_BUF_WORDS (BATCH_SIZE * 8 + 4)
+static uint32_t dma_scanline_buf[2][DMA_BATCH_BUF_WORDS]
     __attribute__((aligned(16)));
 
 // DMA control words (read by CPU in prepare_scanline_dma)
@@ -150,9 +156,19 @@ static volatile uint32_t frame_count = 0;
 volatile uint32_t dvi_irq_max_cycles = 0;
 volatile uint32_t dvi_fifo_empty_count = 0;
 
-// Text mode render timing
+// Text mode render timing (per line)
 volatile uint32_t dvi_render_max_cycles = 0;
 volatile uint32_t dvi_render_last_cycles = 0;
+volatile uint32_t dvi_render_min_cycles = 0xFFFFFFFF;
+
+// Batch render total (sum of BATCH_SIZE line renders in one IRQ)
+volatile uint32_t dvi_batch_render_max_cycles = 0;
+volatile uint32_t dvi_batch_render_last_cycles = 0;
+
+// IRQ-to-IRQ interval measurement
+volatile uint32_t dvi_irq_interval_min = 0xFFFFFFFF;
+volatile uint32_t dvi_irq_interval_max = 0;
+static uint32_t last_irq_timestamp = 0;
 
 // FIFO underflow diagnostics
 #define FIFO_EMPTY_LOG_SIZE 8
@@ -176,13 +192,16 @@ static dvi_text_cell_t text_vram[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
 static int text_cols = DVI_TEXT_MAX_COLS;
 static int text_rows = DVI_TEXT_MAX_ROWS;
 
-// Double-buffered scanline output in main SRAM (8-bank striped).
-// Stride = 644 bytes (640 data + 4 padding) so buf[0] and buf[1] map to
-// different SRAM banks: 644/4 % 8 = 1, giving 7/8 non-conflicting accesses
-// between DMA reads (buf[A]) and CPU writes (buf[B]).
+// Scanline output buffers in main SRAM (8-bank striped).
+// Stride = 644 bytes (640 data + 4 padding).  Word offset = 161 per buffer,
+// so buf[i] maps to SRAM bank (161*i % 8) = {0,1,2,3,4,5,6,7}: all 8 buffers
+// land on different banks, giving zero bank collisions between any pair.
+// 2N=8 buffers are needed for batch rendering (N=4): one set of N buffers
+// being DMA'd while the CPU renders into the other N buffers.
 #define LINE_BUF_STRIDE (MODE_H_ACTIVE_PIXELS + 4)
-static uint8_t line_buf[2][LINE_BUF_STRIDE] __attribute__((aligned(4)));
-static int line_buf_idx = 0;
+static uint8_t line_buf[LINE_BUF_COUNT][LINE_BUF_STRIDE]
+    __attribute__((aligned(4)));
+static int line_buf_next = 0;
 
 static const dvi_font_t *text_font;
 static const dvi_font_t *text_wide_font;
@@ -720,19 +739,38 @@ static void __scratch_x("")
 }
 
 // ----------------------------------------------------------------------------
-// DMA scanline preparation
+// DMA batch descriptor preparation
+//
+// Active lines are batched: BATCH_SIZE scanlines per IRQ (120 IRQs for 480
+// lines).  Blanking lines remain single (45 IRQs for VFP+VSYNC+VBP).
+// Total: 165 IRQs per frame (down from 525).
+//
+// Batch descriptor layout (active, 36 words):
+//   buf[ 0.. 7]: sync + pixel for line 0
+//   buf[ 8..15]: sync + pixel for line 1
+//   buf[16..23]: sync + pixel for line 2
+//   buf[24..31]: sync + pixel for line 3
+//   buf[32..35]: NULL stop (triggers IRQ)
+//
+// Blanking descriptor layout (8 words):
+//   buf[0..3]: sync command (blank_cmd or vsync_cmd)
+//   buf[4..7]: NULL stop (triggers IRQ)
 
-// Build DMA descriptors for a single scanline into the given buffer.
+// First line of each descriptor buffer (tracks what each buffer contains).
+static int buf_first_line[2];
+
+// Build DMA descriptors for a batch of scanlines.
 static void __force_inline __scratch_x("")
-    prepare_scanline_dma(uint32_t *buf, int line) {
+    prepare_batch_dma(uint32_t *buf, int first_line) {
   const uint32_t fifo = (uintptr_t)&hstx_fifo_hw->fifo;
 
-  if (line >= MODE_V_ACTIVE_LINES) {
-    // Blank or vsync line: sync command + NULL stop
+  if (first_line >= MODE_V_ACTIVE_LINES) {
+    // Single blanking or vsync line (no rendering needed)
     uint32_t *cmd;
     uint32_t count;
-    if (line >= MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH &&
-        line < MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH + MODE_V_SYNC_WIDTH) {
+    if (first_line >= MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH &&
+        first_line < MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH +
+                         MODE_V_SYNC_WIDTH) {
       cmd = vsync_cmd;
       count = count_of(vsync_cmd);
     } else {
@@ -748,53 +786,88 @@ static void __force_inline __scratch_x("")
     buf[6] = 0;
     buf[7] = 0;
   } else if (active_mode == DVI_MODE_TEXT) {
-    // Text mode: render scanline into double-buffered line buffer.
-    int idx = line_buf_idx;
-    line_buf_idx ^= 1;
+    // Text mode: render BATCH_SIZE scanlines into line buffers.
+    // Full descriptor build for the first two batches of each frame
+    // (first_line < BATCH_SIZE * 2) to initialize both double-buffered
+    // descriptor buffers.  Subsequent batches use the fast path (pointer
+    // update only).
+    int full_build = (first_line < BATCH_SIZE * 2);
+
 #ifdef DVI_DIAGNOSTICS
-    uint32_t cyc0 = *DWT_CYCCNT;
+    uint32_t batch_cyc0 = *DWT_CYCCNT;
 #endif
-    render_text_scanline_12wide(line, line_buf[idx]);
+    for (int i = 0; i < BATCH_SIZE; i++) {
+      int idx = line_buf_next;
+      line_buf_next = (line_buf_next + 1) % LINE_BUF_COUNT;
+      int grp = i * 8;
+
 #ifdef DVI_DIAGNOSTICS
-    uint32_t elapsed = *DWT_CYCCNT - cyc0;
-    dvi_render_last_cycles = elapsed;
-    if (elapsed > dvi_render_max_cycles)
-      dvi_render_max_cycles = elapsed;
+      uint32_t cyc0 = *DWT_CYCCNT;
+#endif
+      render_text_scanline_12wide(first_line + i, line_buf[idx]);
+#ifdef DVI_DIAGNOSTICS
+      uint32_t elapsed = *DWT_CYCCNT - cyc0;
+      dvi_render_last_cycles = elapsed;
+      if (elapsed > dvi_render_max_cycles)
+        dvi_render_max_cycles = elapsed;
+      if (elapsed < dvi_render_min_cycles)
+        dvi_render_min_cycles = elapsed;
 #endif
 
-    if (line < 2) {
-      buf[0] = ctrl_sync;
-      buf[1] = fifo;
-      buf[2] = count_of(hsync_cmd);
-      buf[3] = (uintptr_t)hsync_cmd;
-      buf[4] = ctrl_text_pixel;
-      buf[5] = fifo;
-      buf[6] = MODE_H_ACTIVE_PIXELS / sizeof(uint32_t);
-      buf[7] = (uintptr_t)line_buf[idx];
-      buf[8] = ctrl_stop;
-      buf[9] = 0;
-      buf[10] = 0;
-      buf[11] = 0;
-    } else {
-      buf[7] = (uintptr_t)line_buf[idx];
+      if (full_build) {
+        buf[grp + 0] = ctrl_sync;
+        buf[grp + 1] = fifo;
+        buf[grp + 2] = count_of(hsync_cmd);
+        buf[grp + 3] = (uintptr_t)hsync_cmd;
+        buf[grp + 4] = ctrl_text_pixel;
+        buf[grp + 5] = fifo;
+        buf[grp + 6] = MODE_H_ACTIVE_PIXELS / sizeof(uint32_t);
+        buf[grp + 7] = (uintptr_t)line_buf[idx];
+      } else {
+        buf[grp + 7] = (uintptr_t)line_buf[idx];
+      }
     }
-  } else if (line < 2) {
-    // Pixel mode: active line (full build for lines 0-1)
-    buf[0] = ctrl_sync;
-    buf[1] = fifo;
-    buf[2] = count_of(hsync_cmd);
-    buf[3] = (uintptr_t)hsync_cmd;
-    buf[4] = ctrl_pixel;
-    buf[5] = fifo;
-    buf[6] = MODE_H_RENDER_PIXELS;
-    buf[7] = (uintptr_t)&framebuf[(line >> 1) * MODE_H_RENDER_PIXELS];
-    buf[8] = ctrl_stop;
-    buf[9] = 0;
-    buf[10] = 0;
-    buf[11] = 0;
+#ifdef DVI_DIAGNOSTICS
+    uint32_t batch_elapsed = *DWT_CYCCNT - batch_cyc0;
+    dvi_batch_render_last_cycles = batch_elapsed;
+    if (batch_elapsed > dvi_batch_render_max_cycles)
+      dvi_batch_render_max_cycles = batch_elapsed;
+#endif
+    if (full_build) {
+      buf[BATCH_SIZE * 8 + 0] = ctrl_stop;
+      buf[BATCH_SIZE * 8 + 1] = 0;
+      buf[BATCH_SIZE * 8 + 2] = 0;
+      buf[BATCH_SIZE * 8 + 3] = 0;
+    }
   } else {
-    // Pixel mode: fast path (only update framebuffer pointer)
-    buf[7] = (uintptr_t)&framebuf[(line >> 1) * MODE_H_RENDER_PIXELS];
+    // Graphics mode: batch of BATCH_SIZE lines (no rendering, pointer only)
+    int full_build = (first_line < BATCH_SIZE * 2);
+
+    for (int i = 0; i < BATCH_SIZE; i++) {
+      int line = first_line + i;
+      int grp = i * 8;
+
+      if (full_build) {
+        buf[grp + 0] = ctrl_sync;
+        buf[grp + 1] = fifo;
+        buf[grp + 2] = count_of(hsync_cmd);
+        buf[grp + 3] = (uintptr_t)hsync_cmd;
+        buf[grp + 4] = ctrl_pixel;
+        buf[grp + 5] = fifo;
+        buf[grp + 6] = MODE_H_RENDER_PIXELS;
+        buf[grp + 7] =
+            (uintptr_t)&framebuf[(line >> 1) * MODE_H_RENDER_PIXELS];
+      } else {
+        buf[grp + 7] =
+            (uintptr_t)&framebuf[(line >> 1) * MODE_H_RENDER_PIXELS];
+      }
+    }
+    if (full_build) {
+      buf[BATCH_SIZE * 8 + 0] = ctrl_stop;
+      buf[BATCH_SIZE * 8 + 1] = 0;
+      buf[BATCH_SIZE * 8 + 2] = 0;
+      buf[BATCH_SIZE * 8 + 3] = 0;
+    }
   }
 }
 
@@ -809,6 +882,9 @@ void __scratch_x("") dma_irq_handler(void) {
   int free_idx = cur_desc_idx;
   cur_desc_idx = next_idx;
 
+  // cur_line = first line of the batch we just triggered
+  cur_line = buf_first_line[next_idx];
+
 #ifdef DVI_DIAGNOSTICS
   // FIFO diagnostics (non-critical, after trigger)
   uint32_t fifo_stat = hstx_fifo_hw->stat;
@@ -822,13 +898,23 @@ void __scratch_x("") dma_irq_handler(void) {
       dvi_fifo_empty_log[idx] = cur_line;
     dvi_fifo_empty_log_idx = idx + 1;
   }
+
+  // IRQ-to-IRQ interval measurement
+  uint32_t now = *DWT_CYCCNT;
+  uint32_t interval = now - last_irq_timestamp;
+  last_irq_timestamp = now;
+  if (interval < dvi_irq_interval_min)
+    dvi_irq_interval_min = interval;
+  if (interval > dvi_irq_interval_max)
+    dvi_irq_interval_max = interval;
 #endif
 
-  // Advance scanline counter.
-  // Signal VBlank at the FIRST non-active line so the pre-render gets the
-  // entire blanking interval (~360K cycles) instead of just the last line.
-  if (++cur_line >= MODE_V_TOTAL_LINES)
-    cur_line = 0;
+  // Determine batch size: BATCH_SIZE for active lines, 1 for blanking.
+  int batch_size =
+      (cur_line < MODE_V_ACTIVE_LINES) ? BATCH_SIZE : 1;
+
+  // Signal VBlank at the first non-active line so Core 0 gets the entire
+  // blanking interval (~360K cycles) for pre-render work.
   if (cur_line == MODE_V_ACTIVE_LINES) {
     frame_count++;
     __asm volatile("sev"); // wake Core 0 WFE
@@ -857,14 +943,16 @@ void __scratch_x("") dma_irq_handler(void) {
     }
   }
 
-  // Build descriptors for the scanline after the one we just started
-  int next_line = cur_line + 1;
-  if (next_line >= MODE_V_TOTAL_LINES)
-    next_line = 0;
+  // Build descriptors for the batch after the one we just triggered.
+  int build_start = cur_line + batch_size;
+  if (build_start >= MODE_V_TOTAL_LINES)
+    build_start -= MODE_V_TOTAL_LINES;
+
 #ifdef DVI_DIAGNOSTICS
   uint32_t cyc0 = *DWT_CYCCNT;
 #endif
-  prepare_scanline_dma(dma_scanline_buf[free_idx], next_line);
+  prepare_batch_dma(dma_scanline_buf[free_idx], build_start);
+  buf_first_line[free_idx] = build_start;
 #ifdef DVI_DIAGNOSTICS
   uint32_t elapsed = *DWT_CYCCNT - cyc0;
   if (elapsed > dvi_irq_max_cycles)
@@ -970,11 +1058,13 @@ void dvi_start_mode(dvi_mode_t mode) {
   memset(text_vram, 0, sizeof(text_vram));
   memset(row_uniform_attr, 0, sizeof(row_uniform_attr));
   memset(line_buf, 0, sizeof(line_buf));
-  line_buf_idx = 0;
+  line_buf_next = 0;
 
-  // Prepare initial scanline buffers (scanline 0 and 1)
-  prepare_scanline_dma(dma_scanline_buf[0], 0);
-  prepare_scanline_dma(dma_scanline_buf[1], 1);
+  // Prepare initial batch buffers: batch [0..3] and batch [4..7]
+  prepare_batch_dma(dma_scanline_buf[0], 0);
+  buf_first_line[0] = 0;
+  prepare_batch_dma(dma_scanline_buf[1], BATCH_SIZE);
+  buf_first_line[1] = BATCH_SIZE;
 
   // Configure CMD channel
   c = dma_channel_get_default_config(DMACH_CMD);

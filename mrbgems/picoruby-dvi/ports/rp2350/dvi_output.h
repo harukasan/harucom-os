@@ -20,6 +20,15 @@ extern volatile uint32_t dvi_irq_max_cycles;
 // DWT cycle counts for text mode scanline rendering.
 extern volatile uint32_t dvi_render_max_cycles;
 extern volatile uint32_t dvi_render_last_cycles;
+extern volatile uint32_t dvi_render_min_cycles;
+
+// Batch render total (sum of BATCH_SIZE line renders in one IRQ).
+extern volatile uint32_t dvi_batch_render_max_cycles;
+extern volatile uint32_t dvi_batch_render_last_cycles;
+
+// IRQ-to-IRQ interval (scanline period measurement).
+extern volatile uint32_t dvi_irq_interval_min;
+extern volatile uint32_t dvi_irq_interval_max;
 
 // Diagnostic: return current HSTX CSR register value.
 uint32_t dvi_get_hstx_csr(void);

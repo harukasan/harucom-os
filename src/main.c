@@ -129,9 +129,15 @@ static bool dvi_diagnostic_callback(struct repeating_timer *t) {
     uint32_t contested, access;
     dvi_read_bus_counters(&contested, &access);
     uint32_t empty = dvi_get_fifo_empty_count();
-    printf("DVI: f=%u fe=%u rl=%u",
+    // Per-line headroom: H-blanking budget (2240) minus last single-line render
+    // Batch headroom: 4-scanline budget (32000) minus last batch render total
+    int32_t line_headroom = 2240 - (int32_t)dvi_render_last_cycles;
+    int32_t batch_headroom = 32000 - (int32_t)dvi_batch_render_last_cycles;
+    printf("DVI: f=%u fe=%u rl=%u bt=%u headroom: line=%d batch=%d",
            dvi_get_frame_count(), empty,
-           dvi_render_last_cycles);
+           dvi_render_last_cycles,
+           dvi_batch_render_last_cycles,
+           line_headroom, batch_headroom);
     // Print FIFO empty log if new events occurred
     if (empty > prev_fifo_empty) {
         printf(" lines=[");
@@ -143,8 +149,10 @@ static bool dvi_diagnostic_callback(struct repeating_timer *t) {
         printf("]");
     }
     prev_fifo_empty = empty;
-    // Reset min level each interval
+    // Reset diagnostic min/max each interval
     dvi_fifo_min_level = 0xFF;
+    dvi_irq_interval_min = 0xFFFFFFFF;
+    dvi_irq_interval_max = 0;
     printf("\n");
     return true;
 }
@@ -235,8 +243,9 @@ static void harucom_main(void) {
     dvi_text_clear(0xF0);
     printf("DVI frame_count after 500ms: %u (expect ~30)\n",
            dvi_get_frame_count());
-    printf("DVI IRQ max cycles: %u, render max: %u\n",
-           dvi_irq_max_cycles, dvi_render_max_cycles);
+    printf("DVI IRQ max cycles: %u, render max: %u, interval: %u-%u\n",
+           dvi_irq_max_cycles, dvi_render_max_cycles,
+           dvi_irq_interval_min, dvi_irq_interval_max);
 
     /* Start periodic DVI diagnostics (every 1 second) */
     static struct repeating_timer diag_timer;
