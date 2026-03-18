@@ -583,30 +583,35 @@ static void __scratch_x("")
 
           // Wide (12px) sub-path
           // Bold offset pre-computed at set time (no runtime check).
+          // Load latency hiding: next nibble address computed during
+          // the 2-cycle ldr bubble to avoid pipeline stalls.
           "4:\n\t"
           "uxth   %[t2], %[t1]\n\t"
           "ldrh   %[t1], [%[wcache], %[t2], lsl #1]\n\t"
           "adds   %[cell], #4\n\t"
           "adds   %[out], #12\n\t"
+          // Pixels 0-3
           "uxtb   %[t2], %[t1]\n\t"
           "add    %[t2], %[exp], %[t2], lsl #3\n\t"
           "ldr    %[t3], [%[t2]]\n\t"
+          "and    %[t2], %[t1], #0x0F\n\t"      // next nibble (fills ldr bubble)
+          "add    %[t2], %[exp], %[t2], lsl #7\n\t"
           "and.w  %[t3], %[t3], %[xor]\n\t"
           "eor.w  %[t3], %[t3], %[bg]\n\t"
           "str    %[t3], [%[out], #-12]\n\t"
-          "and    %[t2], %[t1], #0x0F\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #7\n\t"
+          // Pixels 4-7
           "ldr    %[t2], [%[t2]]\n\t"
+          "lsrs   %[t3], %[t1], #8\n\t"          // next nibble (fills ldr bubble)
+          "add    %[t3], %[exp], %[t3], lsl #3\n\t"
           "and.w  %[t2], %[t2], %[xor]\n\t"
           "eor.w  %[t2], %[t2], %[bg]\n\t"
           "str    %[t2], [%[out], #-8]\n\t"
-          "lsrs   %[t1], %[t1], #8\n\t"
-          "add    %[t1], %[exp], %[t1], lsl #3\n\t"
-          "ldr    %[t1], [%[t1]]\n\t"
-          "cmp    %[end], %[cell]\n\t"
-          "and.w  %[t1], %[t1], %[xor]\n\t"
-          "eor.w  %[t1], %[t1], %[bg]\n\t"
-          "str    %[t1], [%[out], #-4]\n\t"
+          // Pixels 8-11
+          "ldr    %[t3], [%[t3]]\n\t"
+          "cmp    %[end], %[cell]\n\t"            // fills ldr bubble
+          "and.w  %[t3], %[t3], %[xor]\n\t"
+          "eor.w  %[t3], %[t3], %[bg]\n\t"
+          "str    %[t3], [%[out], #-4]\n\t"
           "bhi    1b\n\t"
 
           "6:\n\t" // done
@@ -655,30 +660,35 @@ static void __scratch_x("")
 
           // Wide (12px) sub-path
           // Bold offset pre-computed at set time (no runtime check).
+          // Load latency hiding: next nibble address computed during
+          // the 2-cycle ldr bubble to avoid pipeline stalls.
           "4:\n\t"
           "uxth   %[t2], %[t1]\n\t"
           "ldrh   %[t1], [%[wcache], %[t2], lsl #1]\n\t"
           "adds   %[cell], #4\n\t"
           "adds   %[out], #12\n\t"
+          // Pixels 0-3
           "uxtb   %[t2], %[t1]\n\t"
           "add    %[t2], %[exp], %[t2], lsl #3\n\t"
           "ldr    %[t3], [%[t2]]\n\t"
+          "and    %[t2], %[t1], #0x0F\n\t"      // next nibble (fills ldr bubble)
+          "add    %[t2], %[exp], %[t2], lsl #7\n\t"
           "and.w  %[t3], %[t3], %[xor]\n\t"
           "eor.w  %[t3], %[t3], %[bg]\n\t"
           "str    %[t3], [%[out], #-12]\n\t"
-          "and    %[t2], %[t1], #0x0F\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #7\n\t"
+          // Pixels 4-7
           "ldr    %[t2], [%[t2]]\n\t"
+          "lsrs   %[t3], %[t1], #8\n\t"          // next nibble (fills ldr bubble)
+          "add    %[t3], %[exp], %[t3], lsl #3\n\t"
           "and.w  %[t2], %[t2], %[xor]\n\t"
           "eor.w  %[t2], %[t2], %[bg]\n\t"
           "str    %[t2], [%[out], #-8]\n\t"
-          "lsrs   %[t1], %[t1], #8\n\t"
-          "add    %[t1], %[exp], %[t1], lsl #3\n\t"
-          "ldr    %[t1], [%[t1]]\n\t"
-          "cmp    %[end], %[cell]\n\t"
-          "and.w  %[t1], %[t1], %[xor]\n\t"
-          "eor.w  %[t1], %[t1], %[bg]\n\t"
-          "str    %[t1], [%[out], #-4]\n\t"
+          // Pixels 8-11
+          "ldr    %[t3], [%[t3]]\n\t"
+          "cmp    %[end], %[cell]\n\t"            // fills ldr bubble
+          "and.w  %[t3], %[t3], %[xor]\n\t"
+          "eor.w  %[t3], %[t3], %[bg]\n\t"
+          "str    %[t3], [%[out], #-4]\n\t"
           "bhi    1b\n\t"
           "b      6f\n\t"
 
