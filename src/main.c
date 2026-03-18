@@ -99,10 +99,9 @@ static bool dvi_diagnostic_callback(struct repeating_timer *t) {
     uint32_t contested, access;
     dvi_read_bus_counters(&contested, &access);
     uint32_t empty = dvi_get_fifo_empty_count();
-    printf("DVI: frames=%u fifo_empty=%u irq_max=%u render_last=%u fifo_min=%u s9c=%u s9a=%u",
+    printf("DVI: f=%u fe=%u rl=%u",
            dvi_get_frame_count(), empty,
-           dvi_irq_max_cycles, dvi_render_last_cycles,
-           (unsigned)dvi_fifo_min_level, contested, access);
+           dvi_render_last_cycles);
     // Print FIFO empty log if new events occurred
     if (empty > prev_fifo_empty) {
         printf(" lines=[");

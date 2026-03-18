@@ -232,6 +232,9 @@ static uint32_t text_palette32[16];
 // 4-bit nibble -> 32-bit byte mask LUT. Non-const to keep in SRAM.
 static uint32_t nibble_mask[16];
 
+// Per-row dirty flag: set by Core 0 (text write), may be used for future optimizations.
+static volatile uint8_t row_dirty[DVI_TEXT_MAX_ROWS];
+
 // Pre-expanded nibble mask table in SCRATCH_Y (SRAM9, separate bus port).
 // Maps font byte (0-255) to pre-computed (mask_hi, mask_lo) pair.
 // Eliminates 2 Main SRAM reads per char by moving lookups off the DMA bus.
@@ -559,106 +562,180 @@ static void __scratch_x("")
             wide_row_cache + glyph_y * WIDE_CACHE_STRIDE;
         const uint32_t *exp = (const uint32_t *)expanded_nibble;
 
-        uint32_t t3, t4;
-        __asm__ volatile(
+        uint8_t uattr = row_uniform_attr[text_row];
+        if (uattr != 0xFF) {
+            // UNIFORM-ATTR MIXED PATH: all cells share the same attr.
+            // Pre-compute bg4/xor4 once, skip per-cell attr extraction.
+            // Saves ~3 cycles/cell (ubfx + cmp + bne eliminated).
+            // Bold offset pre-computed at set time (no tst/it/addne).
+            // Combined savings: ~6 cycles/cell x 53 = ~318 cycles.
+            bg4 = text_palette32[uattr & 0x0F];
+            xor4 = bg4 ^ text_palette32[uattr >> 4];
 
-            // Loop top: load 1 cell
-            "1:\n\t"
-            "ldr    %[t1], [%[cell]]\n\t"
-            "adds   %[cell], #4\n\t"
-            "ubfx   %[t2], %[t1], #16, #8\n\t"
-            "cmp    %[t2], %[prev]\n\t"
-            "bne    3f\n\t"
+            uint32_t t3, t4;
+            __asm__ volatile(
 
-            // Dispatch: narrow vs wide
-            "2:\n\t"
-            "tst    %[t1], #0x03000000\n\t"
-            "bne    4f\n\t"
+                // Loop top: load 1 cell (no attr check needed)
+                "1:\n\t"
+                "ldr    %[t1], [%[cell]]\n\t"
+                "adds   %[cell], #4\n\t"
 
-            // Narrow (6px) sub-path using expanded_nibble (SCRATCH_Y)
-            "uxth   %[t2], %[t1]\n\t"
-            "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
-            "adds   %[out], #6\n\t"
-            "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-            "ldrd   %[t1], %[t4], [%[t2]]\n\t"
-            "and.w  %[t1], %[t1], %[xor]\n\t"
-            "eor.w  %[t1], %[t1], %[bg]\n\t"
-            "str    %[t1], [%[out], #-6]\n\t"
-            "and.w  %[t4], %[t4], %[xor]\n\t"
-            "cmp    %[end], %[cell]\n\t"
-            "eor.w  %[t4], %[t4], %[bg]\n\t"
-            "str    %[t4], [%[out], #-2]\n\t"
-            "bhi    1b\n\t"
-            "b      6f\n\t"
+                // Dispatch: narrow vs wide
+                "tst    %[t1], #0x03000000\n\t"
+                "bne    4f\n\t"
 
-            // Wide (12px) sub-path
-            // SRAM cache: regular at slot, bold at slot + WIDE_CACHE_SLOTS.
-            // 12 pixels from 3 nibbles in glyph row (ldrh little-endian):
-            //   bits[7:4] = pixels 0-3, bits[3:0] = pixels 4-7,
-            //   bits[15:12] = pixels 8-11, bits[11:8] = 0 (padding).
-            // All lookups via expanded_nibble in SCRATCH_Y:
-            //   nibble_mask[n] = expanded_nibble[n << 4][0]
-            "4:\n\t"
-            "uxth   %[t2], %[t1]\n\t"
-            "tst    %[t1], #0x80000000\n\t"
-            "it     ne\n\t"
-            "addne  %[t2], %[t2], #" STR(WIDE_CACHE_SLOTS) "\n\t"
-            "ldrh   %[t1], [%[wcache], %[t2], lsl #1]\n\t"
-            "adds   %[cell], #4\n\t"
-            "adds   %[out], #12\n\t"
-            // Pixels 0-3: expanded_nibble[low_byte][0] = nibble_mask[bits[7:4]]
-            "uxtb   %[t2], %[t1]\n\t"
-            "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-            "ldr    %[t3], [%[t2]]\n\t"
-            "and.w  %[t3], %[t3], %[xor]\n\t"
-            "eor.w  %[t3], %[t3], %[bg]\n\t"
-            "str    %[t3], [%[out], #-12]\n\t"
-            // Pixels 4-7: nibble_mask[bits[3:0]] = expanded_nibble[bits[3:0] << 4][0]
-            "and    %[t2], %[t1], #0x0F\n\t"
-            "add    %[t2], %[exp], %[t2], lsl #7\n\t"
-            "ldr    %[t2], [%[t2]]\n\t"
-            "and.w  %[t2], %[t2], %[xor]\n\t"
-            "eor.w  %[t2], %[t2], %[bg]\n\t"
-            "str    %[t2], [%[out], #-8]\n\t"
-            // Pixels 8-11: expanded_nibble[high_byte][0] = nibble_mask[bits[15:12]]
-            // bits[11:8]=0 so high_byte = bits[15:12]<<4, lookup is correct.
-            "lsrs   %[t1], %[t1], #8\n\t"
-            "add    %[t1], %[exp], %[t1], lsl #3\n\t"
-            "ldr    %[t1], [%[t1]]\n\t"
-            "cmp    %[end], %[cell]\n\t"
-            "and.w  %[t1], %[t1], %[xor]\n\t"
-            "eor.w  %[t1], %[t1], %[bg]\n\t"
-            "str    %[t1], [%[out], #-4]\n\t"
-            "bhi    1b\n\t"
-            "b      6f\n\t"
+                // Narrow (6px) sub-path using expanded_nibble (SCRATCH_Y)
+                "uxth   %[t2], %[t1]\n\t"
+                "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+                "adds   %[out], #6\n\t"
+                "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+                "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+                "and.w  %[t1], %[t1], %[xor]\n\t"
+                "eor.w  %[t1], %[t1], %[bg]\n\t"
+                "str    %[t1], [%[out], #-6]\n\t"
+                "and.w  %[t4], %[t4], %[xor]\n\t"
+                "cmp    %[end], %[cell]\n\t"
+                "eor.w  %[t4], %[t4], %[bg]\n\t"
+                "str    %[t4], [%[out], #-2]\n\t"
+                "bhi    1b\n\t"
+                "b      6f\n\t"
 
-            // Attr change handler (cold path)
-            "3:\n\t"
-            "mov    %[prev], %[t2]\n\t"
-            "and    %[t2], %[t2], #0x0F\n\t"
-            "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
-            "lsrs   %[t2], %[prev], #4\n\t"
-            "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
-            "eor    %[xor], %[bg], %[t2]\n\t"
-            "b      2b\n\t"
+                // Wide (12px) sub-path
+                // Bold offset pre-computed at set time (no runtime check).
+                "4:\n\t"
+                "uxth   %[t2], %[t1]\n\t"
+                "ldrh   %[t1], [%[wcache], %[t2], lsl #1]\n\t"
+                "adds   %[cell], #4\n\t"
+                "adds   %[out], #12\n\t"
+                "uxtb   %[t2], %[t1]\n\t"
+                "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+                "ldr    %[t3], [%[t2]]\n\t"
+                "and.w  %[t3], %[t3], %[xor]\n\t"
+                "eor.w  %[t3], %[t3], %[bg]\n\t"
+                "str    %[t3], [%[out], #-12]\n\t"
+                "and    %[t2], %[t1], #0x0F\n\t"
+                "add    %[t2], %[exp], %[t2], lsl #7\n\t"
+                "ldr    %[t2], [%[t2]]\n\t"
+                "and.w  %[t2], %[t2], %[xor]\n\t"
+                "eor.w  %[t2], %[t2], %[bg]\n\t"
+                "str    %[t2], [%[out], #-8]\n\t"
+                "lsrs   %[t1], %[t1], #8\n\t"
+                "add    %[t1], %[exp], %[t1], lsl #3\n\t"
+                "ldr    %[t1], [%[t1]]\n\t"
+                "cmp    %[end], %[cell]\n\t"
+                "and.w  %[t1], %[t1], %[xor]\n\t"
+                "eor.w  %[t1], %[t1], %[bg]\n\t"
+                "str    %[t1], [%[out], #-4]\n\t"
+                "bhi    1b\n\t"
 
-            "6:\n\t" // done
+                "6:\n\t" // done
 
-            : [cell] "+r"(cell),
-              [out] "+r"(out),
-              [bg] "+r"(bg4),
-              [xor] "+r"(xor4),
-              [prev] "+r"(prev_attr),
-              [t1] "=&r"(t1),
-              [t2] "=&r"(t2),
-              [t3] "=&r"(t3),
-              [t4] "=&r"(t4)
-            : [end] "r"(end),
-              [exp] "r"(exp),
-              [nrow] "r"(narrow_row),
-              [wcache] "r"(wcache),
-              [pal] "r"(pal32)
-            : "cc", "memory");
+                : [cell] "+r"(cell),
+                  [out] "+r"(out),
+                  [bg] "+r"(bg4),
+                  [xor] "+r"(xor4),
+                  [t1] "=&r"(t1),
+                  [t2] "=&r"(t2),
+                  [t3] "=&r"(t3),
+                  [t4] "=&r"(t4)
+                : [end] "r"(end),
+                  [exp] "r"(exp),
+                  [nrow] "r"(narrow_row),
+                  [wcache] "r"(wcache)
+                : "cc", "memory");
+
+        } else {
+            // NON-UNIFORM ATTR MIXED PATH: per-cell attr checks.
+            // Bold offset still pre-computed at set time.
+            uint32_t t3, t4;
+            __asm__ volatile(
+
+                // Loop top: load 1 cell
+                "1:\n\t"
+                "ldr    %[t1], [%[cell]]\n\t"
+                "adds   %[cell], #4\n\t"
+                "ubfx   %[t2], %[t1], #16, #8\n\t"
+                "cmp    %[t2], %[prev]\n\t"
+                "bne    3f\n\t"
+
+                // Dispatch: narrow vs wide
+                "2:\n\t"
+                "tst    %[t1], #0x03000000\n\t"
+                "bne    4f\n\t"
+
+                // Narrow (6px) sub-path using expanded_nibble (SCRATCH_Y)
+                "uxth   %[t2], %[t1]\n\t"
+                "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+                "adds   %[out], #6\n\t"
+                "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+                "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+                "and.w  %[t1], %[t1], %[xor]\n\t"
+                "eor.w  %[t1], %[t1], %[bg]\n\t"
+                "str    %[t1], [%[out], #-6]\n\t"
+                "and.w  %[t4], %[t4], %[xor]\n\t"
+                "cmp    %[end], %[cell]\n\t"
+                "eor.w  %[t4], %[t4], %[bg]\n\t"
+                "str    %[t4], [%[out], #-2]\n\t"
+                "bhi    1b\n\t"
+                "b      6f\n\t"
+
+                // Wide (12px) sub-path
+                // Bold offset pre-computed at set time (no runtime check).
+                "4:\n\t"
+                "uxth   %[t2], %[t1]\n\t"
+                "ldrh   %[t1], [%[wcache], %[t2], lsl #1]\n\t"
+                "adds   %[cell], #4\n\t"
+                "adds   %[out], #12\n\t"
+                "uxtb   %[t2], %[t1]\n\t"
+                "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+                "ldr    %[t3], [%[t2]]\n\t"
+                "and.w  %[t3], %[t3], %[xor]\n\t"
+                "eor.w  %[t3], %[t3], %[bg]\n\t"
+                "str    %[t3], [%[out], #-12]\n\t"
+                "and    %[t2], %[t1], #0x0F\n\t"
+                "add    %[t2], %[exp], %[t2], lsl #7\n\t"
+                "ldr    %[t2], [%[t2]]\n\t"
+                "and.w  %[t2], %[t2], %[xor]\n\t"
+                "eor.w  %[t2], %[t2], %[bg]\n\t"
+                "str    %[t2], [%[out], #-8]\n\t"
+                "lsrs   %[t1], %[t1], #8\n\t"
+                "add    %[t1], %[exp], %[t1], lsl #3\n\t"
+                "ldr    %[t1], [%[t1]]\n\t"
+                "cmp    %[end], %[cell]\n\t"
+                "and.w  %[t1], %[t1], %[xor]\n\t"
+                "eor.w  %[t1], %[t1], %[bg]\n\t"
+                "str    %[t1], [%[out], #-4]\n\t"
+                "bhi    1b\n\t"
+                "b      6f\n\t"
+
+                // Attr change handler (cold path)
+                "3:\n\t"
+                "mov    %[prev], %[t2]\n\t"
+                "and    %[t2], %[t2], #0x0F\n\t"
+                "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
+                "lsrs   %[t2], %[prev], #4\n\t"
+                "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
+                "eor    %[xor], %[bg], %[t2]\n\t"
+                "b      2b\n\t"
+
+                "6:\n\t" // done
+
+                : [cell] "+r"(cell),
+                  [out] "+r"(out),
+                  [bg] "+r"(bg4),
+                  [xor] "+r"(xor4),
+                  [prev] "+r"(prev_attr),
+                  [t1] "=&r"(t1),
+                  [t2] "=&r"(t2),
+                  [t3] "=&r"(t3),
+                  [t4] "=&r"(t4)
+                : [end] "r"(end),
+                  [exp] "r"(exp),
+                  [nrow] "r"(narrow_row),
+                  [wcache] "r"(wcache),
+                  [pal] "r"(pal32)
+                : "cc", "memory");
+        }
     }
 
     // Fill remaining pixels with black (inline to avoid flash memset).
@@ -694,7 +771,7 @@ static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, i
         buf[6] = 0;
         buf[7] = 0;
     } else if (active_mode == DVI_MODE_TEXT) {
-        // Text mode: render glyph scanline into line_buf
+        // Text mode: render scanline into double-buffered line buffer.
         int idx = line_buf_idx;
         line_buf_idx ^= 1;
 #ifdef DVI_DIAGNOSTICS
@@ -707,6 +784,7 @@ static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, i
         if (elapsed > dvi_render_max_cycles)
             dvi_render_max_cycles = elapsed;
 #endif
+
         if (line < 2) {
             buf[0] = ctrl_sync;
             buf[1] = fifo;
@@ -768,11 +846,14 @@ void __scratch_x("") dma_irq_handler(void) {
     }
 #endif
 
-    // Advance scanline counter
-    if (++cur_line >= MODE_V_TOTAL_LINES) {
+    // Advance scanline counter.
+    // Signal VBlank at the FIRST non-active line so the pre-render gets the
+    // entire blanking interval (~360K cycles) instead of just the last line.
+    if (++cur_line >= MODE_V_TOTAL_LINES)
         cur_line = 0;
+    if (cur_line == MODE_V_ACTIVE_LINES) {
         frame_count++;
-        __asm volatile("sev");  // wake other core's WFE in dvi_wait_vsync
+        __asm volatile("sev");  // wake Core 0 WFE
     }
 
     // Build descriptors for the scanline after the one we just started
@@ -1063,6 +1144,7 @@ void dvi_text_put_char(int col, int row, char ch, uint8_t attr) {
     c->flags = 0;
     if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
         row_uniform_attr[row] = 0xFF;
+    row_dirty[row] = 1;
 }
 
 void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
@@ -1074,6 +1156,7 @@ void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
     c->flags = DVI_CELL_FLAG_BOLD;
     if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
         row_uniform_attr[row] = 0xFF;
+    row_dirty[row] = 1;
 }
 
 void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
@@ -1094,6 +1177,7 @@ void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
     row_has_wide[row] = 1;
     if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
         row_uniform_attr[row] = 0xFF;
+    row_dirty[row] = 1;
 }
 
 void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
@@ -1105,7 +1189,8 @@ void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
         slot = wide_cache_insert(ch);
     dvi_text_cell_t *left = &text_vram[row * text_cols + col];
     dvi_text_cell_t *right = &text_vram[row * text_cols + col + 1];
-    left->ch = slot;  // cache slot, not JIS index
+    // Store bold-adjusted slot: render uses it directly without runtime bold check.
+    left->ch = slot + WIDE_CACHE_SLOTS;
     left->attr = attr;
     left->flags = DVI_CELL_FLAG_WIDE_L | DVI_CELL_FLAG_BOLD;
     right->ch = 0;
@@ -1114,6 +1199,7 @@ void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
     row_has_wide[row] = 1;
     if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
         row_uniform_attr[row] = 0xFF;
+    row_dirty[row] = 1;
 }
 
 // Decode one UTF-8 character from str, store codepoint in *cp.
@@ -1259,4 +1345,6 @@ void dvi_text_clear(uint8_t attr) {
     memset(row_has_wide, 0, sizeof(row_has_wide));
     memset(row_uniform_attr, attr, text_rows);
     wide_cache_reset();
+    for (int i = 0; i < text_rows; i++)
+        row_dirty[i] = 1;
 }
