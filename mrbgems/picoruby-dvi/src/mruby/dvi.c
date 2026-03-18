@@ -156,6 +156,38 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_text_clear, MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(text_put_char),
                              mrb_dvi_text_put_char, MRB_ARGS_REQ(4));
+
+  // DVI::Text
+  struct RClass *class_Text =
+      mrb_define_class_under_id(mrb, class_DVI, MRB_SYM(Text),
+                                mrb->object_class);
+  mrb_define_const_id(mrb, class_Text, MRB_SYM(COLS),
+                      mrb_fixnum_value(DVI_TEXT_MAX_COLS));
+  mrb_define_const_id(mrb, class_Text, MRB_SYM(ROWS),
+                      mrb_fixnum_value(DVI_TEXT_MAX_ROWS));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(put_char),
+                             mrb_dvi_text_put_char, MRB_ARGS_REQ(4));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(put_string),
+                             mrb_dvi_text_put_string, MRB_ARGS_REQ(4));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(clear),
+                             mrb_dvi_text_clear, MRB_ARGS_REQ(1));
+
+  // DVI::Graphics
+  struct RClass *class_Graphics =
+      mrb_define_class_under_id(mrb, class_DVI, MRB_SYM(Graphics),
+                                mrb->object_class);
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(WIDTH),
+                      mrb_fixnum_value(DVI_FRAME_WIDTH));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(HEIGHT),
+                      mrb_fixnum_value(DVI_FRAME_HEIGHT));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_pixel),
+                             mrb_dvi_set_pixel, MRB_ARGS_REQ(3));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(get_pixel),
+                             mrb_dvi_get_pixel, MRB_ARGS_REQ(2));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill),
+                             mrb_dvi_fill, MRB_ARGS_REQ(1));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_rect),
+                             mrb_dvi_fill_rect, MRB_ARGS_REQ(5));
 }
 
 void

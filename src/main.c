@@ -58,10 +58,10 @@ static const char ruby_code[] =
     "loop do\n"
     "  37.times do |row|\n"
     "    idx = (row + count) % 14\n"
-    "    DVI.text_put_string(0, row, PAD, colors[idx])\n"
-    "    DVI.text_put_string(0, row, lines[idx], colors[idx])\n"
+    "    DVI::Text.put_string(0, row, PAD, colors[idx])\n"
+    "    DVI::Text.put_string(0, row, lines[idx], colors[idx])\n"
     "  end\n"
-    "  DVI.text_put_string(0, 0, \"frame:#{count} \", 0xF0)\n"
+    "  DVI::Text.put_string(0, 0, \"frame:#{count} \", 0xF0)\n"
     "  count = count + 1\n"
     "  DVI.wait_vsync\n"
     "end\n";

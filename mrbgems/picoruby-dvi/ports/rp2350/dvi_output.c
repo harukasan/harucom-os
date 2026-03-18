@@ -1274,3 +1274,29 @@ void dvi_text_clear(uint8_t attr) {
   memset(row_uniform_attr, attr, text_rows);
   wide_cache_reset();
 }
+
+void dvi_text_clear_line(int row, uint8_t attr) {
+  if (row < 0 || row >= text_rows)
+    return;
+  dvi_text_cell_t *line = &text_vram[row * text_cols];
+  for (int i = 0; i < text_cols; i++) {
+    line[i].ch = ' ';
+    line[i].attr = attr;
+    line[i].flags = 0;
+  }
+  row_has_wide[row] = 0;
+  row_uniform_attr[row] = attr;
+}
+
+void dvi_text_set_palette_entry(int index, uint8_t color) {
+  if (index < 0 || index >= 16)
+    return;
+  text_palette[index] = color;
+  update_palette32();
+}
+
+uint8_t dvi_text_get_palette_entry(int index) {
+  if (index < 0 || index >= 16)
+    return 0;
+  return text_palette[index];
+}
