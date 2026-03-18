@@ -1,50 +1,20 @@
-// DVI clock initialization for 720p output (372 MHz).
+// DVI clock initialization for 640x480 output.
 //
-// Based on the configure_clock() function from the hakodate-project
-// dvi_text_console sample. See doc/dvi.md for design rationale.
+// Configures clk_hstx = clk_sys.  The HSTX serializer uses CLKDIV=5 and
+// N_SHIFTS=5, so the pixel clock is sys_clk / 5.  On RP2350 with the
+// default 150 MHz sys_clk this gives 30.0 MHz (+19% from 25.175 MHz
+// standard), which is within the tolerance of most DVI/HDMI monitors
+// for 640x480.  To get an exact 25 MHz pixel clock, reconfigure PLL_SYS
+// to 125 MHz here.
 
 #include "dvi_output.h"
 
 #include "hardware/clocks.h"
-#include "hardware/vreg.h"
-#include "hardware/structs/qmi.h"
-#include "hardware/sync.h"
 #include "pico/stdlib.h"
-#include <pico/platform/common.h>
 
-void __not_in_flash_func(dvi_init_clock)(void) {
-    // 1. Increase QMI flash clock divider BEFORE overclocking.
-    //    Boot stage 2 sets CLKDIV=2 (SCK = sys_clk/2 = 62.5 MHz).
-    //    At 372 MHz with CLKDIV=2, SCK=186 MHz exceeds flash max (~133 MHz).
-    //    CLKDIV=4: SCK = 93 MHz (within spec), but mruby VM's large code footprint
-    //    causes constant XIP cache misses at 93 MHz, disrupting DVI signal quality.
-    //    CLKDIV=8: SCK = 46.5 MHz reduces both switching frequency and QMI
-    //    transaction rate (slower execution = fewer cache misses per second).
-    hw_write_masked(&qmi_hw->m[0].timing,
-                    8u << QMI_M0_TIMING_CLKDIV_LSB,
-                    QMI_M0_TIMING_CLKDIV_BITS);
-    // Dummy read via non-cached window to ensure the QMI bus access actually
-    // occurs (XIP_BASE would hit cache and not reach QMI hardware).
-    (void)*(volatile uint32_t *)XIP_NOCACHE_NOALLOC_BASE;
-    __dsb();
-
-    // 2. Raise VREG voltage for stable operation at 372 MHz under dual-core load.
-    //    1.30 V is stable for core 0 alone, but dual-core mruby execution causes
-    //    enough voltage droop to destabilize PLL_SYS, disrupting HSTX output.
-    //    vreg_disable_voltage_limit() unlocks RP2350-only voltages above 1.30 V.
-    vreg_disable_voltage_limit();
-    vreg_set_voltage(VREG_VOLTAGE_1_35);
-    sleep_ms(10);
-
-    // 3. Reconfigure PLL: 12 MHz × 93 = 1116 MHz VCO, /3/1 = 372 MHz.
-    //    set_sys_clock_pll() internally switches CLK_SYS to PLL_USB (48 MHz)
-    //    before reconfiguring PLL_SYS, then switches back.
-    set_sys_clock_pll(1116000000, 3, 1);
-
-    // 4. Set clk_hstx to sys_clk / 1 (720p: 372 MHz → pixel clock 74.4 MHz).
-    uint32_t sys_freq = 372000000;
+void dvi_init_clock(void) {
+    uint32_t sys_freq = clock_get_hz(clk_sys);
     clock_configure(clk_hstx, 0,
                     CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLK_SYS,
                     sys_freq, sys_freq);
-
 }

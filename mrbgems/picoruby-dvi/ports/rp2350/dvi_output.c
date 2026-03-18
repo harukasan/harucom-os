@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Shunsuke Michii
 //
 // DVI output driver using CMD->DATA DMA architecture with HSTX TMDS encoder.
-// Outputs 1280x720 @ 60Hz DVI from a 640x360 RGB332 framebuffer (2x scaling).
+// Outputs 640x480 @ 60Hz DVI from a 320x240 RGB332 framebuffer (2x scaling).
 //
 // Based on dvi_out_hstx_encoder from pico-examples:
 //   Copyright (c) 2024 Raspberry Pi (Trading) Ltd.
@@ -38,27 +38,26 @@
 #define SYNC_V1_H0 (TMDS_CTRL_10 | (TMDS_CTRL_00 << 10) | (TMDS_CTRL_00 << 20))
 #define SYNC_V1_H1 (TMDS_CTRL_11 | (TMDS_CTRL_00 << 10) | (TMDS_CTRL_00 << 20))
 
-// 1280x720 @ 60Hz uses positive sync polarity: 1 = asserted, 0 = inactive.
-// SYNC_HSYNC_OFF/ON refer to the HSYNC signal state.
-// SYNC_VSYNC_OFF/ON are used during the VSYNC period (VSYNC=1).
-#define SYNC_HSYNC_OFF SYNC_V0_H0  // neither sync active
-#define SYNC_HSYNC_ON  SYNC_V0_H1  // HSYNC active
-#define SYNC_VSYNC_OFF SYNC_V1_H0  // VSYNC active, HSYNC inactive
-#define SYNC_VSYNC_ON  SYNC_V1_H1  // VSYNC active, HSYNC active
+// 640x480 @ 60Hz uses negative sync polarity: 0 = asserted, 1 = inactive.
+// For negative polarity, idle state is high (1) and active pulse is low (0).
+#define SYNC_HSYNC_OFF SYNC_V1_H1  // H=1 deasserted, V=1 deasserted
+#define SYNC_HSYNC_ON  SYNC_V1_H0  // H=0 asserted,   V=1 deasserted
+#define SYNC_VSYNC_OFF SYNC_V0_H1  // H=1 deasserted, V=0 asserted
+#define SYNC_VSYNC_ON  SYNC_V0_H0  // H=0 asserted,   V=0 asserted
 
-// 1280x720 @ 60Hz timing (pixel clock = 74.25 MHz)
-// H total = 110 + 40 + 220 + 1280 = 1650 pixels
-// V total = 5 + 5 + 20 + 720 = 750 lines
-#define MODE_H_FRONT_PORCH    110
-#define MODE_H_SYNC_WIDTH     40
-#define MODE_H_BACK_PORCH     220
-#define MODE_H_ACTIVE_PIXELS  640   // render width (2x HSTX scaling -> 1280 output)
-#define MODE_H_OUTPUT_PIXELS  1280  // actual output pixel count for TMDS/RAW commands
+// 640x480 @ 60Hz timing (pixel clock = sys_clk / 5; 150 MHz -> 30 MHz)
+// H total = 16 + 96 + 48 + 640 = 800 pixels
+// V total = 10 + 2 + 33 + 480 = 525 lines
+#define MODE_H_FRONT_PORCH    16
+#define MODE_H_SYNC_WIDTH     96
+#define MODE_H_BACK_PORCH     48
+#define MODE_H_ACTIVE_PIXELS  320   // render width (2x HSTX scaling -> 640 output)
+#define MODE_H_OUTPUT_PIXELS  640   // actual output pixel count for TMDS/RAW commands
 
-#define MODE_V_FRONT_PORCH    5
-#define MODE_V_SYNC_WIDTH     5
-#define MODE_V_BACK_PORCH     20
-#define MODE_V_ACTIVE_LINES   720
+#define MODE_V_FRONT_PORCH    10
+#define MODE_V_SYNC_WIDTH     2
+#define MODE_V_BACK_PORCH     33
+#define MODE_V_ACTIVE_LINES   480
 #define MODE_V_TOTAL_LINES    (MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH + \
                                MODE_V_SYNC_WIDTH + MODE_V_BACK_PORCH)
 
@@ -70,10 +69,6 @@
 
 // ----------------------------------------------------------------------------
 // HSTX command templates
-//
-// These are shared HSTX command sequences referenced by DMA transfers.
-// In the CMD->DATA architecture, each DMA descriptor specifies which template
-// to send and how many words it contains.
 
 // HSYNC prefix for active lines (7 words):
 // front porch, sync pulse, back porch, then start TMDS pixel encoding.
@@ -100,7 +95,7 @@ static uint32_t blank_cmd[] = {
 };
 
 // VSYNC line (6 words):
-// same structure as blank but with VSYNC active (positive polarity: V=1).
+// same structure as blank but with VSYNC active (negative polarity: V=0).
 static uint32_t vsync_cmd[] = {
     HSTX_CMD_RAW_REPEAT | MODE_H_FRONT_PORCH,
     SYNC_VSYNC_OFF,
@@ -113,25 +108,20 @@ static uint32_t vsync_cmd[] = {
 // ----------------------------------------------------------------------------
 // DMA logic
 //
-// Per-scanline CMD->DATA architecture: CMD reads DMA descriptors from a
-// double-buffered per-scanline command buffer and writes them to DATA's
-// Alias 3 registers via RING_WRITE. DATA executes each transfer to the
-// HSTX FIFO. Each scanline buffer ends with a NULL stop marker that
-// triggers an IRQ. The IRQ handler starts the next pre-prepared buffer
-// and prepares the buffer for the scanline after that.
+// Two-channel CMD->DATA DMA architecture:
+//   DMACH_CMD  (0): reads DMA descriptors, writes to DATA's Alias 3 registers
+//   DMACH_DATA (1): executes transfers to HSTX FIFO
+//
+// DMA bus priority is set high so pixel reads from framebuf (main SRAM) are
+// not delayed by Core 0's bus traffic.
 
 #define DMACH_CMD  0
 #define DMACH_DATA 1
 
-// Framebuffer: 640x360 RGB332 (230 KB), allocated in SRAM for direct DMA access.
+// Framebuffer: 320x240 RGB332 (75 KB)
 static uint8_t framebuf[DVI_FRAME_WIDTH * DVI_FRAME_HEIGHT];
 
-// Per-scanline command buffers (double-buffered).
-// Active line: 3 descriptors (hsync + pixels + NULL stop) x 4 words = 12 words
-// Blank/vsync: 2 descriptors (sync + NULL stop) x 4 words = 8 words
-//
-// Placed in scratch_y so that the IRQ handler (code in scratch_x) accesses
-// data from a separate SRAM bank, avoiding I-bus / D-bus contention.
+// Per-scanline command buffers (double-buffered, in SCRATCH_Y).
 #define DMA_SCANLINE_BUF_WORDS 12
 static uint32_t __scratch_y("") dma_scanline_buf[2][DMA_SCANLINE_BUF_WORDS] __attribute__((aligned(16)));
 
@@ -149,11 +139,13 @@ static volatile uint32_t frame_count = 0;
 
 volatile uint32_t dvi_irq_max_cycles  = 0;
 volatile uint32_t dvi_irq_last_cycles = 0;
+volatile uint32_t dvi_fifo_empty_count = 0;
 
 static int __scratch_y("") cur_line = 0;       // current scanline (0 to MODE_V_TOTAL_LINES-1)
 static int __scratch_y("") cur_desc_idx = 0;   // which dma_scanline_buf is active (0 or 1)
 
 // Build DMA descriptors for a single scanline into the given buffer.
+// Pixel data is read directly from framebuf (main SRAM).
 static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, int line) {
     const uint32_t fifo = (uintptr_t)&hstx_fifo_hw->fifo;
 
@@ -201,6 +193,10 @@ static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, i
 void __scratch_x("") dma_irq_handler(void) {
     dma_hw->ints1 = 1u << DMACH_DATA;
 
+    // Check FIFO empty flag for diagnostics (bit 9 = EMPTY)
+    if (hstx_fifo_hw->stat & (1u << 9))
+        dvi_fifo_empty_count++;
+
     // Start the next pre-prepared descriptor buffer
     int next_idx = cur_desc_idx ^ 1;
     dma_hw->ch[DMACH_CMD].al3_read_addr_trig = (uintptr_t)dma_scanline_buf[next_idx];
@@ -216,8 +212,7 @@ void __scratch_x("") dma_irq_handler(void) {
         __asm volatile("sev");  // wake other core's WFE in dvi_wait_vsync
     }
 
-    // Build descriptors for the scanline after the one we just started,
-    // measuring execution time with the DWT cycle counter.
+    // Build descriptors for the scanline after the one we just started
     int next_line = cur_line + 1;
     if (next_line >= MODE_V_TOTAL_LINES)
         next_line = 0;
@@ -256,8 +251,10 @@ void dvi_start(void) {
         1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
         0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
 
-    // Serial output: CLKDIV=5, 5 shifts per HSTX cycle, 2 bits per shift.
-    // At clk_hstx=372 MHz: bit clock = 372*2 = 744 Mbps ~ 742.5 Mbps (720p).
+    // Serial output: CLKDIV=5, N_SHIFTS=5, SHIFT=2.
+    // CLKDIV must equal N_SHIFTS for gapless TMDS output.
+    // N_SHIFTS * SHIFT = 10 bits per TMDS character.
+    // Pixel clock = sys_clk / CLKDIV (150 MHz -> 30 MHz, 125 MHz -> 25 MHz).
     hstx_ctrl_hw->csr = 0;
     hstx_ctrl_hw->csr =
         HSTX_CTRL_CSR_EXPAND_EN_BITS |
@@ -354,6 +351,10 @@ uint8_t *dvi_get_framebuffer(void) {
 
 uint32_t dvi_get_frame_count(void) {
     return frame_count;
+}
+
+uint32_t dvi_get_fifo_empty_count(void) {
+    return dvi_fifo_empty_count;
 }
 
 uint32_t dvi_get_hstx_csr(void) {

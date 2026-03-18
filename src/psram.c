@@ -88,16 +88,16 @@
  *   tCPH  (min CS# high) = 50 ns  → 50e6 fs
  *   fmax  (VDD = 3.3 V)  = 109 MHz (Wrapped Burst)
  *
- * PSRAM_MAX_SCK_HZ is intentionally set below the hardware maximum.
- * At 372 MHz sys_clk with CLKDIV=4, PSRAM SCK = 93 MHz.  The 8th harmonic
- * (744 MHz) coincides with the HSTX DVI bit clock, causing interference on
- * the QSPI bus that disrupts DVI output.  Lowering SCK to ~46 MHz
- * (CLKDIV=8) reduces all harmonics and eliminates the disruption.
+ * PSRAM_MAX_SCK_HZ is the hardware maximum (109 MHz for wrapped burst).
+ * At 125 MHz sys_clk, CLKDIV = ceil(125/109) = 2, giving SCK = 62.5 MHz.
+ * The previous 46 MHz limit was specific to 720p DVI (8th harmonic of
+ * 93 MHz SCK = 744 MHz matched the 720p bit clock).  At 640x480 with
+ * 250 Mbps bit clock this specific harmonic issue does not apply.
  */
 #define SEC_TO_FS             1000000000000000ll
 #define PSRAM_MAX_SELECT_FS   125000000  /* tCEM / 64 (QMI MAX_SELECT unit) */
 #define PSRAM_MIN_DESELECT_FS 50000000   /* tCPH */
-#define PSRAM_MAX_SCK_HZ      46000000   /* limited to avoid DVI interference */
+#define PSRAM_MAX_SCK_HZ      109000000  /* APS6404L max (wrapped burst) */
 
 /* ------------------------------------------------------------------ */
 

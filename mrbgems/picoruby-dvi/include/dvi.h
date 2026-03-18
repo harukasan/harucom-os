@@ -7,8 +7,8 @@
 extern "C" {
 #endif
 
-#define DVI_FRAME_WIDTH  640
-#define DVI_FRAME_HEIGHT 360
+#define DVI_FRAME_WIDTH  320
+#define DVI_FRAME_HEIGHT 240
 
 uint8_t *dvi_get_framebuffer(void);
 uint32_t dvi_get_frame_count(void);

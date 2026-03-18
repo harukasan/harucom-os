@@ -105,7 +105,7 @@ target_include_directories(picoruby-dvi PUBLIC
     mrbgems/picoruby-dvi/include
     mrbgems/picoruby-dvi/ports/rp2350
 )
-target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_vreg hardware_dma)
+target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_dma)
 target_compile_options(picoruby-dvi PRIVATE -O2)
 
 # --- Executable ---

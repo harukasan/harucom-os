@@ -3,11 +3,9 @@
 
 #include "dvi.h"
 
-// Initialize system clock for DVI 720p output (372 MHz).
+// Initialize system clock for DVI 640x480 output.
 //
-// Must be called before psram_init() and stdio_init_all().
-// Raises VREG to 1.30 V, increases flash QMI divider, reconfigures PLL,
-// and sets clk_hstx = sys_clk (372 MHz).
+// Configures clk_hstx = clk_sys.  No overclocking or VREG changes needed.
 void dvi_init_clock(void);
 
 // Initialize HSTX, DMA, IRQ and start DVI output.
@@ -24,6 +22,10 @@ uint32_t dvi_get_hstx_csr(void);
 
 // Diagnostic: return hsync_cmd[0] to detect command table corruption.
 uint32_t dvi_get_hsync_cmd0(void);
+
+// Diagnostic: number of times the HSTX FIFO was empty at IRQ entry.
+// Non-zero means DVI signal glitches occurred.
+uint32_t dvi_get_fifo_empty_count(void);
 
 // Diagnostic: return HSTX FIFO STAT register.
 // Bits [7:0] = LEVEL, bit [8] = FULL, bit [9] = EMPTY, bit [10] = WOF (write-when-full, sticky).
