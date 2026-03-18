@@ -249,9 +249,6 @@ static void init_expanded_nibble(void) {
     }
 }
 
-// Render function pointer: selected based on font glyph_width.
-typedef void (*render_fn_t)(int scanline, uint8_t *out);
-static render_fn_t render_scanline_fn;
 
 // ----------------------------------------------------------------------------
 // 12px mixed-width renderer (6px half-width + 12px full-width, 106 columns)
@@ -542,14 +539,6 @@ static void __scratch_x("")
 }
 
 // ----------------------------------------------------------------------------
-// Renderer selection
-
-static void update_renderer(void) {
-    if (text_font)
-        render_scanline_fn = render_text_scanline_12wide;
-}
-
-// ----------------------------------------------------------------------------
 // DMA scanline preparation
 
 // Build DMA descriptors for a single scanline into the given buffer.
@@ -581,7 +570,7 @@ static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, i
         int idx = line_buf_idx;
         line_buf_idx ^= 1;
         uint32_t cyc0 = *DWT_CYCCNT;
-        render_scanline_fn(line, line_buf[idx]);
+        render_text_scanline_12wide(line, line_buf[idx]);
         uint32_t elapsed = *DWT_CYCCNT - cyc0;
         dvi_render_last_cycles = elapsed;
         if (elapsed > dvi_render_max_cycles)
@@ -892,12 +881,12 @@ void dvi_text_set_font(const dvi_font_t *font) {
         }
     }
 
-    update_renderer();
+
 }
 
 void dvi_text_set_wide_font(const dvi_font_t *font) {
     text_wide_font = font;
-    update_renderer();
+
 }
 
 void dvi_text_set_bold_font(const dvi_font_t *font) {
