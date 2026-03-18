@@ -20,7 +20,6 @@ void dvi_start_mode(dvi_mode_t mode);
 // DWT cycle counts for the IRQ handler (prepare_scanline_dma).
 // Useful for verifying the handler finishes well within one scanline period.
 extern volatile uint32_t dvi_irq_max_cycles;
-extern volatile uint32_t dvi_irq_last_cycles;
 
 // DWT cycle counts for text mode scanline rendering.
 extern volatile uint32_t dvi_render_max_cycles;

@@ -119,54 +119,6 @@ static bool dvi_diagnostic_callback(struct repeating_timer *t) {
     return true;
 }
 
-/* Set up text mode demo content */
-static void setup_text_demo(void) {
-    // attr = (fg << 4) | bg
-    uint8_t attr_white  = 0xF0;  // white on black
-    uint8_t attr_green  = 0xA0;  // light green on black
-    uint8_t attr_cyan   = 0xB0;  // light cyan on black
-    uint8_t attr_yellow = 0xE0;  // yellow on black
-
-    dvi_text_clear(attr_white);
-
-    // Title
-    dvi_text_put_string_bold(0, 0, "Harucom OS Text Mode", attr_yellow);
-    dvi_text_put_string(0, 1, "640x480 native resolution, 106 columns x 36 rows", attr_green);
-    dvi_text_put_string(0, 2, "12px M+ font (6px half-width + 12px full-width)", attr_green);
-
-    // ASCII table
-    dvi_text_put_string(0, 4, "ASCII characters:", attr_cyan);
-    for (int i = 0x20; i < 0x7F; i++) {
-        int col = (i - 0x20) % 53;
-        int row = 5 + (i - 0x20) / 53;
-        dvi_text_put_char(col, row, (char)i, attr_white);
-    }
-
-    // Color palette demo
-    dvi_text_put_string(0, 9, "Color palette:", attr_cyan);
-    for (int fg = 0; fg < 16; fg++) {
-        uint8_t attr = (fg << 4) | 0x00;  // fg on black
-        char label[4];
-        label[0] = "0123456789ABCDEF"[fg];
-        label[1] = ' ';
-        label[2] = '\0';
-        dvi_text_put_string(fg * 3, 10, label, attr);
-    }
-
-    // Bold text test
-    dvi_text_put_string(0, 12, "Bold text:", attr_cyan);
-    dvi_text_put_string_bold(0, 13, "The quick brown fox jumps over the lazy dog.", attr_white);
-    dvi_text_put_string(0, 14, "The quick brown fox jumps over the lazy dog.", attr_white);
-
-    // Wide character test (rendered before mruby starts, no PSRAM contention)
-    dvi_text_put_string(0, 16, "Wide characters (C):", attr_cyan);
-    dvi_text_put_string(0, 17,
-        "ハルコム OS テキストモード",
-        attr_yellow);
-    dvi_text_put_string(0, 18,
-        "全角文字とHalf-widthの混在テスト",
-        attr_white);
-}
 
 /*
  * run_mruby: compile and run a Ruby script on the mruby task scheduler.
@@ -249,8 +201,8 @@ static void harucom_main(void) {
 
     sleep_ms(500);
 
-    /* Fill text VRAM after DVI is running (dvi_start_mode clears VRAM). */
-    setup_text_demo();
+    /* Clear text VRAM after DVI is running (dvi_start_mode clears VRAM). */
+    dvi_text_clear(0xF0);
     printf("DVI frame_count after 500ms: %u (expect ~30)\n",
            dvi_get_frame_count());
     printf("DVI IRQ max cycles: %u, render max: %u\n",
