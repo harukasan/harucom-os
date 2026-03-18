@@ -87,11 +87,17 @@
  *   tCEM  (max CS# low)  = 8 µs   → 8e6 ns → 8e15 fs / 64 = 125e6 fs
  *   tCPH  (min CS# high) = 50 ns  → 50e6 fs
  *   fmax  (VDD = 3.3 V)  = 109 MHz (Wrapped Burst)
+ *
+ * PSRAM_MAX_SCK_HZ is the hardware maximum (109 MHz for wrapped burst).
+ * At 125 MHz sys_clk, CLKDIV = ceil(125/109) = 2, giving SCK = 62.5 MHz.
+ * The previous 46 MHz limit was specific to 720p DVI (8th harmonic of
+ * 93 MHz SCK = 744 MHz matched the 720p bit clock).  At 640x480 with
+ * 250 Mbps bit clock this specific harmonic issue does not apply.
  */
 #define SEC_TO_FS             1000000000000000ll
 #define PSRAM_MAX_SELECT_FS   125000000  /* tCEM / 64 (QMI MAX_SELECT unit) */
 #define PSRAM_MIN_DESELECT_FS 50000000   /* tCPH */
-#define PSRAM_MAX_SCK_HZ      109000000  /* max SCK at 3.3 V */
+#define PSRAM_MAX_SCK_HZ      109000000  /* APS6404L max (wrapped burst) */
 
 /* ------------------------------------------------------------------ */
 
@@ -174,12 +180,22 @@ static void __no_inline_not_in_flash_func(set_psram_timing)(void)
     uint8_t max_select = PSRAM_MAX_SELECT_FS / fs_per_cycle;
     uint8_t min_deselect = (PSRAM_MIN_DESELECT_FS + fs_per_cycle - 1) / fs_per_cycle;
 
+    /*
+     * RXDELAY: read sample delay in half sys_clk cycles.
+     * Must be ≥ tCKQS (PSRAM data output valid time, ~6 ns).
+     * At 125 MHz (8 ns/cycle): rxdelay=1 → 4 ns (OK, plus inherent CLKDIV margin).
+     * At 372 MHz (2.7 ns/cycle): rxdelay=3 → 4 ns.
+     */
+    uint32_t half_period_ps = 500000000u / (sys_hz / 1000);  /* ps per half cycle */
+    uint8_t rxdelay = (4000 + half_period_ps - 1) / half_period_ps;
+    if (rxdelay < 1) rxdelay = 1;
+
     uint32_t save = save_and_disable_interrupts();
     qmi_hw->m[1].timing =
           (2u << QMI_M1_TIMING_PAGEBREAK_LSB)      /* 1024-byte page boundary */
         | (3u << QMI_M1_TIMING_SELECT_HOLD_LSB)    /* 3 extra hold cycles */
         | (1u << QMI_M1_TIMING_COOLDOWN_LSB)       /* sequential burst reuse */
-        | (1u << QMI_M1_TIMING_RXDELAY_LSB)        /* ½ sys_clk sample delay */
+        | (rxdelay << QMI_M1_TIMING_RXDELAY_LSB)
         | (max_select << QMI_M1_TIMING_MAX_SELECT_LSB)
         | (min_deselect << QMI_M1_TIMING_MIN_DESELECT_LSB)
         | (clkdiv << QMI_M1_TIMING_CLKDIV_LSB);
@@ -225,7 +241,19 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
     qmi_hw->direct_csr = 30 << QMI_DIRECT_CSR_CLKDIV_LSB | QMI_DIRECT_CSR_EN_BITS;
     while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) {}
 
-    const uint8_t cmds[] = { CMD_RESET_ENABLE, CMD_RESET, CMD_QUAD_ENABLE };
+    /*
+     * Command values must live in RAM, not flash, because QMI direct
+     * mode suspends XIP and makes flash unreadable.  An aggregate
+     * initializer (e.g. `uint8_t cmds[] = {0x66, ...}`) would cause
+     * the compiler to emit a template in .rodata (flash) and copy it
+     * to the stack at runtime, crashing during the copy.  Individual
+     * assignments generate immediate MOV instructions that stay in RAM.
+     */
+    uint8_t cmds[3];
+    cmds[0] = CMD_RESET_ENABLE;
+    cmds[1] = CMD_RESET;
+    cmds[2] = CMD_QUAD_ENABLE;
+
     for (int i = 0; i < 3; i++) {
         qmi_hw->direct_csr |= QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
         qmi_hw->direct_tx = cmds[i];

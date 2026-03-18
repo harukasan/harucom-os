@@ -22,6 +22,8 @@ rake distclean # remove build/ and PicoRuby build
 Design documents and implementation notes are in `doc/`:
 
 - [doc/psram.md](doc/psram.md) — PSRAM driver (APS6404L, QMI CS1 initialization, XIP mapping)
+- [doc/dvi.md](doc/dvi.md) — DVI output (HSTX, DMA, text/pixel modes, stability analysis)
+- [doc/dvi/batch-rendering.md](doc/dvi/batch-rendering.md) — Batch scanline rendering (N=4, line buffers, descriptor layout)
 
 ## Code style
 
@@ -29,6 +31,23 @@ Design documents and implementation notes are in `doc/`:
 - Use C11, K&R brace style
 - Keep HAL functions prefixed with `hal_` or `mrb_hal_`
 - Write documents in `doc/` in English
+- Documents describe the current state only, not historical changes or comparisons with previous implementations
+- Do not use em dashes (--) in comments or documentation; use commas, periods, or parentheses instead
+- Prefer full names over abbreviations in API naming (e.g. `pixel` not `px`, `framebuffer` not `fb`)
+
+## Common pitfalls
+
+- **PicoRuby presym files are auto-generated.** Do not edit files under
+  `lib/picoruby/build/` or presym tables by hand. They are regenerated
+  by the build system.
+- **IDE clang diagnostics are unreliable before building.** This is a
+  cross-compiled RP2350 project. The IDE's clang cannot resolve
+  pico-sdk include paths or target-specific headers. Errors shown in the
+  IDE (e.g. "undeclared identifier") may be false positives. Always run
+  `rake` to confirm real build errors.
+- **`lib/picoruby` submodule may show as "modified content" in git status.**
+  `rake distclean` recreates `lib/picoruby/build/.gitignore` to prevent
+  this issue. If it still appears, do not stage or commit the submodule.
 
 ## Commit messages
 

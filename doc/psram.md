@@ -23,8 +23,8 @@ are shared with the on-board flash (W25Q128JVS).
 
 The RP2350 QMI (QSPI Memory Interface) supports two chip selects:
 
-- **CS0** — Flash (dedicated QSPI_SS pin), memory window M0 (0x10000000–0x10FFFFFF)
-- **CS1** — PSRAM (via GPIO), memory window M1 (0x11000000–0x117FFFFF)
+- **CS0** - Flash (dedicated QSPI_SS pin), memory window M0 (0x10000000–0x10FFFFFF)
+- **CS1** - PSRAM (via GPIO), memory window M1 (0x11000000–0x117FFFFF)
 
 A 16 kB XIP cache transparently covers both windows. The cache is write-back:
 writes are held as dirty lines and flushed to PSRAM on eviction.
@@ -64,6 +64,16 @@ Exit QPI (0xF5, quad width) → Read ID (0x9F, SPI) → extract KGD/EID
 The function is marked `__no_inline_not_in_flash_func` so it runs from RAM,
 since flash XIP is paused while direct mode is active.
 
+#### Flash access hazard in direct mode
+
+When QMI direct mode is enabled, all XIP access (including flash) is
+suspended.  Code running during direct mode must not reference any data
+in flash.  In particular, aggregate initializers for local arrays
+(e.g. `uint8_t cmds[] = {0x66, 0x99, 0x35}`) cause the compiler to emit
+a template in `.rodata` (flash) and copy it to the stack, which crashes.
+Use individual assignments instead so the values are encoded as immediate
+operands in RAM-resident instructions.
+
 ### Step 2: Configure CS1 (bootrom flash_devinfo API)
 
 The bootrom is informed about the CS1 device via its runtime API:
@@ -79,8 +89,8 @@ rom_flash_enter_cmd_xip();
 This API is the runtime equivalent of programming the OTP FLASH_DEVINFO
 register. It causes the bootrom to configure:
 
-- **ATRANS registers** — address translation from XIP address space to CS1
-- **GPIO pads** — output configuration for the CS1 pin
+- **ATRANS registers** - address translation from XIP address space to CS1
+- **GPIO pads** - output configuration for the CS1 pin
 
 #### Why manual ATRANS writes alone do not work
 
@@ -99,7 +109,7 @@ The following SPI commands are sent to the PSRAM via QMI direct mode:
 | Command | Code | Description |
 |---|---|---|
 | Reset Enable | 0x66 | Prepare for reset (must immediately precede 0x99) |
-| Reset | 0x99 | Software reset — returns device to SPI standby mode |
+| Reset | 0x99 | Software reset, returns device to SPI standby mode |
 | Enter Quad Mode | 0x35 | Switch to QPI mode (only valid in SPI mode) |
 
 After reset the device is in SPI mode (datasheet §8.4). Enter Quad Mode
@@ -109,7 +119,7 @@ switches it to QPI for higher throughput.
 
 The QMI memory window 1 registers are programmed for QPI read/write access.
 
-**Read — Fast Quad Read (0xEB):**
+**Read - Fast Quad Read (0xEB):**
 
 ```
 [CMD 0xEB: 2 clk] [24-bit ADDR: 6 clk] [6 WAIT: 6 clk] [DATA...]
@@ -120,7 +130,7 @@ The QMI memory window 1 registers are programmed for QPI read/write access.
 - 6 wait cycles = 24 dummy bits (`DUMMY_LEN_VALUE_24`)
 - Max 133 MHz
 
-**Write — Quad Write (0x38):**
+**Write - Quad Write (0x38):**
 
 ```
 [CMD 0x38: 2 clk] [24-bit ADDR: 6 clk] [DATA...]
@@ -142,7 +152,11 @@ Clock divider, MAX_SELECT, and MIN_DESELECT are computed dynamically from
 | MAX_SELECT | tCEM / (64 × sys_clk period) | Max CS# low time (8 µs) |
 | MIN_DESELECT | ceil(tCPH / sys_clk period) | Min CS# high time (50 ns) |
 | PAGEBREAK | 1024 bytes | Break bursts at 1 kB page boundary |
-| RXDELAY | 1 | Read data sample delay (½ sys_clk cycle) |
+| RXDELAY | ceil(4 ns / half sys_clk period) | Read data sample delay (≥ tCKQS) |
+
+RXDELAY is computed dynamically to maintain approximately 4 ns of sample
+delay regardless of sys_clk frequency. At 125 MHz this yields RXDELAY=1;
+at 372 MHz (DVI overclock) this yields RXDELAY=3.
 
 ### Step 5: Enable XIP writes
 
@@ -178,5 +192,5 @@ picotool otp set BOOT_FLAGS0 0x20
 
 - [APS6404L-3SQR datasheet (AP Memory)](https://www.apmemory.com/en/downloadFiles/032411212009597427)
 - [RP2350 datasheet §4.4 "External flash and PSRAM (XIP)"](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf)
-- [pico-sdk issue #2205 — runtime CS1 configuration without OTP](https://github.com/raspberrypi/pico-sdk/issues/2205)
+- [pico-sdk issue #2205 - runtime CS1 configuration without OTP](https://github.com/raspberrypi/pico-sdk/issues/2205)
 - [SparkFun sparkfun-pico library (sfe_psram.c)](https://github.com/sparkfun/sparkfun-pico)

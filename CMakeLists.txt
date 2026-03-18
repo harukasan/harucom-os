@@ -96,6 +96,20 @@ set_target_properties(mruby PROPERTIES
     IMPORTED_LOCATION ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a
 )
 
+# --- DVI driver library (timing-critical, always -O2) ---
+add_library(picoruby-dvi
+    mrbgems/picoruby-dvi/ports/rp2350/dvi_clock.c
+    mrbgems/picoruby-dvi/ports/rp2350/dvi_output.c
+)
+target_include_directories(picoruby-dvi PUBLIC
+    mrbgems/picoruby-dvi/include
+    mrbgems/picoruby-dvi/ports/rp2350
+    mrbgems/picoruby-dvi/ports/rp2350/fonts
+)
+target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_dma)
+target_compile_options(picoruby-dvi PRIVATE -O2)
+target_compile_definitions(picoruby-dvi PRIVATE DVI_DIAGNOSTICS)
+
 # --- Executable ---
 add_executable(harucom_os
     src/main.c
@@ -151,12 +165,18 @@ pico_enable_stdio_usb(harucom_os 1)
 
 target_link_libraries(harucom_os
     pico_stdlib
+    pico_multicore
     hardware_timer
     hardware_gpio
     hardware_flash
     hardware_sync
     mruby
+    picoruby-dvi
 )
+
+# Core 0 needs 32 KB stack for mruby compiler (mrc_load_string_cxt).
+# Default __STACK_SIZE is 0x800 (2 KB), which is insufficient.
+target_link_options(harucom_os PRIVATE -Wl,--defsym=__STACK_SIZE=0x8000)
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS "-Wl,--print-memory-usage")
 

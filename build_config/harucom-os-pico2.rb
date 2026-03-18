@@ -40,4 +40,5 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
 
   conf.gembox "minimum"
   conf.gem core: 'picoruby-gpio'
+  conf.gem File.expand_path('../../mrbgems/picoruby-dvi', __FILE__)
 end

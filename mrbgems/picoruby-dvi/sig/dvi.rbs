@@ -1,0 +1,52 @@
+class DVI
+  TEXT_MODE: Integer
+  GRAPHICS_MODE: Integer
+
+  def self.set_mode: (Integer mode) -> void
+  def self.wait_vsync: () -> void
+  def self.frame_count: () -> Integer
+
+  class Color
+    def self.rgb: (Integer r, Integer g, Integer b) -> Integer
+  end
+
+  class Text
+    COLS: Integer
+    ROWS: Integer
+
+    BLACK: Integer
+    BLUE: Integer
+    GREEN: Integer
+    CYAN: Integer
+    RED: Integer
+    MAGENTA: Integer
+    BROWN: Integer
+    LIGHT_GRAY: Integer
+    DARK_GRAY: Integer
+    LIGHT_BLUE: Integer
+    LIGHT_GREEN: Integer
+    LIGHT_CYAN: Integer
+    LIGHT_RED: Integer
+    LIGHT_MAGENTA: Integer
+    YELLOW: Integer
+    WHITE: Integer
+
+    def self.put_char: (Integer col, Integer row, Integer ch, Integer attr) -> void
+    def self.put_string: (Integer col, Integer row, String str, Integer attr) -> void
+    def self.clear: (Integer attr) -> void
+    def self.clear_line: (Integer row, Integer attr) -> void
+    def self.set_palette: (Integer index, Integer color) -> void
+    def self.get_palette: (Integer index) -> Integer
+    def self.attr: (Integer fg, Integer bg) -> Integer
+  end
+
+  class Graphics
+    WIDTH: Integer
+    HEIGHT: Integer
+
+    def self.set_pixel: (Integer x, Integer y, Integer color) -> void
+    def self.get_pixel: (Integer x, Integer y) -> Integer
+    def self.fill: (Integer color) -> void
+    def self.fill_rect: (Integer x, Integer y, Integer w, Integer h, Integer color) -> void
+  end
+end

@@ -38,6 +38,9 @@ desc "Clean PicoRuby build"
 task :clean_picoruby do
   picoruby_build = File.join(PROJECT_DIR, "lib", "picoruby", "build")
   rm_rf picoruby_build
+  # Recreate .gitignore so the submodule stays clean in git status
+  mkdir_p picoruby_build
+  File.write(File.join(picoruby_build, ".gitignore"), "*\n!.gitignore\n")
 end
 
 desc "Clean everything"
