@@ -8,14 +8,23 @@
 // Configures clk_hstx = clk_sys.  No overclocking or VREG changes needed.
 void dvi_init_clock(void);
 
-// Initialize HSTX, DMA, IRQ and start DVI output.
+// Initialize HSTX, DMA, IRQ and start DVI output in pixel mode.
 // Must be called after dvi_init_clock() and psram_init().
 void dvi_start(void);
+
+// Initialize HSTX, DMA, IRQ and start DVI output in the specified mode.
+// For DVI_MODE_TEXT, call dvi_text_set_font() before this function.
+// Must be called after dvi_init_clock() and psram_init().
+void dvi_start_mode(dvi_mode_t mode);
 
 // DWT cycle counts for the IRQ handler (prepare_scanline_dma).
 // Useful for verifying the handler finishes well within one scanline period.
 extern volatile uint32_t dvi_irq_max_cycles;
 extern volatile uint32_t dvi_irq_last_cycles;
+
+// DWT cycle counts for text mode scanline rendering.
+extern volatile uint32_t dvi_render_max_cycles;
+extern volatile uint32_t dvi_render_last_cycles;
 
 // Diagnostic: return current HSTX CSR register value.
 uint32_t dvi_get_hstx_csr(void);

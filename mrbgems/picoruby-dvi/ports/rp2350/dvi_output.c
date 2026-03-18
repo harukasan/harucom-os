@@ -1,7 +1,11 @@
 // Copyright (c) 2026 Shunsuke Michii
 //
 // DVI output driver using CMD->DATA DMA architecture with HSTX TMDS encoder.
-// Outputs 640x480 @ 60Hz DVI from a 320x240 RGB332 framebuffer (2x scaling).
+// Outputs 640x480 @ 60Hz DVI.
+//
+// Supports two modes:
+//   PIXEL: 320x240 RGB332 framebuffer, 2x scaled to 640x480
+//   TEXT:  text VRAM rendered at native 640x480
 //
 // Based on dvi_out_hstx_encoder from pico-examples:
 //   Copyright (c) 2024 Raspberry Pi (Trading) Ltd.
@@ -21,6 +25,10 @@
 #include "hardware/structs/hstx_fifo.h"
 #include "hardware/sync.h"
 
+#include <string.h>
+
+#include "fonts/uni2jis_table.h"
+
 // ----------------------------------------------------------------------------
 // DVI constants
 
@@ -39,20 +47,19 @@
 #define SYNC_V1_H1 (TMDS_CTRL_11 | (TMDS_CTRL_00 << 10) | (TMDS_CTRL_00 << 20))
 
 // 640x480 @ 60Hz uses negative sync polarity: 0 = asserted, 1 = inactive.
-// For negative polarity, idle state is high (1) and active pulse is low (0).
 #define SYNC_HSYNC_OFF SYNC_V1_H1  // H=1 deasserted, V=1 deasserted
 #define SYNC_HSYNC_ON  SYNC_V1_H0  // H=0 asserted,   V=1 deasserted
 #define SYNC_VSYNC_OFF SYNC_V0_H1  // H=1 deasserted, V=0 asserted
 #define SYNC_VSYNC_ON  SYNC_V0_H0  // H=0 asserted,   V=0 asserted
 
-// 640x480 @ 60Hz timing (pixel clock = sys_clk / 5; 150 MHz -> 30 MHz)
+// 640x480 @ 60Hz timing (pixel clock = sys_clk / 5; 125 MHz -> 25 MHz)
 // H total = 16 + 96 + 48 + 640 = 800 pixels
 // V total = 10 + 2 + 33 + 480 = 525 lines
 #define MODE_H_FRONT_PORCH    16
 #define MODE_H_SYNC_WIDTH     96
 #define MODE_H_BACK_PORCH     48
-#define MODE_H_ACTIVE_PIXELS  320   // render width (2x HSTX scaling -> 640 output)
-#define MODE_H_OUTPUT_PIXELS  640   // actual output pixel count for TMDS/RAW commands
+#define MODE_H_ACTIVE_PIXELS  640   // output pixel count (text: native, pixel: 320 rendered)
+#define MODE_H_RENDER_PIXELS  320   // pixel mode render width (2x HSTX scaling -> 640 output)
 
 #define MODE_V_FRONT_PORCH    10
 #define MODE_V_SYNC_WIDTH     2
@@ -72,7 +79,6 @@
 
 // HSYNC prefix for active lines (7 words):
 // front porch, sync pulse, back porch, then start TMDS pixel encoding.
-// Pixel data follows as a separate DMA transfer.
 static uint32_t hsync_cmd[] = {
     HSTX_CMD_RAW_REPEAT | MODE_H_FRONT_PORCH,
     SYNC_HSYNC_OFF,
@@ -80,30 +86,33 @@ static uint32_t hsync_cmd[] = {
     SYNC_HSYNC_ON,
     HSTX_CMD_RAW_REPEAT | MODE_H_BACK_PORCH,
     SYNC_HSYNC_OFF,
-    HSTX_CMD_TMDS | MODE_H_OUTPUT_PIXELS
+    HSTX_CMD_TMDS | MODE_H_ACTIVE_PIXELS
 };
 
 // Blank line for VFP and VBP (6 words):
-// back porch and active area merged since both are blank.
 static uint32_t blank_cmd[] = {
     HSTX_CMD_RAW_REPEAT | MODE_H_FRONT_PORCH,
     SYNC_HSYNC_OFF,
     HSTX_CMD_RAW_REPEAT | MODE_H_SYNC_WIDTH,
     SYNC_HSYNC_ON,
-    HSTX_CMD_RAW_REPEAT | (MODE_H_BACK_PORCH + MODE_H_OUTPUT_PIXELS),
+    HSTX_CMD_RAW_REPEAT | (MODE_H_BACK_PORCH + MODE_H_ACTIVE_PIXELS),
     SYNC_HSYNC_OFF,
 };
 
 // VSYNC line (6 words):
-// same structure as blank but with VSYNC active (negative polarity: V=0).
 static uint32_t vsync_cmd[] = {
     HSTX_CMD_RAW_REPEAT | MODE_H_FRONT_PORCH,
     SYNC_VSYNC_OFF,
     HSTX_CMD_RAW_REPEAT | MODE_H_SYNC_WIDTH,
     SYNC_VSYNC_ON,
-    HSTX_CMD_RAW_REPEAT | (MODE_H_BACK_PORCH + MODE_H_OUTPUT_PIXELS),
+    HSTX_CMD_RAW_REPEAT | (MODE_H_BACK_PORCH + MODE_H_ACTIVE_PIXELS),
     SYNC_VSYNC_OFF,
 };
+
+// ----------------------------------------------------------------------------
+// Mode state
+
+static dvi_mode_t active_mode;
 
 // ----------------------------------------------------------------------------
 // DMA logic
@@ -111,23 +120,18 @@ static uint32_t vsync_cmd[] = {
 // Two-channel CMD->DATA DMA architecture:
 //   DMACH_CMD  (0): reads DMA descriptors, writes to DATA's Alias 3 registers
 //   DMACH_DATA (1): executes transfers to HSTX FIFO
-//
-// DMA bus priority is set high so pixel reads from framebuf (main SRAM) are
-// not delayed by Core 0's bus traffic.
 
 #define DMACH_CMD  0
 #define DMACH_DATA 1
-
-// Framebuffer: 320x240 RGB332 (75 KB)
-static uint8_t framebuf[DVI_FRAME_WIDTH * DVI_FRAME_HEIGHT];
 
 // Per-scanline command buffers (double-buffered, in SCRATCH_Y).
 #define DMA_SCANLINE_BUF_WORDS 12
 static uint32_t __scratch_y("") dma_scanline_buf[2][DMA_SCANLINE_BUF_WORDS] __attribute__((aligned(16)));
 
-// DMA control words (initialized in dvi_start, used by prepare_scanline_dma)
+// DMA control words
 static uint32_t __scratch_y("") ctrl_sync;
-static uint32_t __scratch_y("") ctrl_pixel;
+static uint32_t __scratch_y("") ctrl_pixel;       // DMA_SIZE_8 for pixel mode (byte replication = 2x)
+static uint32_t __scratch_y("") ctrl_text_pixel;   // DMA_SIZE_32 for text mode (4 packed pixels)
 static uint32_t __scratch_y("") ctrl_stop;
 
 static volatile uint32_t frame_count = 0;
@@ -141,11 +145,358 @@ volatile uint32_t dvi_irq_max_cycles  = 0;
 volatile uint32_t dvi_irq_last_cycles = 0;
 volatile uint32_t dvi_fifo_empty_count = 0;
 
-static int __scratch_y("") cur_line = 0;       // current scanline (0 to MODE_V_TOTAL_LINES-1)
-static int __scratch_y("") cur_desc_idx = 0;   // which dma_scanline_buf is active (0 or 1)
+// Text mode render timing
+volatile uint32_t dvi_render_max_cycles  = 0;
+volatile uint32_t dvi_render_last_cycles = 0;
+
+static int __scratch_y("") cur_line = 0;
+static int __scratch_y("") cur_desc_idx = 0;
+
+// ----------------------------------------------------------------------------
+// Pixel mode data
+
+static uint8_t framebuf[DVI_FRAME_WIDTH * DVI_FRAME_HEIGHT];
+
+// ----------------------------------------------------------------------------
+// Text mode data
+
+static dvi_text_cell_t text_vram[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
+static int text_cols = DVI_TEXT_MAX_COLS;
+static int text_rows = DVI_TEXT_MAX_ROWS;
+
+// Double-buffered scanline output in SCRATCH_Y (DMA reads from here).
+static uint8_t __scratch_y("") line_buf[2][MODE_H_ACTIVE_PIXELS]
+    __attribute__((aligned(4)));
+static int line_buf_idx = 0;
+
+static const dvi_font_t *text_font;
+static const dvi_font_t *text_wide_font;
+static const dvi_font_t *text_bold_font;
+static uint8_t text_palette[16];
+
+// 12px renderer constants
+#define TEXT_GLYPH_HEIGHT_12WIDE 13
+#define TEXT_12WIDE_COLS (MODE_H_ACTIVE_PIXELS / 6)  // 106
+
+// Row-major narrow font cache in SRAM (regular + bold).
+// Layout: [glyph_y * 512 + ch]. Regular at 0-255, bold at 256-511.
+#define NARROW_CACHE_STRIDE 512
+static uint8_t narrow_row_cache[TEXT_GLYPH_HEIGHT_12WIDE * NARROW_CACHE_STRIDE];
+
+// Per-row wide character flag for narrow-only / mixed path dispatch.
+static uint8_t row_has_wide[DVI_TEXT_MAX_ROWS];
+
+// Pre-expanded palette: RGB332 byte replicated to all 4 lanes.
+static uint32_t text_palette32[16];
+
+// 4-bit nibble -> 32-bit byte mask LUT. Non-const to keep in SRAM.
+static uint32_t nibble_mask[16];
+
+// VGA-compatible default palette
+static const uint8_t default_palette[16] = {
+    0x00, // 0  Black
+    0x03, // 1  Blue
+    0x1C, // 2  Green
+    0x1F, // 3  Cyan
+    0xE0, // 4  Red
+    0xE3, // 5  Magenta
+    0xFC, // 6  Brown/Yellow
+    0x92, // 7  Light Gray
+    0x49, // 8  Dark Gray
+    0x4F, // 9  Light Blue
+    0x3E, // 10 Light Green
+    0x3F, // 11 Light Cyan
+    0xEC, // 12 Light Red
+    0xEF, // 13 Light Magenta
+    0xFE, // 14 Yellow
+    0xFF, // 15 White
+};
+
+static void update_palette32(void) {
+    for (int i = 0; i < 16; i++)
+        text_palette32[i] = text_palette[i] * 0x01010101u;
+}
+
+// Render function pointer: selected based on font glyph_width.
+typedef void (*render_fn_t)(int scanline, uint8_t *out);
+static render_fn_t render_scanline_fn;
+
+// ----------------------------------------------------------------------------
+// 8px-wide renderer (80 columns, fallback)
+
+static void __scratch_x("") render_text_scanline_8(int scanline, uint8_t *out) {
+    int gw = text_font->glyph_height;
+    int text_row = scanline / gw;
+    int glyph_y = scanline % gw;
+    const dvi_text_cell_t *row = &text_vram[text_row * text_cols];
+    const uint8_t *bitmap_base =
+        text_font->bitmap + glyph_y - (text_font->first_char * gw);
+    uint32_t *out32 = (uint32_t *)out;
+
+    for (int col = 0; col < text_cols; col++) {
+        uint8_t ch = row[col].ch;
+        uint8_t attr = row[col].attr;
+        uint32_t fg4 = text_palette32[attr >> 4];
+        uint32_t bg4 = text_palette32[attr & 0x0F];
+        uint32_t xor4 = fg4 ^ bg4;
+
+        uint8_t bits = bitmap_base[ch * gw];
+
+        uint32_t m0 = nibble_mask[bits >> 4];
+        uint32_t m1 = nibble_mask[bits & 0x0F];
+        out32[0] = bg4 ^ (xor4 & m0);
+        out32[1] = bg4 ^ (xor4 & m1);
+        out32 += 2;
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 12px mixed-width renderer (6px half-width + 12px full-width, 106 columns)
+//
+// Renders a scanline using 6px half-width (ISO 8859-1) and 12px full-width
+// (JIS X 0208) glyphs at 640x480 native resolution. Half-width characters
+// occupy 1 cell (6px), full-width characters occupy 2 cells (12px).
+//
+// Rendering formula (branchless pixel selection via nibble mask LUT):
+//   pixel = bg4 ^ (xor4 & nibble_mask[nibble])
+//
+// Two fast paths:
+//   Narrow-only: ldrd pair processing (2 cells/iter, ~16 insns/char)
+//   Mixed:       single-cell dispatch (~20 insns/narrow, ~25 insns/wide)
+
+static void __scratch_x("")
+    render_text_scanline_12wide(int scanline, uint8_t *out) {
+    int text_row = scanline / TEXT_GLYPH_HEIGHT_12WIDE;
+    int glyph_y = scanline % TEXT_GLYPH_HEIGHT_12WIDE;
+
+    const uint32_t *cell =
+        (const uint32_t *)&text_vram[text_row * TEXT_12WIDE_COLS];
+    const uint32_t *end = cell + TEXT_12WIDE_COLS;
+    uint8_t *out_end = out + MODE_H_ACTIVE_PIXELS;
+
+    // SRAM cache row: regular at [0..255], bold at [256..511].
+    const uint8_t *narrow_row =
+        narrow_row_cache + (glyph_y * NARROW_CACHE_STRIDE);
+
+    const uint32_t *pal32 = text_palette32;
+    const uint32_t *nmask = nibble_mask;
+
+    // Force first attr lookup (bitwise NOT guarantees mismatch).
+    uint32_t prev_attr = ~(uint32_t)(uint8_t)(*cell >> 16);
+    uint32_t bg4 = 0, xor4 = 0;
+    uint32_t t1, t2;
+
+    if (!row_has_wide[text_row]) {
+        // NARROW-ONLY FAST PATH (ldrd pair processing)
+        // ldrd loads 2 cells per iteration, loop control once per pair.
+        // Requires even column count (106).
+        // Bold via 512-stride SRAM cache (ch bit 8 selects bold region).
+        uint32_t t3;
+        __asm__ volatile(
+
+            // Loop top: load 2 cells via ldrd
+            "10:\n\t"
+            "ldrd   %[t1], %[t3], [%[cell]]\n\t"
+            "adds   %[cell], #8\n\t"
+            "ubfx   %[t2], %[t1], #16, #8\n\t"
+            "cmp    %[t2], %[prev]\n\t"
+            "bne    13f\n\t"
+
+            // First character (narrow 6px)
+            "12:\n\t"
+            "uxth   %[t2], %[t1]\n\t"
+            "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+            "adds   %[out], #6\n\t"
+            "lsrs   %[t1], %[t2], #4\n\t"
+            "ldr    %[t1], [%[nmask], %[t1], lsl #2]\n\t"
+            "and    %[t2], %[t2], #0x0C\n\t"
+            "ands   %[t1], %[xor]\n\t"
+            "eors   %[t1], %[bg]\n\t"
+            "str    %[t1], [%[out], #-6]\n\t"
+            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
+            "and.w  %[t2], %[t2], %[xor]\n\t"
+            "eor.w  %[t2], %[t2], %[bg]\n\t"
+            "str    %[t2], [%[out], #-2]\n\t"
+
+            // Second character attr check
+            "ubfx   %[t2], %[t3], #16, #8\n\t"
+            "cmp    %[t2], %[prev]\n\t"
+            "bne    14f\n\t"
+
+            // Second character (narrow 6px)
+            "15:\n\t"
+            "uxth   %[t2], %[t3]\n\t"
+            "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+            "adds   %[out], #6\n\t"
+            "lsrs   %[t1], %[t2], #4\n\t"
+            "ldr    %[t1], [%[nmask], %[t1], lsl #2]\n\t"
+            "and    %[t2], %[t2], #0x0C\n\t"
+            "ands   %[t1], %[xor]\n\t"
+            "eors   %[t1], %[bg]\n\t"
+            "str    %[t1], [%[out], #-6]\n\t"
+            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
+            "cmp    %[end], %[cell]\n\t"
+            "and.w  %[t2], %[t2], %[xor]\n\t"
+            "eor.w  %[t2], %[t2], %[bg]\n\t"
+            "str    %[t2], [%[out], #-2]\n\t"
+            "bhi    10b\n\t"
+            "b      16f\n\t"
+
+            // Attr change handler for first cell (cold path)
+            "13:\n\t"
+            "mov    %[prev], %[t2]\n\t"
+            "and    %[t2], %[t2], #0x0F\n\t"
+            "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
+            "lsrs   %[t2], %[prev], #4\n\t"
+            "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
+            "eor    %[xor], %[bg], %[t2]\n\t"
+            "b      12b\n\t"
+
+            // Attr change handler for second cell (cold path)
+            "14:\n\t"
+            "mov    %[prev], %[t2]\n\t"
+            "and    %[t2], %[t2], #0x0F\n\t"
+            "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
+            "lsrs   %[t2], %[prev], #4\n\t"
+            "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
+            "eor    %[xor], %[bg], %[t2]\n\t"
+            "b      15b\n\t"
+
+            "16:\n\t" // done
+
+            : [cell] "+r"(cell),
+              [out] "+r"(out),
+              [bg] "+r"(bg4),
+              [xor] "+r"(xor4),
+              [prev] "+r"(prev_attr),
+              [t1] "=&r"(t1),
+              [t2] "=&r"(t2),
+              [t3] "=&r"(t3)
+            : [end] "r"(end),
+              [nmask] "r"(nmask),
+              [nrow] "r"(narrow_row),
+              [pal] "r"(pal32)
+            : "cc", "memory");
+
+    } else {
+        // MIXED PATH (narrow 6px + wide 12px)
+        // Precomputed wide font base: hot loop uses wbase + ch * 52 (+26 for bold).
+        const uintptr_t wbase =
+            (uintptr_t)text_wide_font->bitmap + glyph_y * 2 -
+            (text_wide_font->first_char * (TEXT_GLYPH_HEIGHT_12WIDE * 2 * 2));
+
+        __asm__ volatile(
+
+            // Loop top: load 1 cell
+            "1:\n\t"
+            "ldr    %[t1], [%[cell]]\n\t"
+            "adds   %[cell], #4\n\t"
+            "ubfx   %[t2], %[t1], #16, #8\n\t"
+            "cmp    %[t2], %[prev]\n\t"
+            "bne    3f\n\t"
+
+            // Dispatch: narrow vs wide
+            "2:\n\t"
+            "tst    %[t1], #0x03000000\n\t"
+            "bne    4f\n\t"
+
+            // Narrow (6px) sub-path
+            "uxth   %[t2], %[t1]\n\t"
+            "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+            "adds   %[out], #6\n\t"
+            "lsrs   %[t1], %[t2], #4\n\t"
+            "ldr    %[t1], [%[nmask], %[t1], lsl #2]\n\t"
+            "and    %[t2], %[t2], #0x0C\n\t"
+            "ands   %[t1], %[xor]\n\t"
+            "eors   %[t1], %[bg]\n\t"
+            "str    %[t1], [%[out], #-6]\n\t"
+            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
+            "cmp    %[end], %[cell]\n\t"
+            "and.w  %[t2], %[t2], %[xor]\n\t"
+            "eor.w  %[t2], %[t2], %[bg]\n\t"
+            "str    %[t2], [%[out], #-2]\n\t"
+            "bhi    1b\n\t"
+            "b      6f\n\t"
+
+            // Wide (12px) sub-path
+            // Interleaved font: regular at ch*52, bold at ch*52+26.
+            "4:\n\t"
+            "tst    %[t1], #0x80000000\n\t"
+            "uxth   %[t2], %[t1]\n\t"
+            "mov.w  %[t1], #52\n\t"
+            "mul    %[t2], %[t1], %[t2]\n\t"
+            "it     ne\n\t"
+            "addne  %[t2], #26\n\t"
+            "ldrh   %[t1], [%[wbase], %[t2]]\n\t"
+            "adds   %[cell], #4\n\t"
+            "adds   %[out], #12\n\t"
+            "ubfx   %[t2], %[t1], #4, #4\n\t"
+            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
+            "ands   %[t2], %[xor]\n\t"
+            "eors   %[t2], %[bg]\n\t"
+            "str    %[t2], [%[out], #-12]\n\t"
+            "and    %[t2], %[t1], #0x0F\n\t"
+            "ldr    %[t2], [%[nmask], %[t2], lsl #2]\n\t"
+            "lsrs   %[t1], %[t1], #12\n\t"
+            "ands   %[t2], %[xor]\n\t"
+            "eors   %[t2], %[bg]\n\t"
+            "str    %[t2], [%[out], #-8]\n\t"
+            "ldr    %[t1], [%[nmask], %[t1], lsl #2]\n\t"
+            "cmp    %[end], %[cell]\n\t"
+            "and.w  %[t1], %[t1], %[xor]\n\t"
+            "eor.w  %[t1], %[t1], %[bg]\n\t"
+            "str    %[t1], [%[out], #-4]\n\t"
+            "bhi    1b\n\t"
+            "b      6f\n\t"
+
+            // Attr change handler (cold path)
+            "3:\n\t"
+            "mov    %[prev], %[t2]\n\t"
+            "and    %[t2], %[t2], #0x0F\n\t"
+            "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
+            "lsrs   %[t2], %[prev], #4\n\t"
+            "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
+            "eor    %[xor], %[bg], %[t2]\n\t"
+            "b      2b\n\t"
+
+            "6:\n\t" // done
+
+            : [cell] "+r"(cell),
+              [out] "+r"(out),
+              [bg] "+r"(bg4),
+              [xor] "+r"(xor4),
+              [prev] "+r"(prev_attr),
+              [t1] "=&r"(t1),
+              [t2] "=&r"(t2)
+            : [end] "r"(end),
+              [nmask] "r"(nmask),
+              [nrow] "r"(narrow_row),
+              [wbase] "r"(wbase),
+              [pal] "r"(pal32)
+            : "cc", "memory");
+    }
+
+    // Fill remaining pixels with black (inline to avoid flash memset).
+    for (uint8_t *p = out; p < out_end; p += 4)
+        __asm__ volatile("str %1, [%0]" : : "r"(p), "r"(0) : "memory");
+}
+
+// ----------------------------------------------------------------------------
+// Renderer selection
+
+static void update_renderer(void) {
+    if (text_wide_font && text_font && text_font->glyph_width == 6) {
+        render_scanline_fn = render_text_scanline_12wide;
+        return;
+    }
+    if (text_font)
+        render_scanline_fn = render_text_scanline_8;
+}
+
+// ----------------------------------------------------------------------------
+// DMA scanline preparation
 
 // Build DMA descriptors for a single scanline into the given buffer.
-// Pixel data is read directly from framebuf (main SRAM).
 static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, int line) {
     const uint32_t fifo = (uintptr_t)&hstx_fifo_hw->fifo;
 
@@ -169,24 +520,49 @@ static void __force_inline __scratch_x("") prepare_scanline_dma(uint32_t *buf, i
         buf[5] = 0;
         buf[6] = 0;
         buf[7] = 0;
+    } else if (active_mode == DVI_MODE_TEXT) {
+        // Text mode: render glyph scanline into line_buf
+        int idx = line_buf_idx;
+        line_buf_idx ^= 1;
+        uint32_t cyc0 = *DWT_CYCCNT;
+        render_scanline_fn(line, line_buf[idx]);
+        uint32_t elapsed = *DWT_CYCCNT - cyc0;
+        dvi_render_last_cycles = elapsed;
+        if (elapsed > dvi_render_max_cycles)
+            dvi_render_max_cycles = elapsed;
+        if (line < 2) {
+            buf[0] = ctrl_sync;
+            buf[1] = fifo;
+            buf[2] = count_of(hsync_cmd);
+            buf[3] = (uintptr_t)hsync_cmd;
+            buf[4] = ctrl_text_pixel;
+            buf[5] = fifo;
+            buf[6] = MODE_H_ACTIVE_PIXELS / sizeof(uint32_t);
+            buf[7] = (uintptr_t)line_buf[idx];
+            buf[8] = ctrl_stop;
+            buf[9] = 0;
+            buf[10] = 0;
+            buf[11] = 0;
+        } else {
+            buf[7] = (uintptr_t)line_buf[idx];
+        }
     } else if (line < 2) {
-        // Active line (full build for lines 0-1 after blanking period)
+        // Pixel mode: active line (full build for lines 0-1)
         buf[0] = ctrl_sync;
         buf[1] = fifo;
         buf[2] = count_of(hsync_cmd);
         buf[3] = (uintptr_t)hsync_cmd;
         buf[4] = ctrl_pixel;
         buf[5] = fifo;
-        buf[6] = DVI_FRAME_WIDTH;
-        buf[7] = (uintptr_t)&framebuf[(line >> 1) * DVI_FRAME_WIDTH];
+        buf[6] = MODE_H_RENDER_PIXELS;
+        buf[7] = (uintptr_t)&framebuf[(line >> 1) * MODE_H_RENDER_PIXELS];
         buf[8] = ctrl_stop;
         buf[9] = 0;
         buf[10] = 0;
         buf[11] = 0;
     } else {
-        // Fast path: buffer still has active-line template from 2 lines ago,
-        // only the framebuffer pointer needs updating.
-        buf[7] = (uintptr_t)&framebuf[(line >> 1) * DVI_FRAME_WIDTH];
+        // Pixel mode: fast path (only update framebuffer pointer)
+        buf[7] = (uintptr_t)&framebuf[(line >> 1) * MODE_H_RENDER_PIXELS];
     }
 }
 
@@ -227,7 +603,9 @@ void __scratch_x("") dma_irq_handler(void) {
 // ----------------------------------------------------------------------------
 // Public API
 
-void dvi_start(void) {
+void dvi_start_mode(dvi_mode_t mode) {
+    active_mode = mode;
+
     // Enable DWT cycle counter for IRQ timing measurement
     *DEMCR     |= (1u << 24);  // TRCENA: enable DWT
     *DWT_CTRL  |= 1u;          // CYCCNTENA: enable cycle counter
@@ -242,19 +620,23 @@ void dvi_start(void) {
         1  << HSTX_CTRL_EXPAND_TMDS_L0_NBITS_LSB |
         26 << HSTX_CTRL_EXPAND_TMDS_L0_ROT_LSB;
 
-    // Pixels (TMDS): 2 shifts of 8 bits per refill -> 2 identical TMDS pixels
-    // per DMA read (horizontal 2x scaling). Control symbols (RAW) are an
-    // entire 32-bit word.
-    hstx_ctrl_hw->expand_shift =
-        2 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
-        8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
-        1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
-        0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
+    if (mode == DVI_MODE_TEXT) {
+        // Text mode: DMA_SIZE_32, 4 shifts of 8 bits = 4 unique pixels per word
+        hstx_ctrl_hw->expand_shift =
+            4 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
+            8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
+            1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
+            0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
+    } else {
+        // Pixel mode: DMA_SIZE_8 byte-lane replication for 2x horizontal scaling
+        hstx_ctrl_hw->expand_shift =
+            2 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
+            8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
+            1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
+            0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
+    }
 
     // Serial output: CLKDIV=5, N_SHIFTS=5, SHIFT=2.
-    // CLKDIV must equal N_SHIFTS for gapless TMDS output.
-    // N_SHIFTS * SHIFT = 10 bits per TMDS character.
-    // Pixel clock = sys_clk / CLKDIV (150 MHz -> 30 MHz, 125 MHz -> 25 MHz).
     hstx_ctrl_hw->csr = 0;
     hstx_ctrl_hw->csr =
         HSTX_CTRL_CSR_EXPAND_EN_BITS |
@@ -264,18 +646,8 @@ void dvi_start(void) {
         HSTX_CTRL_CSR_EN_BITS;
 
     // HSTX outputs 0 through 7 appear on GPIO 12 through 19.
-    // Pinout:
-    //
-    //   GP12 CK-  GP13 CK+
-    //   GP14 D0-  GP15 D0+
-    //   GP16 D1-  GP17 D1+
-    //   GP18 D2-  GP19 D2+
-
-    // Clock on GP12 (CK-) and GP13 (CK+):
     hstx_ctrl_hw->bit[0] = HSTX_CTRL_BIT0_CLK_BITS | HSTX_CTRL_BIT0_INV_BITS;
     hstx_ctrl_hw->bit[1] = HSTX_CTRL_BIT0_CLK_BITS;
-    // TMDS lanes 0-2 on GP14-GP19 sequentially (D0, D1, D2).
-    // Within each pair, the '-' pin (lower GPIO) is inverted, '+' pin is not.
     for (uint lane = 0; lane < 3; ++lane) {
         int bit = 2 + lane * 2;
         uint32_t sel = (lane * 10    ) << HSTX_CTRL_BIT0_SEL_P_LSB |
@@ -290,7 +662,6 @@ void dvi_start(void) {
     }
 
     // Build DMA control words for scanline descriptors.
-    // All DATA transfers chain back to CMD and use IRQ_QUIET.
     dma_channel_config c;
 
     // CTRL_SYNC: sync/timing data (SIZE_32, DREQ_HSTX)
@@ -305,17 +676,38 @@ void dvi_start(void) {
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
     ctrl_pixel = channel_config_get_ctrl_value(&c);
 
+    // CTRL_TEXT_PIXEL: text mode pixel data (SIZE_32, DREQ_HSTX) for native 640
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+    ctrl_text_pixel = channel_config_get_ctrl_value(&c);
+
     // CTRL_STOP: NULL stop marker (TREQ_FORCE, triggers IRQ via null trigger)
     channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
     channel_config_set_dreq(&c, DREQ_FORCE);
     ctrl_stop = channel_config_get_ctrl_value(&c);
 
+    // Initialize nibble_mask LUT in SRAM (avoids flash XIP latency)
+    {
+        static const uint32_t nibble_mask_init[16] = {
+            0x00000000, 0xFF000000, 0x00FF0000, 0xFFFF0000,
+            0x0000FF00, 0xFF00FF00, 0x00FFFF00, 0xFFFFFF00,
+            0x000000FF, 0xFF0000FF, 0x00FF00FF, 0xFFFF00FF,
+            0x0000FFFF, 0xFF00FFFF, 0x00FFFFFF, 0xFFFFFFFF,
+        };
+        memcpy(nibble_mask, nibble_mask_init, sizeof(nibble_mask));
+    }
+
+    // Initialize text mode state
+    memcpy(text_palette, default_palette, sizeof(default_palette));
+    update_palette32();
+    memset(text_vram, 0, sizeof(text_vram));
+    memset(line_buf, 0, sizeof(line_buf));
+    line_buf_idx = 0;
+
     // Prepare initial scanline buffers (scanline 0 and 1)
     prepare_scanline_dma(dma_scanline_buf[0], 0);
     prepare_scanline_dma(dma_scanline_buf[1], 1);
 
-    // Configure CMD channel: reads descriptors from scanline buffer,
-    // writes to DATA channel's Alias 3 registers via RING_WRITE.
+    // Configure CMD channel
     c = dma_channel_get_default_config(DMACH_CMD);
     channel_config_set_chain_to(&c, DMACH_CMD);
     channel_config_set_dreq(&c, DREQ_FORCE);
@@ -332,7 +724,6 @@ void dvi_start(void) {
     );
 
     // DATA channel IRQ: fires once per scanline at NULL stop marker.
-    // Using DMA_IRQ_1 to avoid conflicts with other DMA users on IRQ_0.
     dma_hw->ints1 = 1u << DMACH_DATA;
     dma_hw->inte1 = 1u << DMACH_DATA;
     irq_set_exclusive_handler(DMA_IRQ_1, dma_irq_handler);
@@ -343,6 +734,10 @@ void dvi_start(void) {
 
     // Start by triggering CMD to process the first scanline
     dma_hw->ch[DMACH_CMD].al3_read_addr_trig = (uintptr_t)dma_scanline_buf[0];
+}
+
+void dvi_start(void) {
+    dvi_start_mode(DVI_MODE_PIXEL);
 }
 
 uint8_t *dvi_get_framebuffer(void) {
@@ -374,4 +769,265 @@ void dvi_wait_vsync(void) {
     while (frame_count == last) {
         asm volatile("wfe" ::: "memory");
     }
+}
+
+// ----------------------------------------------------------------------------
+// Text mode API
+
+dvi_text_cell_t *dvi_get_text_vram(void) {
+    return text_vram;
+}
+
+int dvi_text_get_cols(void) {
+    return text_cols;
+}
+
+int dvi_text_get_rows(void) {
+    return text_rows;
+}
+
+void dvi_text_set_font(const dvi_font_t *font) {
+    text_font = font;
+    text_cols = MODE_H_ACTIVE_PIXELS / font->glyph_width;
+    int content_height = MODE_V_ACTIVE_LINES;
+    text_rows = (content_height + font->glyph_height - 1) / font->glyph_height;
+    if (text_cols > DVI_TEXT_MAX_COLS)
+        text_cols = DVI_TEXT_MAX_COLS;
+    if (text_rows > DVI_TEXT_MAX_ROWS)
+        text_rows = DVI_TEXT_MAX_ROWS;
+
+    // Build row-major SRAM cache (regular region 0-255) from column-major font.
+    if (font->glyph_height <= TEXT_GLYPH_HEIGHT_12WIDE) {
+        const uint8_t *src = font->bitmap;
+        int first = font->first_char;
+        int num = font->num_chars;
+        int gh = font->glyph_height;
+        memset(narrow_row_cache, 0, sizeof(narrow_row_cache));
+        for (int ch = 0; ch < num; ch++) {
+            for (int y = 0; y < gh; y++) {
+                narrow_row_cache[y * NARROW_CACHE_STRIDE + (first + ch)] =
+                    src[ch * gh + y];
+            }
+        }
+    }
+
+    update_renderer();
+}
+
+void dvi_text_set_wide_font(const dvi_font_t *font) {
+    text_wide_font = font;
+    update_renderer();
+}
+
+void dvi_text_set_bold_font(const dvi_font_t *font) {
+    text_bold_font = font;
+    if (font && font->glyph_height <= TEXT_GLYPH_HEIGHT_12WIDE) {
+        const uint8_t *src = font->bitmap;
+        int first = font->first_char;
+        int num = font->num_chars;
+        int gh = font->glyph_height;
+        // Build bold region (offset 256-511) of the 512-stride cache.
+        for (int y = 0; y < gh; y++)
+            memset(&narrow_row_cache[y * NARROW_CACHE_STRIDE + 256], 0, 256);
+        for (int ch = 0; ch < num; ch++) {
+            for (int y = 0; y < gh; y++) {
+                narrow_row_cache[y * NARROW_CACHE_STRIDE + 256 + (first + ch)] =
+                    src[ch * gh + y];
+            }
+        }
+    }
+}
+
+void dvi_text_set_palette(const uint8_t palette[16]) {
+    memcpy(text_palette, palette, 16);
+    update_palette32();
+}
+
+void dvi_text_put_char(int col, int row, char ch, uint8_t attr) {
+    if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
+        return;
+    dvi_text_cell_t *c = &text_vram[row * text_cols + col];
+    c->ch = (uint8_t)ch;
+    c->attr = attr;
+    c->flags = 0;
+}
+
+void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
+    if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
+        return;
+    dvi_text_cell_t *c = &text_vram[row * text_cols + col];
+    c->ch = (uint8_t)ch | 0x100;  // bit 8 = bold indicator for 512-stride cache
+    c->attr = attr;
+    c->flags = DVI_CELL_FLAG_BOLD;
+}
+
+void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
+    if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows)
+        return;
+    dvi_text_cell_t *left = &text_vram[row * text_cols + col];
+    dvi_text_cell_t *right = &text_vram[row * text_cols + col + 1];
+    left->ch = ch;
+    left->attr = attr;
+    left->flags = DVI_CELL_FLAG_WIDE_L;
+    right->ch = 0;
+    right->attr = attr;
+    right->flags = DVI_CELL_FLAG_WIDE_R;
+    row_has_wide[row] = 1;
+}
+
+void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
+    if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows)
+        return;
+    dvi_text_cell_t *left = &text_vram[row * text_cols + col];
+    dvi_text_cell_t *right = &text_vram[row * text_cols + col + 1];
+    left->ch = ch;
+    left->attr = attr;
+    left->flags = DVI_CELL_FLAG_WIDE_L | DVI_CELL_FLAG_BOLD;
+    right->ch = 0;
+    right->attr = attr;
+    right->flags = DVI_CELL_FLAG_WIDE_R | DVI_CELL_FLAG_BOLD;
+    row_has_wide[row] = 1;
+}
+
+// Decode one UTF-8 character from str, store codepoint in *cp.
+// Returns pointer to next character, or NULL on invalid sequence.
+static const char *utf8_decode(const char *str, uint32_t *cp) {
+    uint8_t b = (uint8_t)*str;
+    if (b < 0x80) {
+        *cp = b;
+        return str + 1;
+    } else if ((b & 0xE0) == 0xC0) {
+        *cp = (b & 0x1F) << 6 | ((uint8_t)str[1] & 0x3F);
+        return str + 2;
+    } else if ((b & 0xF0) == 0xE0) {
+        *cp = (b & 0x0F) << 12 | ((uint8_t)str[1] & 0x3F) << 6 |
+              ((uint8_t)str[2] & 0x3F);
+        return str + 3;
+    } else if ((b & 0xF8) == 0xF0) {
+        *cp = (b & 0x07) << 18 | ((uint8_t)str[1] & 0x3F) << 12 |
+              ((uint8_t)str[2] & 0x3F) << 6 | ((uint8_t)str[3] & 0x3F);
+        return str + 4;
+    }
+    *cp = '?';
+    return str + 1;
+}
+
+// Look up a Unicode codepoint in the uni2jis table (binary search).
+static uint16_t unicode_to_jis(uint32_t cp) {
+    if (cp > 0xFFFF)
+        return 0;
+    uint16_t target = (uint16_t)cp;
+    int lo = 0, hi = UNI2JIS_TABLE_SIZE - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        uint16_t mid_cp = uni2jis_table[mid].unicode;
+        if (mid_cp == target)
+            return uni2jis_table[mid].jis;
+        if (mid_cp < target)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+    return 0;
+}
+
+void dvi_text_put_string(int col, int row, const char *str, uint8_t attr) {
+    int start_col = col;
+    while (*str && row < text_rows) {
+        uint32_t cp;
+        str = utf8_decode(str, &cp);
+
+        if (cp == '\n') {
+            col = start_col;
+            row++;
+            continue;
+        }
+
+        if (cp < 0x80) {
+            if (col >= text_cols) {
+                col = start_col;
+                row++;
+                if (row >= text_rows)
+                    break;
+            }
+            dvi_text_put_char(col, row, (char)cp, attr);
+            col++;
+        } else {
+            uint16_t jis = unicode_to_jis(cp);
+            if (jis) {
+                if (col + 1 >= text_cols) {
+                    col = start_col;
+                    row++;
+                    if (row >= text_rows)
+                        break;
+                }
+                dvi_text_put_wide_char(col, row, dvi_jis_to_linear(jis), attr);
+                col += 2;
+            } else {
+                if (col >= text_cols) {
+                    col = start_col;
+                    row++;
+                    if (row >= text_rows)
+                        break;
+                }
+                dvi_text_put_char(col, row, '?', attr);
+                col++;
+            }
+        }
+    }
+}
+
+void dvi_text_put_string_bold(int col, int row, const char *str, uint8_t attr) {
+    int start_col = col;
+    while (*str && row < text_rows) {
+        uint32_t cp;
+        str = utf8_decode(str, &cp);
+
+        if (cp == '\n') {
+            col = start_col;
+            row++;
+            continue;
+        }
+
+        if (cp < 0x80) {
+            if (col >= text_cols) {
+                col = start_col;
+                row++;
+                if (row >= text_rows)
+                    break;
+            }
+            dvi_text_put_char_bold(col, row, (char)cp, attr);
+            col++;
+        } else {
+            uint16_t jis = unicode_to_jis(cp);
+            if (jis) {
+                if (col + 1 >= text_cols) {
+                    col = start_col;
+                    row++;
+                    if (row >= text_rows)
+                        break;
+                }
+                dvi_text_put_wide_char_bold(col, row, dvi_jis_to_linear(jis), attr);
+                col += 2;
+            } else {
+                if (col >= text_cols) {
+                    col = start_col;
+                    row++;
+                    if (row >= text_rows)
+                        break;
+                }
+                dvi_text_put_char_bold(col, row, '?', attr);
+                col++;
+            }
+        }
+    }
+}
+
+void dvi_text_clear(uint8_t attr) {
+    for (int i = 0; i < text_rows * text_cols; i++) {
+        text_vram[i].ch = ' ';
+        text_vram[i].attr = attr;
+        text_vram[i].flags = 0;
+    }
+    memset(row_has_wide, 0, sizeof(row_has_wide));
 }

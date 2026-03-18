@@ -104,6 +104,7 @@ add_library(picoruby-dvi
 target_include_directories(picoruby-dvi PUBLIC
     mrbgems/picoruby-dvi/include
     mrbgems/picoruby-dvi/ports/rp2350
+    mrbgems/picoruby-dvi/ports/rp2350/fonts
 )
 target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_dma)
 target_compile_options(picoruby-dvi PRIVATE -O2)

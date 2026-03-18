@@ -86,6 +86,43 @@ mrb_dvi_fill_rect(mrb_state *mrb, mrb_value klass)
   return mrb_nil_value();
 }
 
+/*
+ * DVI.text_put_string(col, row, str, attr)
+ */
+static mrb_value
+mrb_dvi_text_put_string(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int col, row, attr;
+  const char *str;
+  mrb_get_args(mrb, "iizi", &col, &row, &str, &attr);
+  dvi_text_put_string(col, row, str, (uint8_t)attr);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI.text_clear(attr)
+ */
+static mrb_value
+mrb_dvi_text_clear(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int attr;
+  mrb_get_args(mrb, "i", &attr);
+  dvi_text_clear((uint8_t)attr);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI.text_put_char(col, row, ch, attr)
+ */
+static mrb_value
+mrb_dvi_text_put_char(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int col, row, ch, attr;
+  mrb_get_args(mrb, "iiii", &col, &row, &ch, &attr);
+  dvi_text_put_char(col, row, (char)ch, (uint8_t)attr);
+  return mrb_nil_value();
+}
+
 void
 mrb_picoruby_dvi_gem_init(mrb_state *mrb)
 {
@@ -96,6 +133,10 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                       mrb_fixnum_value(DVI_FRAME_WIDTH));
   mrb_define_const_id(mrb, class_DVI, MRB_SYM(HEIGHT),
                       mrb_fixnum_value(DVI_FRAME_HEIGHT));
+  mrb_define_const_id(mrb, class_DVI, MRB_SYM(TEXT_COLS),
+                      mrb_fixnum_value(DVI_TEXT_MAX_COLS));
+  mrb_define_const_id(mrb, class_DVI, MRB_SYM(TEXT_ROWS),
+                      mrb_fixnum_value(DVI_TEXT_MAX_ROWS));
 
   mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(wait_vsync),
                              mrb_dvi_wait_vsync, MRB_ARGS_NONE());
@@ -109,6 +150,12 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(fill_rect),
                              mrb_dvi_fill_rect, MRB_ARGS_REQ(5));
+  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(text_put_string),
+                             mrb_dvi_text_put_string, MRB_ARGS_REQ(4));
+  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(text_clear),
+                             mrb_dvi_text_clear, MRB_ARGS_REQ(1));
+  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(text_put_char),
+                             mrb_dvi_text_put_char, MRB_ARGS_REQ(4));
 }
 
 void
