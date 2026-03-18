@@ -77,7 +77,7 @@ GP18 D2-   GP19 D2+   (Lane 2: red)
 Text mode rendering requires sys_clk > clk_hstx. At a 1:1 ratio, DMA and
 CPU compete for main SRAM bus bandwidth every cycle, inflating render time
 beyond the scanline budget. A 2:1 ratio (250 MHz sys_clk, 125 MHz clk_hstx)
-combined with render loop optimizations (expanded nibble table in SCRATCH_Y,
+combined with render loop optimizations (font_byte_mask table in SCRATCH_Y,
 uniform-attribute fast path) keeps the render within the blanking budget.
 See [stability analysis](#stability-analysis) below.
 
@@ -183,27 +183,61 @@ defaults).
 
 - Half-width: 6px wide, 13px tall. Cached in a 512-stride SRAM row cache
   (6656 bytes). Regular glyphs at index 0-255, bold at 256-511. Zero flash
-  access during narrow-only rendering.
-- Full-width: 12px wide, 13px tall. Interleaved regular+bold in flash XIP.
-  52-byte stride per glyph pair. Unusable with mruby active due to QMI bus
-  contention (see below).
+  access during rendering.
+- Full-width: 12px wide, 13px tall. Source data is interleaved regular+bold
+  in flash XIP (52-byte stride per glyph pair). Rendered from an SRAM wide
+  glyph cache to avoid QMI bus contention (see below).
+
+### Wide glyph cache
+
+Full-width font bitmaps cannot be read from flash XIP during rendering
+because the QMI bus is shared with PSRAM. The wide glyph cache copies
+needed glyph rows into SRAM on Core 0 at character-write time, so Core 1
+never touches flash.
+
+- 512 cache slots, row-major layout: `wide_row_cache[glyph_y * stride + slot]`
+- Regular glyphs at slots 0-511, bold at 512-1023 (26 KB total)
+- 1024-entry hash table maps linear JIS index to cache slot (open addressing,
+  linear probing)
+- Populated by `dvi_text_put_wide_char()` on Core 0
+- On overflow, the cache scans VRAM and re-maps slots in-place
+
+Bold characters store `slot + WIDE_CACHE_SLOTS` in `cell.ch` at write time
+so the render loop indexes directly into the bold region without a runtime
+branch.
 
 ### Scanline renderer
 
 The renderer converts one row of text VRAM into 640 RGB332 bytes using
-inline ARM Thumb-2 assembly. Branchless pixel selection via nibble-mask LUT:
+inline ARM Thumb-2 assembly. Branchless pixel selection via font-byte-mask
+LUT:
 
 ```
-pixel = bg4 ^ (xor4 & nibble_mask[nibble])
+pixel = bg4 ^ (xor4 & font_byte_mask[byte][0..1])
 ```
 
-Three render paths selected by `row_has_wide[]` and `row_uniform_attr[]`:
+`font_byte_mask[256][2]` (2 KB) resides in SCRATCH_Y (SRAM9, separate bus
+port from Main SRAM) to eliminate DMA bus contention during rendering.
 
-- Uniform-attr narrow-only: pre-computed bg/xor, expanded nibble table in
-  SCRATCH_Y, no per-cell attr checks. ~1,763 cycles including IRQ overhead.
-- Mixed-attr narrow-only: expanded nibble table with per-cell attr checks.
-  ~2,050 cycles including IRQ overhead.
-- Mixed (narrow + wide): single-cell dispatch with narrow/wide sub-paths.
+Four render paths selected by `row_has_wide[]` and `row_uniform_attr[]`:
+
+| Path | Dispatch condition | Per-cell cost | Typical cycles |
+|---|---|---|---|
+| Uniform-attr narrow-only | no wide, uniform attr | ~12 cycles (2-cell pair) | ~1,763 |
+| Mixed-attr narrow-only | no wide, mixed attrs | ~21 cycles (2-cell pair) | ~2,050 |
+| Uniform-attr mixed | has wide, uniform attr | ~20 narrow / ~25 wide | ~2,080 |
+| Non-uniform-attr mixed | has wide, mixed attrs | ~23 narrow / ~28 wide | ~2,200 |
+
+Cycle counts include IRQ overhead. The FIFO-augmented budget is 2,240
+cycles (1,600 blanking + 640 FIFO margin).
+
+Key render-loop optimizations:
+
+- **Load-latency interleaving**: next nibble address computed during the
+  2-cycle ldr bubble to hide pipeline stalls in the wide sub-path.
+- **Set-time pre-computation**: bold slot offset and per-row uniform-attr
+  flags are computed on Core 0 at character-write time, not at render time
+  on Core 1.
 
 The render function and IRQ handler are placed in SCRATCH_X to avoid
 flash instruction fetch during rendering.
@@ -213,9 +247,9 @@ flash instruction fetch during rendering.
 | Region | Size | Contents |
 |---|---|---|
 | Flash (XIP) | ~920 KB | Firmware, font data (~400 KB), mruby library |
-| Main SRAM | ~156 KB | text_vram (15.7 KB), narrow_row_cache (6.6 KB), line_buf (1.3 KB), framebuf (75 KB), stacks, BSS |
+| Main SRAM | ~182 KB | text_vram (15.7 KB), narrow_row_cache (6.6 KB), wide_row_cache (26 KB), line_buf (1.3 KB), framebuf (75 KB), stacks, BSS |
 | SCRATCH_X | ~3.4 KB | IRQ handler + render code |
-| SCRATCH_Y | 4 KB | expanded_nibble (2 KB) + pico-sdk default stack (2 KB, unused after BSS stack switch) |
+| SCRATCH_Y | 4 KB | font_byte_mask (2 KB) + pico-sdk default stack (2 KB, unused after BSS stack switch) |
 | PSRAM (QMI CS1) | 8 MB | mruby heap |
 
 ### Main SRAM bank-offset technique
@@ -236,48 +270,52 @@ The QMI bus is shared between flash (CS0) and PSRAM (CS1). The 16 KB XIP
 cache covers both chip selects. When the mruby VM alternates between flash
 code and PSRAM data, the XIP cache thrashes, generating heavy QMI traffic.
 
-Impact on text mode:
-- Half-width rendering reads from SRAM cache only (no QMI access). Stable.
-- Full-width rendering reads font bitmaps from flash XIP. QMI contention
-  with mruby's PSRAM access causes render stalls of 20,000+ cycles
-  (budget: 12,000 cycles). Unusable with mruby active.
+The wide glyph cache keeps all render-time font reads in SRAM, so the
+render path has no flash access. Text mode is stable regardless of mruby
+VM activity.
 
 ### Main SRAM bus contention
 
 At sys_clk = clk_hstx (1:1 ratio), DMA and CPU compete for main SRAM bus
-bandwidth on every cycle. Measured effects:
+bandwidth on every cycle. The 2:1 ratio (250 MHz sys_clk, 125 MHz clk_hstx)
+reduces contention enough for the render to fit within the scanline budget.
 
-| sys_clk | ratio | render_last | fifo_empty | fifo_min | result |
-|---------|-------|-------------|------------|----------|--------|
-| 125 MHz | 1:1 | 4,555 | >500/sec | -- | unstable |
-| 250 MHz | 2:1 | 2,137 | ~1/10 sec | -- | nearly stable (pre-optimization) |
-| 375 MHz | 3:1 | 2,137 | 0 | -- | fully stable |
-| 250 MHz | 2:1 | 1,763 | 0 | 7 | **fully stable (optimized)** |
+Measured render cycles at 250 MHz:
 
-The initial 250 MHz attempt (2:1 ratio) suffered rare FIFO underflows due
-to multi-master main SRAM bank contention between Core 0 (mruby), Core 1
-(render), and DMA. The render (~2,137 cycles) exceeded the blanking budget
-(1,600 cycles), spilling into the active pixel period where DMA reads
-caused additional bus stalls.
+| Workload | render_last | fifo_empty |
+|----------|-------------|------------|
+| Narrow-only (uniform attr) | ~1,763 | 0 |
+| Narrow-only (mixed attr) | ~2,050 | 0 |
+| Full-screen CJK (uniform attr) | ~2,080 | 0 |
 
-Three optimizations brought the render within the blanking budget at 250 MHz:
+The blanking interval provides 1,600 cycles. The 8-entry HSTX FIFO extends
+the effective budget to 2,240 cycles (1,600 + 640 FIFO margin).
 
-1. **Pre-expanded nibble table in SCRATCH_Y**: maps font byte (0-255) to
-   pre-computed (mask_hi, mask_lo) pairs. Replaces two nibble_mask lookups
-   (Main SRAM) with a single ldrd from SRAM9 (separate bus port, zero DMA
-   contention). 256 entries x 8 bytes = 2 KB.
+The following techniques keep the render within this budget:
+
+1. **font_byte_mask table in SCRATCH_Y**: maps font byte (0-255) to
+   pre-computed (mask_hi, mask_lo) pairs. A single ldrd from SRAM9
+   (separate bus port) avoids Main SRAM contention with DMA.
+   256 entries x 8 bytes = 2 KB.
 
 2. **Uniform-attribute fast path**: tracks per-row attribute uniformity via
    `row_uniform_attr[]`. When all cells share the same attr, pre-computes
    bg4/xor4 once and skips all per-cell ubfx+cmp+bne attr checks.
 
-3. **DMA trigger reordering**: moves the DMA descriptor trigger to
-   immediately after IRQ acknowledgment, before FIFO diagnostics. Recovers
-   ~20 cycles of blanking margin.
+3. **DMA trigger reordering**: the IRQ handler triggers the next
+   pre-prepared descriptor buffer immediately after acknowledgment, before
+   diagnostics.
 
-Combined savings: ~2,137 to ~1,484 cycles (pure render), ~1,763 cycles
-including IRQ overhead. The 8-entry HSTX FIFO (fifo_min=7) absorbs any
-residual Core 0 vs DMA contention during the active pixel period.
+4. **SRAM wide glyph cache**: all full-width font reads come from SRAM,
+   avoiding flash XIP access entirely
+   (see [Wide glyph cache](#wide-glyph-cache)).
+
+5. **Set-time pre-computation**: bold slot offset stored in `cell.ch` at
+   write time, eliminating tst/it/addne (3 instructions per wide cell) from
+   the render loop.
+
+6. **Load-latency interleaving**: next nibble address computed during the
+   2-cycle ldr bubble in the wide sub-path.
 
 ### Diagnostic instrumentation
 
