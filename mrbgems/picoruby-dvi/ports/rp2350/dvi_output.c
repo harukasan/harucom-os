@@ -4,7 +4,7 @@
 // Outputs 640x480 @ 60Hz DVI.
 //
 // Supports two modes:
-//   PIXEL: 320x240 RGB332 framebuffer, 2x scaled to 640x480
+//   GRAPHICS: 320x240 RGB332 framebuffer, 2x scaled to 640x480
 //   TEXT:  text VRAM rendered at native 640x480
 //
 // Based on dvi_out_hstx_encoder from pico-examples:
@@ -167,7 +167,7 @@ static int cur_desc_idx = 0;
 // ----------------------------------------------------------------------------
 // Pixel mode data
 
-static uint8_t framebuf[DVI_FRAME_WIDTH * DVI_FRAME_HEIGHT];
+static uint8_t framebuf[DVI_GRAPHICS_WIDTH * DVI_GRAPHICS_HEIGHT];
 
 // ----------------------------------------------------------------------------
 // Text mode data

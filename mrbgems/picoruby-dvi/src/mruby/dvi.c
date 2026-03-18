@@ -44,9 +44,9 @@ mrb_dvi_set_pixel(mrb_state *mrb, mrb_value klass)
 {
   mrb_int x, y, color;
   mrb_get_args(mrb, "iii", &x, &y, &color);
-  if (x < 0 || x >= DVI_FRAME_WIDTH || y < 0 || y >= DVI_FRAME_HEIGHT)
+  if (x < 0 || x >= DVI_GRAPHICS_WIDTH || y < 0 || y >= DVI_GRAPHICS_HEIGHT)
     return mrb_nil_value();
-  dvi_get_framebuffer()[y * DVI_FRAME_WIDTH + x] = (uint8_t)color;
+  dvi_get_framebuffer()[y * DVI_GRAPHICS_WIDTH + x] = (uint8_t)color;
   return mrb_nil_value();
 }
 
@@ -58,9 +58,9 @@ mrb_dvi_get_pixel(mrb_state *mrb, mrb_value klass)
 {
   mrb_int x, y;
   mrb_get_args(mrb, "ii", &x, &y);
-  if (x < 0 || x >= DVI_FRAME_WIDTH || y < 0 || y >= DVI_FRAME_HEIGHT)
+  if (x < 0 || x >= DVI_GRAPHICS_WIDTH || y < 0 || y >= DVI_GRAPHICS_HEIGHT)
     return mrb_fixnum_value(0);
-  return mrb_fixnum_value(dvi_get_framebuffer()[y * DVI_FRAME_WIDTH + x]);
+  return mrb_fixnum_value(dvi_get_framebuffer()[y * DVI_GRAPHICS_WIDTH + x]);
 }
 
 /*
@@ -72,7 +72,7 @@ mrb_dvi_fill(mrb_state *mrb, mrb_value klass)
   mrb_int color;
   mrb_get_args(mrb, "i", &color);
   memset(dvi_get_framebuffer(), (uint8_t)color,
-         DVI_FRAME_WIDTH * DVI_FRAME_HEIGHT);
+         DVI_GRAPHICS_WIDTH * DVI_GRAPHICS_HEIGHT);
   return mrb_nil_value();
 }
 
@@ -89,11 +89,11 @@ mrb_dvi_fill_rect(mrb_state *mrb, mrb_value klass)
   /* Clip to framebuffer bounds */
   if (x < 0) { w += x; x = 0; }
   if (y < 0) { h += y; y = 0; }
-  if (x + w > DVI_FRAME_WIDTH) w = DVI_FRAME_WIDTH - x;
-  if (y + h > DVI_FRAME_HEIGHT) h = DVI_FRAME_HEIGHT - y;
+  if (x + w > DVI_GRAPHICS_WIDTH) w = DVI_GRAPHICS_WIDTH - x;
+  if (y + h > DVI_GRAPHICS_HEIGHT) h = DVI_GRAPHICS_HEIGHT - y;
   if (w <= 0 || h <= 0) return mrb_nil_value();
   for (mrb_int iy = 0; iy < h; iy++) {
-    memset(&fb[(y + iy) * DVI_FRAME_WIDTH + x], c, w);
+    memset(&fb[(y + iy) * DVI_GRAPHICS_WIDTH + x], c, w);
   }
   return mrb_nil_value();
 }
@@ -141,18 +141,10 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
   struct RClass *class_DVI =
       mrb_define_class_id(mrb, MRB_SYM(DVI), mrb->object_class);
 
-  mrb_define_const_id(mrb, class_DVI, MRB_SYM(WIDTH),
-                      mrb_fixnum_value(DVI_FRAME_WIDTH));
-  mrb_define_const_id(mrb, class_DVI, MRB_SYM(HEIGHT),
-                      mrb_fixnum_value(DVI_FRAME_HEIGHT));
-  mrb_define_const_id(mrb, class_DVI, MRB_SYM(TEXT_COLS),
-                      mrb_fixnum_value(DVI_TEXT_MAX_COLS));
-  mrb_define_const_id(mrb, class_DVI, MRB_SYM(TEXT_ROWS),
-                      mrb_fixnum_value(DVI_TEXT_MAX_ROWS));
   mrb_define_const_id(mrb, class_DVI, MRB_SYM(TEXT_MODE),
                       mrb_fixnum_value(DVI_MODE_TEXT));
   mrb_define_const_id(mrb, class_DVI, MRB_SYM(GRAPHICS_MODE),
-                      mrb_fixnum_value(DVI_MODE_PIXEL));
+                      mrb_fixnum_value(DVI_MODE_GRAPHICS));
 
   mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(set_mode),
                              mrb_dvi_set_mode, MRB_ARGS_REQ(1));
@@ -160,20 +152,6 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_wait_vsync, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(frame_count),
                              mrb_dvi_frame_count, MRB_ARGS_NONE());
-  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(set_pixel),
-                             mrb_dvi_set_pixel, MRB_ARGS_REQ(3));
-  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(get_pixel),
-                             mrb_dvi_get_pixel, MRB_ARGS_REQ(2));
-  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(fill), mrb_dvi_fill,
-                             MRB_ARGS_REQ(1));
-  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(fill_rect),
-                             mrb_dvi_fill_rect, MRB_ARGS_REQ(5));
-  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(text_put_string),
-                             mrb_dvi_text_put_string, MRB_ARGS_REQ(4));
-  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(text_clear),
-                             mrb_dvi_text_clear, MRB_ARGS_REQ(1));
-  mrb_define_class_method_id(mrb, class_DVI, MRB_SYM(text_put_char),
-                             mrb_dvi_text_put_char, MRB_ARGS_REQ(4));
 
   // DVI::Text
   struct RClass *class_Text =
@@ -195,9 +173,9 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
       mrb_define_class_under_id(mrb, class_DVI, MRB_SYM(Graphics),
                                 mrb->object_class);
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(WIDTH),
-                      mrb_fixnum_value(DVI_FRAME_WIDTH));
+                      mrb_fixnum_value(DVI_GRAPHICS_WIDTH));
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(HEIGHT),
-                      mrb_fixnum_value(DVI_FRAME_HEIGHT));
+                      mrb_fixnum_value(DVI_GRAPHICS_HEIGHT));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_pixel),
                              mrb_dvi_set_pixel, MRB_ARGS_REQ(3));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(get_pixel),

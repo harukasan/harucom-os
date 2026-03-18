@@ -8,10 +8,6 @@
 // Configures clk_hstx = clk_sys.  No overclocking or VREG changes needed.
 void dvi_init_clock(void);
 
-// Initialize HSTX, DMA, IRQ and start DVI output in pixel mode.
-// Must be called after dvi_init_clock() and psram_init().
-void dvi_start(void);
-
 // Initialize HSTX, DMA, IRQ and start DVI output in the specified mode.
 // For DVI_MODE_TEXT, call dvi_text_set_font() before this function.
 // Must be called after dvi_init_clock() and psram_init().

@@ -7,9 +7,9 @@
 extern "C" {
 #endif
 
-// Pixel mode framebuffer dimensions (320x240, 2x scaled to 640x480)
-#define DVI_FRAME_WIDTH  320
-#define DVI_FRAME_HEIGHT 240
+// Graphics mode framebuffer dimensions (320x240, 2x scaled to 640x480)
+#define DVI_GRAPHICS_WIDTH  320
+#define DVI_GRAPHICS_HEIGHT 240
 
 // Text mode grid dimensions (12px font: 6px half-width, 13px glyph height)
 #define DVI_TEXT_MAX_COLS 106
@@ -27,8 +27,8 @@ typedef struct {
 } dvi_text_cell_t;
 
 typedef enum {
-    DVI_MODE_PIXEL,  // 320x240 RGB332, 2x scaled to 640x480
-    DVI_MODE_TEXT,   // text VRAM, native 640x480
+    DVI_MODE_GRAPHICS,  // 320x240 RGB332, 2x scaled to 640x480
+    DVI_MODE_TEXT,      // text VRAM, native 640x480
 } dvi_mode_t;
 
 // Font data structure (defined in dvi_font.h)
@@ -50,6 +50,8 @@ void dvi_text_set_font(const dvi_font_t *font);
 void dvi_text_set_wide_font(const dvi_font_t *font);
 void dvi_text_set_bold_font(const dvi_font_t *font);
 void dvi_text_set_palette(const uint8_t palette[16]);
+void dvi_text_set_palette_entry(int index, uint8_t color);
+uint8_t dvi_text_get_palette_entry(int index);
 void dvi_text_put_char(int col, int row, char ch, uint8_t attr);
 void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr);
 void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr);
@@ -57,6 +59,7 @@ void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr);
 void dvi_text_put_string(int col, int row, const char *str, uint8_t attr);
 void dvi_text_put_string_bold(int col, int row, const char *str, uint8_t attr);
 void dvi_text_clear(uint8_t attr);
+void dvi_text_clear_line(int row, uint8_t attr);
 
 // Convert a JIS X 0208 code to a linear font index.
 static inline uint16_t dvi_jis_to_linear(uint16_t jis_code) {

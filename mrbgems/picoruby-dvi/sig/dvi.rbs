@@ -2,8 +2,6 @@ class DVI
   TEXT_MODE: Integer
   GRAPHICS_MODE: Integer
 
-  def self.start: (?Integer mode) -> void
-  def self.stop: () -> void
   def self.set_mode: (Integer mode) -> void
   def self.wait_vsync: () -> void
   def self.frame_count: () -> Integer
