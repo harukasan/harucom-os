@@ -24,6 +24,66 @@ Design documents and implementation notes are in `doc/`:
 - [doc/psram.md](doc/psram.md) — PSRAM driver (APS6404L, QMI CS1 initialization, XIP mapping)
 - [doc/dvi.md](doc/dvi.md) — DVI output (HSTX, DMA, text/pixel modes, stability analysis)
 - [doc/dvi/batch-rendering.md](doc/dvi/batch-rendering.md) — Batch scanline rendering (N=4, line buffers, descriptor layout)
+- [doc/usb-host-keyboard.md](doc/usb-host-keyboard.md) — USB host keyboard (PIO-USB, HID, Ruby/C API)
+
+## Documentation style
+
+Documents in `doc/` follow this structure:
+
+```markdown
+# Title
+
+Brief overview (2-3 sentences). Link libraries and specs on first mention
+using reference-style links (e.g. [Pico-PIO-USB][pio-usb]).
+
+## Ruby API
+
+Module: `Module::Name`
+
+- [Method.one](#methodone)
+- [Method.two](#methodtwo---returntype)
+
+Module overview: what it provides and how to use it, with a code example.
+
+### Module::Name.method_one
+
+Description of the method.
+
+### Module::Name.method_two -> ReturnType
+
+Description with return value.
+
+## C API
+
+Defined in [header.h](../path/to/header.h).
+
+### function_name
+
+\```c
+void function_name(void);
+\```
+
+Description of the function.
+
+## Hardware Configuration
+
+Pin assignments (table with constants from board header), port assignments.
+
+## Architecture
+
+Narrative sections with tables and bullet lists where appropriate.
+Each subsection opens with a sentence explaining what it covers.
+
+## References
+
+- [Name][ref-id]: Description
+```
+
+Guidelines:
+- Use reference-style links (`[text][id]`) for external URLs; define them near first use
+- Link source files with relative paths (e.g. `[header.h](../path/to/header.h)`)
+- API sections list each method/function with signature and description
+- Architecture uses narrative prose; use bullet lists and tables for structured data
 
 ## Code style
 
