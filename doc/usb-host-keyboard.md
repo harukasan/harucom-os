@@ -40,7 +40,6 @@ loop do
     released = prev_keys - keys      # keyup
     prev_keys = keys
   end
-  DVI.wait_vsync
 end
 ```
 
