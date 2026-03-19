@@ -4,3 +4,6 @@
 [submodule "lib/picoruby"]
 	path = lib/picoruby
 	url = git@github.com:picoruby/picoruby.git
+[submodule "lib/Pico-PIO-USB"]
+	path = lib/Pico-PIO-USB
+	url = https://github.com/sekigon-gonnoc/Pico-PIO-USB.git

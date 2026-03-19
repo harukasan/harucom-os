@@ -32,6 +32,9 @@ set(PICO_BOARD harucom_board CACHE STRING "Board type")
 set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/include/boards)
 set(PICO_PLATFORM rp2350-arm-s CACHE STRING "Platform")
 
+# Pico-PIO-USB (must be set before pico_sdk_init)
+set(PICO_PIO_USB_PATH ${CMAKE_CURRENT_LIST_DIR}/lib/Pico-PIO-USB)
+
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
@@ -116,6 +119,7 @@ add_executable(harucom_os
     src/hal.c
     src/psram.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
+    mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
 )
 
 add_dependencies(harucom_os build_picoruby)
@@ -141,6 +145,7 @@ target_compile_definitions(harucom_os PRIVATE
     MRB_USE_TASK_SCHEDULER=1
     NO_CLOCK_GETTIME=1
     NDEBUG=1
+    BOARD_TUH_RHPORT=1
 )
 
 target_compile_options(harucom_os PRIVATE -fshort-enums)
@@ -157,11 +162,12 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-task/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-machine/include
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems
+    ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include
 )
 
-# Enable UART output for debug
+# Enable UART output for debug (USB stdio disabled for USB host mode)
 pico_enable_stdio_uart(harucom_os 1)
-pico_enable_stdio_usb(harucom_os 1)
+pico_enable_stdio_usb(harucom_os 0)
 
 target_link_libraries(harucom_os
     pico_stdlib
@@ -170,6 +176,8 @@ target_link_libraries(harucom_os
     hardware_gpio
     hardware_flash
     hardware_sync
+    tinyusb_host
+    tinyusb_pico_pio_usb
     mruby
     picoruby-dvi
 )

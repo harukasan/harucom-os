@@ -89,7 +89,9 @@ mrb_hal_task_init(mrb_state *mrb)
   hw_set_bits(&timer_hw->inte, 1u << ALARM_NUM);
   irq_set_exclusive_handler(ALARM_IRQ, alarm_handler);
   irq_set_enabled(ALARM_IRQ, true);
-  irq_set_priority(ALARM_IRQ, PICO_HIGHEST_IRQ_PRIORITY);
+  /* Priority 0x20: below PIO-USB SOF timer (0x00) so that USB transactions
+   * are not preempted by the mruby task scheduler tick. */
+  irq_set_priority(ALARM_IRQ, 0x20);
   timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + US_PER_MS;
 }
 
