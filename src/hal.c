@@ -19,7 +19,6 @@
 #include "picoruby.h"
 #include "task_hal.h"
 #include "ringbuffer.h"
-#include "usb_host.h"
 
 /* Forward declarations */
 int hal_write(int fd, const void *buf, int nbytes);
@@ -128,7 +127,6 @@ void
 mrb_hal_task_idle_cpu(mrb_state *mrb)
 {
   (void)mrb;
-  usb_host_task();
   asm volatile (
     "wfe\n"
     "nop\n"

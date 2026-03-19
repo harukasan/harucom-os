@@ -36,11 +36,18 @@
 
 // clang-format off
 static const char ruby_code[] =
+    "# USB host background task\n"
+    "Task.new(name: \"usb_host\") do\n"
+    "  loop do\n"
+    "    USB::Host.task\n"
+    "    Task.pass\n"
+    "  end\n"
+    "end\n"
+    "\n"
     "# USB keyboard input demo\n"
     "BLANK = \" \" * 106\n"
     "\n"
     "loop do\n"
-    "  USB::Host.task\n"
     "  if USB::Host.keyboard_connected?\n"
     "    keys = USB::Host.keyboard_keycodes\n"
     "    mod = USB::Host.keyboard_modifier\n"
