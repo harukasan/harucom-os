@@ -28,6 +28,7 @@
 #include "pico/stdlib.h"
 #include "picoruby.h"
 #include "psram.h"
+#include "usb_host.h"
 
 #include "fonts/font_mplus_f12b.h"
 #include "fonts/font_mplus_f12r.h"
@@ -35,55 +36,21 @@
 
 // clang-format off
 static const char ruby_code[] =
-    "# Mode switching demo: alternate TEXT and GRAPHICS every 10 seconds\n"
-    "PAD = \" \" * 106\n"
-    "lines = %w[\n"
-    "  吾輩は猫である。名前はまだ無い。\n"
-    "  どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。\n"
-    "  吾輩はここで始めて人間というものを見た。しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそ\n"
-    "  うだ。\n"
-    "  この書生というのは時々我々を捕えて煮て食うという話である。しかしその当時は何という考もなかったから別段恐し\n"
-    "  いとも思わなかった。ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである\n"
-    "  。掌の上で少し落ちついて書生の顔を見たのがいわゆる人間というものの見始であろう。この時妙なものだと思った感\n"
-    "  じが今でも残っている。第一毛をもって装飾されべきはずの顔がつるつるしてまるで薬缶だ。\n"
-    "  その後猫にもだいぶ逢ったがこんな片輪には一度も出会わした事がない。のみならず顔の真中があまりに突起している\n"
-    "  。そうしてその穴の中から時々ぷうぷうと煙を吹く。どうも咽せぽくて実に弱った。これが人間の飲む煙草というもの\n"
-    "  である事はようやくこの頃知った。\n"
-    "  この書生の掌の裏でしばらくはよい心持に坐っておったが、しばらくすると非常な速力で運転し始めた。書生が動くの\n"
-    "  か自分だけが動くのか分らないが無暗に眼が廻る。胸が悪くなる。到底助からないと思っていると、どさりと音がして\n"
-    "  眼から火が出た。それまでは記憶しているがあとは何の事やらいくら考え出そうとしても分らない。\n"
-    "]\n"
-    "colors = [0xE0, 0xF0, 0xB0, 0xA0, 0x90, 0xC0, 0xD0, 0x80, 0xE0, 0xF0, 0xB0, 0xA0, 0x90, 0xC0]\n"
+    "# USB keyboard input demo\n"
+    "BLANK = \" \" * 106\n"
     "\n"
-    "# Pre-fill graphics framebuffer with color bars\n"
-    "DVI::Graphics.fill(0x00)\n"
-    "bar_w = DVI::Graphics::WIDTH / 8\n"
-    "bar_colors = [0xFF, 0x1C, 0xFF, 0xFC, 0xE3, 0x1F, 0xFF, 0x00]\n"
-    "8.times do |i|\n"
-    "  DVI::Graphics.fill_rect(i * bar_w, 0, bar_w, DVI::Graphics::HEIGHT, bar_colors[i])\n"
-    "end\n"
-    "\n"
-    "text_mode = true\n"
-    "switch_at = DVI.frame_count + 600\n"
-    "count = 0\n"
     "loop do\n"
-    "  if DVI.frame_count >= switch_at\n"
-    "    text_mode = !text_mode\n"
-    "    if text_mode\n"
-    "      DVI.set_mode(DVI::TEXT_MODE)\n"
-    "    else\n"
-    "      DVI.set_mode(DVI::GRAPHICS_MODE)\n"
-    "    end\n"
-    "    switch_at = DVI.frame_count + 600\n"
+    "  USB::Host.task\n"
+    "  if USB::Host.keyboard_connected?\n"
+    "    keys = USB::Host.keyboard_keycodes\n"
+    "    mod = USB::Host.keyboard_modifier\n"
+    "    line = \"mod=\" + mod.to_s + \" keys=\" + keys.to_s\n"
+    "    DVI::Text.put_string(0, 0, BLANK, 0xF0)\n"
+    "    DVI::Text.put_string(0, 0, line, 0xF0)\n"
+    "  else\n"
+    "    DVI::Text.put_string(0, 0, BLANK, 0xF0)\n"
+    "    DVI::Text.put_string(0, 0, \"No keyboard connected\", 0xF0)\n"
     "  end\n"
-    "  if text_mode\n"
-    "    37.times do |row|\n"
-    "      idx = (row + count) % 14\n"
-    "      DVI::Text.put_string(0, row, PAD, colors[idx])\n"
-    "      DVI::Text.put_string(0, row, lines[idx], colors[idx])\n"
-    "    end\n"
-    "  end\n"
-    "  count = count + 1\n"
     "  DVI.wait_vsync\n"
     "end\n";
 
@@ -208,7 +175,6 @@ static void harucom_main(void) {
     dvi_init_clock();
 
     stdio_init_all();
-    sleep_ms(2000); /* Wait for USB enumeration */
 
     printf("Harucom OS %s (built %s)\n", HARUCOM_VERSION, HARUCOM_BUILD_DATE);
 
@@ -250,6 +216,9 @@ static void harucom_main(void) {
     /* Start periodic DVI diagnostics (every 1 second) */
     static struct repeating_timer diag_timer;
     add_repeating_timer_ms(1000, dvi_diagnostic_callback, NULL, &diag_timer);
+
+    /* Initialize USB host (PIO-USB on RHPORT 1) */
+    usb_host_init();
 
     /* Run mruby on core 0 (has default alarm pool, stdio, timers) */
     run_mruby();
