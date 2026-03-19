@@ -52,5 +52,6 @@ Design documents and implementation notes are in `doc/`:
 ## Commit messages
 
 - First line: summary of the change
-- Following lines: concise bullet points of what was done
+- Following lines: concise bullet points explaining the purpose of each change
+- Each bullet should be purpose-driven, not just describe the action (e.g. "Add X to achieve Y", not "Add X")
 - Do not include trivial accompanying changes (e.g. license additions, formatting fixes)
