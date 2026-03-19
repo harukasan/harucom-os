@@ -180,6 +180,11 @@ volatile uint32_t dvi_fifo_min_level =
 static int cur_line = 0;
 static int cur_desc_idx = 0;
 
+// Blanking flag: when true, all active lines output black (blank_cmd only).
+// Set by Core 0 before flash operations to prevent Core 1 from accessing
+// flash-resident .rodata during rendering.
+static volatile bool dvi_blanking = false;
+
 // ----------------------------------------------------------------------------
 // Pixel mode data
 
@@ -191,6 +196,12 @@ static uint8_t framebuf[DVI_GRAPHICS_WIDTH * DVI_GRAPHICS_HEIGHT];
 static dvi_text_cell_t text_vram[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
 static int text_cols = DVI_TEXT_MAX_COLS;
 static int text_rows = DVI_TEXT_MAX_ROWS;
+
+// All-black line buffer for DVI blanking mode (flash write safety).
+// Used as pixel data source when dvi_blanking is true, avoiding any
+// flash-resident data access during rendering.
+static uint8_t blank_line_buf[MODE_H_ACTIVE_PIXELS + 4]
+    __attribute__((aligned(4)));
 
 // Scanline output buffers in main SRAM (8-bank striped).
 // Stride = 644 bytes (640 data + 4 padding).  Word offset = 161 per buffer,
@@ -785,6 +796,26 @@ static void __force_inline __scratch_x("")
     buf[5] = 0;
     buf[6] = 0;
     buf[7] = 0;
+  } else if (dvi_blanking && active_mode == DVI_MODE_TEXT) {
+    // Blanking mode (text only): same descriptor format as text mode,
+    // but all lines point to the all-black buffer instead of rendered data.
+    // No rendering call, no flash-resident data access.
+    // Graphics mode is safe without blanking (framebuffer is in SRAM).
+    for (int i = 0; i < BATCH_SIZE; i++) {
+      int grp = i * 8;
+      buf[grp + 0] = ctrl_sync;
+      buf[grp + 1] = fifo;
+      buf[grp + 2] = count_of(hsync_cmd);
+      buf[grp + 3] = (uintptr_t)hsync_cmd;
+      buf[grp + 4] = ctrl_text_pixel;
+      buf[grp + 5] = fifo;
+      buf[grp + 6] = MODE_H_ACTIVE_PIXELS / sizeof(uint32_t);
+      buf[grp + 7] = (uintptr_t)blank_line_buf;
+    }
+    buf[BATCH_SIZE * 8 + 0] = ctrl_stop;
+    buf[BATCH_SIZE * 8 + 1] = 0;
+    buf[BATCH_SIZE * 8 + 2] = 0;
+    buf[BATCH_SIZE * 8 + 3] = 0;
   } else if (active_mode == DVI_MODE_TEXT) {
     // Text mode: render BATCH_SIZE scanlines into line buffers.
     // Full descriptor build for the first two batches of each frame
@@ -1092,6 +1123,10 @@ void dvi_start_mode(dvi_mode_t mode) {
 
 void dvi_set_mode(dvi_mode_t mode) {
   next_mode = (int)mode;
+}
+
+void dvi_set_blanking(bool enable) {
+  dvi_blanking = enable;
 }
 
 uint8_t *dvi_get_framebuffer(void) { return framebuf; }

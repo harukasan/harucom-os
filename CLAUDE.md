@@ -25,6 +25,7 @@ Design documents and implementation notes are in `doc/`:
 - [doc/dvi.md](doc/dvi.md) — DVI output (HSTX, DMA, text/pixel modes, stability analysis)
 - [doc/dvi/batch-rendering.md](doc/dvi/batch-rendering.md) — Batch scanline rendering (N=4, line buffers, descriptor layout)
 - [doc/usb-host-keyboard.md](doc/usb-host-keyboard.md) — USB host keyboard (PIO-USB, HID, Ruby/C API)
+- [doc/filesystem.md](doc/filesystem.md) — FAT filesystem on flash (FatFs, VFS, flash write safety)
 
 ## Documentation style
 

@@ -29,13 +29,35 @@
 #include "picoruby.h"
 #include "psram.h"
 #include "usb_host.h"
+#include <mruby/array.h>
+#include <mruby/string.h>
 
 #include "fonts/font_mplus_f12b.h"
 #include "fonts/font_mplus_f12r.h"
 #include "fonts/font_mplus_j12_combined.h"
 
+/* Mount FAT filesystem on flash, set up VFS and $LOAD_PATH,
+ * then try to load /flash/main.rb. Falls back to embedded demo. */
 // clang-format off
 static const char ruby_code[] =
+    /* Mount filesystem (format on first boot) */
+    "fat = FAT.new(:flash, label: \"HARUCOM\")\n"
+    "retry_count = 0\n"
+    "begin\n"
+    "  VFS.mount(fat, \"/flash\")\n"
+    "rescue => e\n"
+    "  fat._mkfs(\"flash:\")\n"
+    "  retry_count = retry_count + 1\n"
+    "  retry if retry_count == 1\n"
+    "  raise e\n"
+    "end\n"
+    "$LOAD_PATH = [\"/flash\"]\n"
+    "\n"
+    "# Write a test file\n"
+    "f = VFS::File.open(\"/flash/hello.txt\", \"w\")\n"
+    "f.write(\"Hello from Harucom OS!\")\n"
+    "f.close\n"
+    "\n"
     "# USB host background task\n"
     "Task.new(name: \"usb_host\") do\n"
     "  loop do\n"
@@ -44,20 +66,57 @@ static const char ruby_code[] =
     "  end\n"
     "end\n"
     "\n"
-    "# USB keyboard input demo\n"
-    "BLANK = \" \" * 106\n"
+    /* Try loading main.rb from flash */
+    "# No main.rb on flash, run embedded demo\n"
     "\n"
+    /* Fallback demo: mode switching with text and graphics */
+    "PAD = \" \" * 106\n"
+    "lines = %w[\n"
+    "  吾輩は猫である。名前はまだ無い。\n"
+    "  どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。\n"
+    "  吾輩はここで始めて人間というものを見た。しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそ\n"
+    "  うだ。\n"
+    "  この書生というのは時々我々を捕えて煮て食うという話である。しかしその当時は何という考もなかったから別段恐し\n"
+    "  いとも思わなかった。ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである\n"
+    "  。掌の上で少し落ちついて書生の顔を見たのがいわゆる人間というものの見始であろう。この時妙なものだと思った感\n"
+    "  じが今でも残っている。第一毛をもって装飾されべきはずの顔がつるつるしてまるで薬缶だ。\n"
+    "  その後猫にもだいぶ逢ったがこんな片輪には一度も出会わした事がない。のみならず顔の真中があまりに突起している\n"
+    "  。そうしてその穴の中から時々ぷうぷうと煙を吹く。どうも咽せぽくて実に弱った。これが人間の飲む煙草というもの\n"
+    "  である事はようやくこの頃知った。\n"
+    "  この書生の掌の裏でしばらくはよい心持に坐っておったが、しばらくすると非常な速力で運転し始めた。書生が動くの\n"
+    "  か自分だけが動くのか分らないが無暗に眼が廻る。胸が悪くなる。到底助からないと思っていると、どさりと音がして\n"
+    "  眼から火が出た。それまでは記憶しているがあとは何の事やらいくら考え出そうとしても分らない。\n"
+    "]\n"
+    "colors = [0xE0, 0xF0, 0xB0, 0xA0, 0x90, 0xC0, 0xD0, 0x80, 0xE0, 0xF0, 0xB0, 0xA0, 0x90, 0xC0]\n"
+    "\n"
+    "DVI::Graphics.fill(0x00)\n"
+    "bar_w = DVI::Graphics::WIDTH / 8\n"
+    "bar_colors = [0xFF, 0x1C, 0xFF, 0xFC, 0xE3, 0x1F, 0xFF, 0x00]\n"
+    "8.times do |i|\n"
+    "  DVI::Graphics.fill_rect(i * bar_w, 0, bar_w, DVI::Graphics::HEIGHT, bar_colors[i])\n"
+    "end\n"
+    "\n"
+    "text_mode = true\n"
+    "switch_at = DVI.frame_count + 600\n"
+    "count = 0\n"
     "loop do\n"
-    "  if USB::Host.keyboard_connected?\n"
-    "    keys = USB::Host.keyboard_keycodes\n"
-    "    mod = USB::Host.keyboard_modifier\n"
-    "    line = \"mod=\" + mod.to_s + \" keys=\" + keys.to_s\n"
-    "    DVI::Text.put_string(0, 0, BLANK, 0xF0)\n"
-    "    DVI::Text.put_string(0, 0, line, 0xF0)\n"
-    "  else\n"
-    "    DVI::Text.put_string(0, 0, BLANK, 0xF0)\n"
-    "    DVI::Text.put_string(0, 0, \"No keyboard connected\", 0xF0)\n"
+    "  if DVI.frame_count >= switch_at\n"
+    "    text_mode = !text_mode\n"
+    "    if text_mode\n"
+    "      DVI.set_mode(DVI::TEXT_MODE)\n"
+    "    else\n"
+    "      DVI.set_mode(DVI::GRAPHICS_MODE)\n"
+    "    end\n"
+    "    switch_at = DVI.frame_count + 600\n"
     "  end\n"
+    "  if text_mode\n"
+    "    37.times do |row|\n"
+    "      idx = (row + count) % 14\n"
+    "      DVI::Text.put_string(0, row, PAD, colors[idx])\n"
+    "      DVI::Text.put_string(0, row, lines[idx], colors[idx])\n"
+    "    end\n"
+    "  end\n"
+    "  count = count + 1\n"
     "  DVI.wait_vsync\n"
     "end\n";
 
@@ -81,14 +140,50 @@ static uint32_t dvi_stack_mem[DVI_STACK_SIZE / sizeof(uint32_t)];
 static uint8_t bss_stack[BSS_STACK_SIZE] __attribute__((aligned(8)));
 
 /*
+ * Core 1 vector table in SRAM.
+ *
+ * The default vector table is in flash.  During flash erase/program,
+ * XIP is disabled, so any interrupt dispatch on Core 1 would fault
+ * when reading the handler address from the vector table.
+ *
+ * After dvi_start_mode() registers the DMA IRQ handler, we copy the
+ * entire vector table to SRAM and point VTOR here.  Combined with
+ * PICO_FLASH_ASSUME_CORE1_SAFE=1 and DVI blanking during flash writes,
+ * Core 1 never accesses flash.
+ *
+ * 16 system exceptions + 52 IRQs = 68 entries.
+ * VTOR requires 512-byte alignment on Cortex-M33.
+ */
+#define VTOR_TABLE_ENTRIES (16 + NUM_IRQS)
+static uint32_t __attribute__((aligned(512)))
+    core1_vector_table[VTOR_TABLE_ENTRIES];
+
+/*
  * core1_dvi_entry: DVI output runs on core 1.
  *
  * After dvi_start_mode(), core 1 must never execute flash-resident code.
  * BASEPRI blocks all interrupts with priority >= 0x20.  DMA_IRQ_1 is at
  * priority 0x00 and passes through.
+ *
+ * Flash write safety relies on three mechanisms:
+ *   1. DVI blanking: flash_disk.c enables blanking before flash ops,
+ *      so the DMA IRQ handler outputs blank lines (no .rodata access).
+ *   2. VTOR in SRAM: interrupt dispatch reads handler addresses from
+ *      SRAM, not flash.
+ *   3. __not_in_flash_func: this function (including the WFI loop)
+ *      runs from SRAM.
  */
-static void core1_dvi_entry(void) {
+static void __not_in_flash_func(core1_dvi_entry)(void) {
     dvi_start_mode(DVI_MODE_TEXT);
+
+    /* Copy vector table to SRAM after DMA IRQ handler is registered */
+    volatile uint32_t *vtor_reg = (volatile uint32_t *)0xE000ED08;
+    uint32_t *flash_vtable = (uint32_t *)*vtor_reg;
+    for (int i = 0; i < VTOR_TABLE_ENTRIES; i++)
+        core1_vector_table[i] = flash_vtable[i];
+    *vtor_reg = (uint32_t)core1_vector_table;
+    __asm volatile("dsb" ::: "memory");
+    __asm volatile("isb" ::: "memory");
 
     __asm volatile("msr basepri, %0" ::"r"(0x20u) : "memory");
     while (1) {
@@ -133,7 +228,8 @@ static bool dvi_diagnostic_callback(struct repeating_timer *t) {
 
 
 /*
- * run_mruby: compile and run a Ruby script on the mruby task scheduler.
+ * run_mruby: mount filesystem, load /flash/main.rb if present,
+ * fall back to embedded demo, then run the mruby task scheduler.
  */
 static void run_mruby(void) {
     printf("Starting PicoRuby...\n");
@@ -163,6 +259,25 @@ static void run_mruby(void) {
 
     printf("running task scheduler\n");
     mrb_task_run(mrb);
+
+    /* Print unhandled exception if the task exited with an error */
+    if (mrb->exc) {
+        mrb_value exc = mrb_obj_value(mrb->exc);
+        mrb_value msg = mrb_funcall(mrb, exc, "inspect", 0);
+        if (mrb_string_p(msg)) {
+            printf("Exception: %s\n", RSTRING_PTR(msg));
+        }
+        mrb_value bt = mrb_funcall(mrb, exc, "backtrace", 0);
+        if (mrb_array_p(bt)) {
+            for (mrb_int i = 0; i < RARRAY_LEN(bt); i++) {
+                mrb_value line = mrb_ary_ref(mrb, bt, i);
+                if (mrb_string_p(line))
+                    printf("  %s\n", RSTRING_PTR(line));
+            }
+        }
+    } else {
+        printf("task scheduler exited normally\n");
+    }
 }
 
 static void harucom_main(void);
