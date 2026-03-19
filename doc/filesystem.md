@@ -313,8 +313,9 @@ After mounting, `require "main"` searches `$LOAD_PATH` for
 ### Flash Write Safety
 
 Flash erase and program operations temporarily disable XIP, making the
-entire flash inaccessible. Three mechanisms ensure Core 1 (DVI output)
-is not affected:
+entire flash inaccessible. See [dvi/stability.md](dvi/stability.md) for
+the full analysis. Three mechanisms ensure Core 1 (DVI output) is not
+affected:
 
 1. **DVI blanking with VSync synchronization**: `flash_disk.c` calls
    `dvi_set_blanking(true)` followed by `dvi_wait_vsync()` before flash
