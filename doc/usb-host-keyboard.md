@@ -7,7 +7,9 @@ The keyboard state is accessible from Ruby scripts running on the mruby VM.
 
 ## Ruby API
 
-Module: `USB::Host`
+### USB::Host
+
+Module: `USB::Host` (provided by picoruby-usb-host mrbgem)
 
 - [USB::Host.init](#usbhostinit)
 - [USB::Host.task](#usbhosttask)
