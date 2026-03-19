@@ -1,6 +1,7 @@
 #ifndef DVI_DEFINED_H_
 #define DVI_DEFINED_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -36,6 +37,11 @@ typedef enum {
 
 // Mode switch (applied at next VBlank by DMA IRQ handler)
 void dvi_set_mode(dvi_mode_t mode);
+
+// Blanking control for flash write safety.
+// When enabled, all active lines output black (no rendering, no flash access).
+// Call dvi_wait_vsync() after enabling to ensure the blanking takes effect.
+void dvi_set_blanking(bool enable);
 
 // Common API
 uint8_t *dvi_get_framebuffer(void);

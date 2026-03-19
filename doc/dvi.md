@@ -8,15 +8,294 @@ directly driving a DVI connector without an external encoder IC.
 [rp2350-hstx]: https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#section_hstx
 [tmds]: https://en.wikipedia.org/wiki/Transition-minimized_differential_signaling
 
-## Output format
+## Ruby API
 
-### 640x480 timing
+### DVI
 
-The output resolution is 640x480 @ 60 Hz (VGA DMT). The pixel clock is
-25.0 MHz (-0.7% from 25.175 MHz standard), within typical display tolerance.
+Class: `DVI` (provided by picoruby-dvi mrbgem)
+
+- [DVI.set_mode](#dviset_modemode)
+- [DVI.frame_count](#dviframe_count---integer)
+- [DVI.wait_vsync](#dviwait_vsync)
+
+`DVI` provides display output control. Two display modes are available:
+`DVI::TEXT_MODE` (106x37 text grid at 640x480) and `DVI::GRAPHICS_MODE`
+(320x240 RGB332 framebuffer, 2x scaled).
+
+```ruby
+DVI.set_mode(DVI::TEXT_MODE)
+loop do
+  DVI::Text.put_string(0, 0, "Hello!", 0xF0)
+  DVI.wait_vsync
+end
+```
+
+#### DVI.set_mode(mode)
+
+Switch display mode. `mode` is `DVI::TEXT_MODE` or `DVI::GRAPHICS_MODE`.
+The switch is applied at the next VBlank.
+
+#### DVI.frame_count -> Integer
+
+Return the number of frames rendered since DVI output started. Increments
+once per VBlank (approximately 60 per second).
+
+#### DVI.wait_vsync
+
+Block until the next VBlank. See
+[Cross-core vsync signaling](#cross-core-vsync-signaling) for details.
+
+### DVI::Text
+
+Class: `DVI::Text` (provided by picoruby-dvi mrbgem)
+
+- [DVI::Text.put_char](#dvitextput_charcol-row-ch-attr)
+- [DVI::Text.put_string](#dvitextput_stringcol-row-str-attr)
+- [DVI::Text.clear](#dvitextclearattr)
+
+`DVI::Text` provides text mode rendering. Characters are placed on a
+106-column, 37-row grid. The `attr` byte encodes foreground (bits 7-4)
+and background (bits 3-0) palette indices.
+
+Constants: `DVI::Text::COLS` (106), `DVI::Text::ROWS` (37).
+
+#### DVI::Text.put_char(col, row, ch, attr)
+
+Place a single character at the given grid position.
+
+#### DVI::Text.put_string(col, row, str, attr)
+
+Write a UTF-8 string starting at the given position. Half-width and
+full-width (CJK) characters are supported.
+
+#### DVI::Text.clear(attr)
+
+Clear the entire text VRAM, filling all cells with spaces and the given
+attribute.
+
+### DVI::Graphics
+
+Class: `DVI::Graphics` (provided by picoruby-dvi mrbgem)
+
+- [DVI::Graphics.set_pixel](#dvigraphicsset_pixelx-y-color)
+- [DVI::Graphics.get_pixel](#dvigraphicsget_pixelx-y---integer)
+- [DVI::Graphics.fill](#dvigraphicsfillcolor)
+- [DVI::Graphics.fill_rect](#dvigraphicsfill_rectx-y-width-height-color)
+
+`DVI::Graphics` provides pixel-level framebuffer access. The framebuffer
+is 320x240 pixels in RGB332 format, 2x scaled to 640x480 on output.
+
+Constants: `DVI::Graphics::WIDTH` (320), `DVI::Graphics::HEIGHT` (240).
+
+```ruby
+DVI.set_mode(DVI::GRAPHICS_MODE)
+DVI::Graphics.fill(0x00)
+DVI::Graphics.fill_rect(10, 10, 100, 50, 0xE0)
+```
+
+#### DVI::Graphics.set_pixel(x, y, color)
+
+Set a single pixel to the given RGB332 color.
+
+#### DVI::Graphics.get_pixel(x, y) -> Integer
+
+Return the RGB332 color at the given position.
+
+#### DVI::Graphics.fill(color)
+
+Fill the entire framebuffer with the given color.
+
+#### DVI::Graphics.fill_rect(x, y, width, height, color)
+
+Fill a rectangular region with the given color.
+
+## C API
+
+Defined in [dvi.h](../mrbgems/picoruby-dvi/include/dvi.h) and
+[dvi_output.h](../mrbgems/picoruby-dvi/ports/rp2350/dvi_output.h).
+
+### dvi_init_clock
+
+```c
+void dvi_init_clock(void);
+```
+
+Initialize system clock for DVI 640x480 output. Configures PLL to 250 MHz
+and sets clk_hstx = clk_sys / 2 (125 MHz). Must be called before
+`dvi_start_mode()`.
+
+### dvi_start_mode
+
+```c
+void dvi_start_mode(dvi_mode_t mode);
+```
+
+Initialize HSTX, DMA, IRQ and start DVI output in the specified mode.
+For `DVI_MODE_TEXT`, call `dvi_text_set_font()` before this function.
+Must be called on Core 1.
+
+### dvi_set_mode
+
+```c
+void dvi_set_mode(dvi_mode_t mode);
+```
+
+Switch display mode. The switch is applied at the next VBlank by the DMA
+IRQ handler.
+
+### dvi_set_blanking
+
+```c
+void dvi_set_blanking(bool enable);
+```
+
+Enable or disable DVI blanking for flash write safety. When enabled in text
+mode, all active lines output black from a static SRAM buffer instead of
+rendering from font data. Graphics mode is unaffected. Call
+`dvi_wait_vsync()` after enabling to ensure blanking has taken effect.
+
+### dvi_get_frame_count
+
+```c
+uint32_t dvi_get_frame_count(void);
+```
+
+Return the number of frames rendered since DVI output started.
+
+### dvi_wait_vsync
+
+```c
+void dvi_wait_vsync(void);
+```
+
+Block until the next VBlank. See
+[Cross-core vsync signaling](#cross-core-vsync-signaling) for details.
+
+### dvi_get_framebuffer
+
+```c
+uint8_t *dvi_get_framebuffer(void);
+```
+
+Return a pointer to the 320x240 RGB332 framebuffer (75 KB in main SRAM).
+
+### dvi_text_set_font
+
+```c
+void dvi_text_set_font(const dvi_font_t *font);
+```
+
+Set the half-width font for text mode rendering. Caches all glyph rows
+into the SRAM narrow row cache. Must be called before `dvi_start_mode()`.
+
+### dvi_text_set_bold_font
+
+```c
+void dvi_text_set_bold_font(const dvi_font_t *font);
+```
+
+Set the bold half-width font. Cached into the upper half of the narrow
+row cache (indices 256-511).
+
+### dvi_text_set_wide_font
+
+```c
+void dvi_text_set_wide_font(const dvi_font_t *font);
+```
+
+Set the full-width (CJK) font. Glyphs are cached on demand into the wide
+row cache by `dvi_text_put_wide_char()`.
+
+### dvi_text_set_palette
+
+```c
+void dvi_text_set_palette(const uint8_t palette[16]);
+```
+
+Set all 16 text palette entries at once. Each entry is an RGB332 color.
+
+### dvi_text_put_char
+
+```c
+void dvi_text_put_char(int col, int row, char ch, uint8_t attr);
+```
+
+Place a half-width character at the given grid position.
+
+### dvi_text_put_string
+
+```c
+void dvi_text_put_string(int col, int row, const char *str, uint8_t attr);
+```
+
+Write a UTF-8 string starting at the given position. Handles both
+half-width and full-width characters.
+
+### dvi_text_put_wide_char
+
+```c
+void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr);
+```
+
+Place a full-width character (linear JIS index) at the given position.
+Occupies two columns. Populates the wide glyph cache from flash if the
+glyph is not already cached.
+
+### dvi_text_clear
+
+```c
+void dvi_text_clear(uint8_t attr);
+```
+
+Clear the entire text VRAM with spaces and the given attribute.
+
+## Hardware Configuration
+
+### Pin Assignment
+
+DVI output uses HSTX on GPIO 12-19, directly driving a DVI connector
+without an external encoder IC. Pin definitions are in
+[harucom_board.h](../include/boards/harucom_board.h).
+
+| Constant | Pin | Function |
+|----------|-----|----------|
+| `HARUCOM_DVI_CLK_N_PIN` | GPIO 12 | TMDS clock - |
+| `HARUCOM_DVI_CLK_P_PIN` | GPIO 13 | TMDS clock + |
+| `HARUCOM_DVI_D0_N_PIN` | GPIO 14 | Lane 0 - (blue + sync) |
+| `HARUCOM_DVI_D0_P_PIN` | GPIO 15 | Lane 0 + |
+| `HARUCOM_DVI_D1_N_PIN` | GPIO 16 | Lane 1 - (green) |
+| `HARUCOM_DVI_D1_P_PIN` | GPIO 17 | Lane 1 + |
+| `HARUCOM_DVI_D2_N_PIN` | GPIO 18 | Lane 2 - (red) |
+| `HARUCOM_DVI_D2_P_PIN` | GPIO 19 | Lane 2 + |
+| `HARUCOM_DVI_HPD_PIN` | GPIO 11 | Hot plug detect |
+
+### TMDS Lane Mapping
+
+HSTX encodes RGB332 pixels into TMDS using the following configuration:
+
+| Lane | Channel | NBITS | ROT |
+|------|---------|-------|-----|
+| 0 | Blue | 1 | 26 |
+| 1 | Green | 2 | 29 |
+| 2 | Red | 2 | 0 |
+
+### RGB332 Color Encoding
+
+Both display modes use RGB332 pixel format (1 byte per pixel).
+
+| Bits | Channel | Values |
+|------|---------|--------|
+| 7-5 | Red | 0-7 |
+| 4-2 | Green | 0-7 |
+| 1-0 | Blue | 0-3 |
+
+### Video Timing
+
+640x480 @ 60 Hz (VGA DMT). The pixel clock is 25.0 MHz (-0.7% from
+25.175 MHz standard), within typical display tolerance.
 
 | Parameter | Pixels/Lines |
-|---|---|
+|-----------|--------------|
 | H active | 640 |
 | H front porch | 16 |
 | H sync width | 96 |
@@ -30,61 +309,13 @@ The output resolution is 640x480 @ 60 Hz (VGA DMT). The pixel clock is
 
 Sync polarity is negative for both HSYNC and VSYNC (0 = asserted).
 
-### Display modes
+### Clock Configuration
 
-Two display modes are supported, selected at initialization via
-`dvi_start_mode()`:
-
-**Pixel mode** (`DVI_MODE_PIXEL`): 320x240 RGB332 framebuffer (75 KB) in
-main SRAM. HSTX performs 2x horizontal scaling via DMA_SIZE_8 byte-lane
-replication (`ENC_N_SHIFTS=2`). Vertical 2x by line doubling in the DMA
-IRQ handler.
-
-**Text mode** (`DVI_MODE_TEXT`): text VRAM (106 columns x 37 rows) rendered
-per-scanline at native 640x480 resolution. DMA uses DMA_SIZE_32 with
-`ENC_N_SHIFTS=4` for 4 unique pixels per FIFO word. See [Text mode
-rendering](#text-mode-rendering) below.
-
-### RGB332 color encoding
-
-Both modes use RGB332 pixel format (1 byte per pixel).
-
-| Bits | Channel | Values |
-|---|---|---|
-| 7-5 | Red | 0-7 |
-| 4-2 | Green | 0-7 |
-| 1-0 | Blue | 0-3 |
-
-HSTX TMDS lane mapping (configured in `expand_tmds`):
-
-| Lane | Channel | NBITS | ROT |
-|---|---|---|---|
-| 0 | Blue | 1 | 26 |
-| 1 | Green | 2 | 29 |
-| 2 | Red | 2 | 0 |
-
-### GPIO pinout
-
-```
-GP12 CK-   GP13 CK+   (TMDS clock, differential)
-GP14 D0-   GP15 D0+   (Lane 0: blue + sync)
-GP16 D1-   GP17 D1+   (Lane 1: green)
-GP18 D2-   GP19 D2+   (Lane 2: red)
-```
-
-## System clock: 250 MHz
-
-Text mode rendering requires sys_clk > clk_hstx. At a 1:1 ratio, DMA and
-CPU compete for main SRAM bus bandwidth every cycle, inflating render time
-beyond the scanline budget. A 2:1 ratio (250 MHz sys_clk, 125 MHz clk_hstx)
-combined with render loop optimizations (font_byte_mask table in SCRATCH_Y,
-uniform-attribute fast path) keeps the render within the blanking budget.
-See [stability analysis](#stability-analysis) below.
-
-### HSTX serialization
+Text mode rendering requires sys_clk > clk_hstx to reduce main SRAM bus
+contention between DMA and CPU. A 2:1 ratio gives sufficient headroom.
 
 | Parameter | Value |
-|---|---|
+|-----------|-------|
 | clk_sys | 250 MHz |
 | clk_hstx | 125 MHz (clk_sys / 2) |
 | CLKDIV | 5 |
@@ -92,7 +323,7 @@ See [stability analysis](#stability-analysis) below.
 | SHIFT | 2 bits |
 | Pixel clock | 125 / 5 = 25.0 MHz |
 
-### PLL configuration
+PLL configuration:
 
 ```
 VCO     = 12 MHz x 125 = 1500 MHz
@@ -100,12 +331,27 @@ sys_clk = 1500 / 6 / 1 = 250 MHz
 VREG    = 1.15 V
 ```
 
-### Peripheral clocks
-
 Changing clk_sys does not affect clk_usb or clk_peri (both sourced from
 PLL_USB at 48 MHz). UART baud rates remain correct.
 
-## Core assignment
+## Architecture
+
+### Display Modes
+
+Two display modes are supported, selected via `dvi_set_mode()`:
+
+**Graphics mode** (`DVI_MODE_GRAPHICS`): 320x240 RGB332 framebuffer (75 KB)
+in main SRAM. HSTX performs 2x horizontal scaling via DMA_SIZE_8 byte-lane
+replication (`ENC_N_SHIFTS=2`). Vertical 2x by line doubling in the DMA
+IRQ handler.
+
+**Text mode** (`DVI_MODE_TEXT`): text VRAM (106 columns x 37 rows) rendered
+per-scanline at native 640x480 resolution. DMA uses DMA_SIZE_32 with
+`ENC_N_SHIFTS=4` for 4 unique pixels per FIFO word. See
+[dvi/text-mode-rendering.md](dvi/text-mode-rendering.md) for VRAM layout,
+font caching, wide glyph cache, and scanline renderer details.
+
+### Core Assignment
 
 ```
 Core 0: mruby VM, stdio, timers (default alarm pool)
@@ -122,9 +368,9 @@ Core 0:
 
 | IRQ | Source | Priority | Purpose |
 |---|---|---|---|
-| 3 | TIMER0_IRQ_3 | 0x80 | Default alarm pool (sleep_ms, mruby tasks) |
-| 14 | USBCTRL_IRQ | 0x80 | USB device controller |
-| 51 | User IRQ | 0x80 | USB CDC low-priority worker |
+| TIMER0_IRQ_2 | Timer | 0x00 | PIO-USB SOF timer |
+| TIMER0_IRQ_0 | Timer | 0x20 | mruby task scheduler tick |
+| TIMER0_IRQ_3 | Timer | 0x80 | Default alarm pool (sleep_ms) |
 
 Core 1:
 
@@ -141,7 +387,7 @@ that wakes WFE on any core:
 - DMA IRQ handler (core 1): issues `SEV` after incrementing `frame_count`
 - `dvi_wait_vsync()` (any core): uses `WFE` to sleep until the event
 
-## DMA architecture
+### DMA Architecture
 
 Two-channel CMD-to-DATA DMA with double-buffered descriptor buffers.
 
@@ -156,86 +402,7 @@ Blanking lines remain single (45 IRQs per frame).  See
 [doc/dvi/batch-rendering.md](dvi/batch-rendering.md) for descriptor
 layout, line buffer design, and measured performance.
 
-## Text mode rendering
-
-### Text VRAM
-
-106 columns x 37 rows of 4-byte cells:
-
-```c
-typedef struct {
-    uint16_t ch;   // character code (ASCII or linear JIS index)
-    uint8_t attr;  // bits 7-4: fg palette index, bits 3-0: bg palette index
-    uint8_t flags; // DVI_CELL_FLAG_WIDE_L, _WIDE_R, _BOLD
-} dvi_text_cell_t;
-```
-
-16-color palette maps 4-bit indices to RGB332 values (VGA-compatible
-defaults).
-
-### Font: 12px M+
-
-- Half-width: 6px wide, 13px tall. Cached in a 512-stride SRAM row cache
-  (6656 bytes). Regular glyphs at index 0-255, bold at 256-511. Zero flash
-  access during rendering.
-- Full-width: 12px wide, 13px tall. Source data is interleaved regular+bold
-  in flash XIP (52-byte stride per glyph pair). Rendered from an SRAM wide
-  glyph cache to avoid QMI bus contention (see below).
-
-### Wide glyph cache
-
-Full-width font bitmaps cannot be read from flash XIP during rendering
-because the QMI bus is shared with PSRAM. The wide glyph cache copies
-needed glyph rows into SRAM on Core 0 at character-write time, so Core 1
-never touches flash.
-
-- 512 cache slots, row-major layout: `wide_row_cache[glyph_y * stride + slot]`
-- Regular glyphs at slots 0-511, bold at 512-1023 (26 KB total)
-- 1024-entry hash table maps linear JIS index to cache slot (open addressing,
-  linear probing)
-- Populated by `dvi_text_put_wide_char()` on Core 0
-- On overflow, the cache scans VRAM and re-maps slots in-place
-
-Bold characters store `slot + WIDE_CACHE_SLOTS` in `cell.ch` at write time
-so the render loop indexes directly into the bold region without a runtime
-branch.
-
-### Scanline renderer
-
-The renderer converts one row of text VRAM into 640 RGB332 bytes using
-inline ARM Thumb-2 assembly. Branchless pixel selection via font-byte-mask
-LUT:
-
-```
-pixel = bg4 ^ (xor4 & font_byte_mask[byte][0..1])
-```
-
-`font_byte_mask[256][2]` (2 KB) resides in SCRATCH_Y (SRAM9, separate bus
-port from Main SRAM) to eliminate DMA bus contention during rendering.
-
-Four render paths selected by `row_has_wide[]` and `row_uniform_attr[]`:
-
-| Path | Dispatch condition | Per-cell cost | Typical cycles |
-|---|---|---|---|
-| Uniform-attr narrow-only | no wide, uniform attr | ~12 cycles (2-cell pair) | ~1,763 |
-| Mixed-attr narrow-only | no wide, mixed attrs | ~21 cycles (2-cell pair) | ~2,050 |
-| Uniform-attr mixed | has wide, uniform attr | ~20 narrow / ~25 wide | ~2,080 |
-| Non-uniform-attr mixed | has wide, mixed attrs | ~23 narrow / ~28 wide | ~2,200 |
-
-Cycle counts are per-line render time.
-
-Key render-loop optimizations:
-
-- **Load-latency interleaving**: next nibble address computed during the
-  2-cycle ldr bubble to hide pipeline stalls in the wide sub-path.
-- **Set-time pre-computation**: bold slot offset and per-row uniform-attr
-  flags are computed on Core 0 at character-write time, not at render time
-  on Core 1.
-
-The render function and IRQ handler are placed in SCRATCH_X to avoid
-flash instruction fetch during rendering.
-
-## Memory layout
+### Memory Layout
 
 | Region | Size | Contents |
 |---|---|---|
@@ -245,7 +412,7 @@ flash instruction fetch during rendering.
 | SCRATCH_Y | 4 KB | font_byte_mask (2 KB) + pico-sdk default stack (2 KB, unused after BSS stack switch) |
 | PSRAM (QMI CS1) | 8 MB | mruby heap |
 
-### Main SRAM bank-offset technique
+#### Main SRAM bank-offset technique
 
 Main SRAM has 8 banks striped at 4-byte boundaries. Two buffers at offset N
 share the same bank when N % 32 = 0.
@@ -256,85 +423,30 @@ consecutive buffers is 161, so buf[i] maps to SRAM bank (161*i % 8).  With
 {0,1,2,3,4,5,6,7}, giving zero bank collisions between any pair of
 simultaneously-active buffers.
 
-## Stability analysis
+### Stability Analysis
 
-### QMI bus contention
+DVI output stability depends on avoiding bus contention and ensuring
+Core 1 never accesses flash during flash write operations. See
+[dvi/stability.md](dvi/stability.md) for QMI bus contention, Main SRAM
+bus contention, flash write safety mechanisms, and diagnostic
+instrumentation.
 
-The QMI bus is shared between flash (CS0) and PSRAM (CS1). The 16 KB XIP
-cache covers both chip selects. When the mruby VM alternates between flash
-code and PSRAM data, the XIP cache thrashes, generating heavy QMI traffic.
-
-The wide glyph cache keeps all render-time font reads in SRAM, so the
-render path has no flash access. Text mode is stable regardless of mruby
-VM activity.
-
-### Main SRAM bus contention
-
-At sys_clk = clk_hstx (1:1 ratio), DMA and CPU compete for main SRAM bus
-bandwidth on every cycle. The 2:1 ratio (250 MHz sys_clk, 125 MHz clk_hstx)
-reduces contention enough for the render to fit within the scanline budget.
-
-Measured per-line render cycles at 250 MHz:
-
-| Workload | Cycles |
-|----------|--------|
-| Narrow-only (uniform attr) | ~1,837 |
-| Mixed-attr spike | ~2,321 |
-
-The following techniques keep the per-line render time low:
-
-1. **font_byte_mask table in SCRATCH_Y**: maps font byte (0-255) to
-   pre-computed (mask_hi, mask_lo) pairs. A single ldrd from SRAM9
-   (separate bus port) avoids Main SRAM contention with DMA.
-   256 entries x 8 bytes = 2 KB.
-
-2. **Uniform-attribute fast path**: tracks per-row attribute uniformity via
-   `row_uniform_attr[]`. When all cells share the same attr, pre-computes
-   bg4/xor4 once and skips all per-cell ubfx+cmp+bne attr checks.
-
-3. **DMA trigger reordering**: the IRQ handler triggers the next
-   pre-prepared descriptor buffer immediately after acknowledgment, before
-   diagnostics.
-
-4. **SRAM wide glyph cache**: all full-width font reads come from SRAM,
-   avoiding flash XIP access entirely
-   (see [Wide glyph cache](#wide-glyph-cache)).
-
-5. **Set-time pre-computation**: bold slot offset stored in `cell.ch` at
-   write time, eliminating tst/it/addne (3 instructions per wide cell) from
-   the render loop.
-
-6. **Load-latency interleaving**: next nibble address computed during the
-   2-cycle ldr bubble in the wide sub-path.
-
-### Diagnostic instrumentation
-
-The driver includes counters readable via `dvi_output.h` (gated by
-`DVI_DIAGNOSTICS`):
-
-- `dvi_irq_max_cycles`: DWT cycle count for prepare_batch_dma
-- `dvi_render_max/min/last_cycles`: per-line render timing
-- `dvi_batch_render_max/last_cycles`: total batch render time (sum of
-  BATCH_SIZE line renders)
-- `dvi_irq_interval_min/max`: IRQ-to-IRQ interval in cycles
-- `dvi_fifo_empty_count`: HSTX FIFO empty events at IRQ entry
-- `dvi_fifo_empty_log[]`: scanline numbers of the last 8 empty events
-- `dvi_fifo_min_level`: minimum FIFO level per diagnostic interval
-- `dvi_read_bus_counters()`: SRAM9 contested/total access counts
-
-## Initialization order
+### Initialization Order
 
 ```c
 dvi_init_clock();           // 250 MHz, VREG 1.15V
-stdio_init_all();           // UART/USB CDC on core 0
+stdio_init_all();           // UART on core 0
 psram_init();               // PSRAM timing at 375 MHz
 dvi_text_set_font(...);     // configure fonts before DVI starts
-setup_text_demo();          // (optional) fill text VRAM
 
 multicore_launch_core1_with_stack(core1_dvi_entry, ...);
-// core1_dvi_entry: dvi_start_mode(DVI_MODE_TEXT), BASEPRI, WFI loop
+// core1_dvi_entry:
+//   dvi_start_mode(DVI_MODE_TEXT)   -- registers DMA IRQ handler
+//   copy vector table to SRAM       -- flash-independent interrupt dispatch
+//   BASEPRI = 0x20, WFI loop        -- runs from SRAM
 
-run_mruby();                // mruby VM on core 0
+usb_host_init();            // PIO-USB host on core 0
+run_mruby();                // mount filesystem, run Ruby scripts
 ```
 
 Font setup must happen before `dvi_start_mode()` because the scanline

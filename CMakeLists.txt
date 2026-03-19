@@ -118,6 +118,9 @@ add_executable(harucom_os
     src/main.c
     src/hal.c
     src/psram.c
+    src/flash_disk.c
+    src/platform.c
+    src/env.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
 )
@@ -144,6 +147,7 @@ target_compile_definitions(harucom_os PRIVATE
     MRB_TIMESLICE_TICK_COUNT=10
     MRB_USE_TASK_SCHEDULER=1
     NO_CLOCK_GETTIME=1
+    USE_FAT_FLASH_DISK=1
     NDEBUG=1
     BOARD_TUH_RHPORT=1
 )
@@ -152,6 +156,7 @@ target_compile_options(harucom_os PRIVATE -fshort-enums)
 
 target_include_directories(harucom_os PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
+    ${CMAKE_CURRENT_LIST_DIR}/include
     ${PICORUBY_ROOT}/include
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/include
@@ -161,6 +166,12 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-task/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-machine/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-require/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-env/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-time/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/lib/ff14b/source
+    ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/src/hal
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include
 )
