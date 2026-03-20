@@ -113,6 +113,18 @@ target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_dma)
 target_compile_options(picoruby-dvi PRIVATE -O2)
 target_compile_definitions(picoruby-dvi PRIVATE DVI_DIAGNOSTICS)
 
+# --- Ruby scripts (rootfs/ -> ruby_scripts.h) ---
+file(GLOB_RECURSE RUBY_SCRIPTS ${CMAKE_SOURCE_DIR}/rootfs/*.rb)
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/ruby_scripts.h
+    COMMAND ${Ruby_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_ruby_scripts.rb
+            ${CMAKE_SOURCE_DIR}/rootfs
+            ${CMAKE_BINARY_DIR}/ruby_scripts.h
+    DEPENDS ${RUBY_SCRIPTS} ${CMAKE_SOURCE_DIR}/scripts/gen_ruby_scripts.rb
+    COMMENT "Generating ruby_scripts.h from rootfs/"
+)
+add_custom_target(ruby_scripts_gen DEPENDS ${CMAKE_BINARY_DIR}/ruby_scripts.h)
+
 # --- Executable ---
 add_executable(harucom_os
     src/main.c
@@ -120,6 +132,7 @@ add_executable(harucom_os
     src/hal_machine.c
     src/psram.c
     src/flash_disk.c
+    src/init_rootfs.c
     src/platform.c
     src/env.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-rng/ports/rp2040/rng.c
@@ -129,7 +142,7 @@ add_executable(harucom_os
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
 )
 
-add_dependencies(harucom_os build_picoruby)
+add_dependencies(harucom_os build_picoruby ruby_scripts_gen)
 
 pico_set_program_name(harucom_os "harucom_os")
 pico_set_program_version(harucom_os "${HARUCOM_VERSION}")
@@ -161,6 +174,7 @@ target_compile_options(harucom_os PRIVATE -fshort-enums)
 target_include_directories(harucom_os PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
     ${CMAKE_CURRENT_LIST_DIR}/include
+    ${CMAKE_BINARY_DIR}
     ${PICORUBY_ROOT}/include
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/include
