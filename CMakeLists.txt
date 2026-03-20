@@ -122,6 +122,7 @@ add_executable(harucom_os
     src/flash_disk.c
     src/platform.c
     src/env.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-rng/ports/rp2040/rng.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/ports/rp2040/io-console.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
