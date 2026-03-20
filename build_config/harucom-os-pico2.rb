@@ -5,6 +5,7 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.cc.defines << "MRB_TICK_UNIT=1"
   conf.cc.defines << "MRB_TIMESLICE_TICK_COUNT=10"
 
+  conf.cc.defines << "MRB_UTF8_STRING"
   conf.cc.defines << "MRB_INT64"
   conf.cc.defines << "MRB_32BIT"
   conf.cc.defines << "PICORB_ALLOC_ESTALLOC"
@@ -46,6 +47,8 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.gem core: 'picoruby-gpio'
   conf.gem core: 'picoruby-env'
   conf.gem core: 'picoruby-io-console'
+  conf.gem core: 'picoruby-editor'
+  conf.gem core: 'picoruby-sandbox'
 
   conf.gem File.expand_path('../../mrbgems/picoruby-dvi', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-usb-host', __FILE__)
