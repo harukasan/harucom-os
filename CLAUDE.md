@@ -17,6 +17,11 @@ rake clean    # remove build/
 rake distclean # remove build/ and PicoRuby build
 ```
 
+**When changing `build_config/*.rb` (adding/removing gems, changing defines),
+you must run `rake distclean` before `rake`.** `rake clean` only removes the
+CMake build directory; it does not rebuild `libmruby.a`. The PicoRuby build
+cache is separate and only cleared by `distclean`.
+
 ## Documentation
 
 Design documents and implementation notes are in `doc/`:
@@ -27,6 +32,7 @@ Design documents and implementation notes are in `doc/`:
 - [doc/dvi/text-mode-rendering.md](doc/dvi/text-mode-rendering.md) — Text mode rendering (VRAM, font cache, scanline renderer)
 - [doc/dvi/stability.md](doc/dvi/stability.md) — DVI stability analysis (bus contention, flash write safety, diagnostics)
 - [doc/usb-host-keyboard.md](doc/usb-host-keyboard.md) — USB host keyboard (PIO-USB, HID, Ruby/C API)
+- [doc/keyboard-input.md](doc/keyboard-input.md) — Keyboard input (HID keycode conversion, key repeat, Ruby API)
 - [doc/filesystem.md](doc/filesystem.md) — FAT filesystem on flash (FatFs, VFS, flash write safety)
 
 ## Documentation style
