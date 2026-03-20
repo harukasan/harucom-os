@@ -116,12 +116,15 @@ target_compile_definitions(picoruby-dvi PRIVATE DVI_DIAGNOSTICS)
 # --- Executable ---
 add_executable(harucom_os
     src/main.c
-    src/hal.c
+    src/hal_task.c
+    src/hal_machine.c
     src/psram.c
     src/flash_disk.c
     src/platform.c
     src/env.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/ports/rp2040/io-console.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
 )
 
@@ -166,6 +169,8 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-task/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-machine/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-require/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-env/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-time/include
@@ -183,10 +188,13 @@ pico_enable_stdio_usb(harucom_os 0)
 target_link_libraries(harucom_os
     pico_stdlib
     pico_multicore
+    pico_unique_id
+    pico_aon_timer
     hardware_timer
     hardware_gpio
     hardware_flash
     hardware_sync
+    hardware_watchdog
     tinyusb_host
     tinyusb_pico_pio_usb
     mruby

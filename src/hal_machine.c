@@ -1,146 +1,35 @@
 /*
- * Minimal HAL implementation for PicoRuby on RP2350
+ * HAL for picoruby-machine
  *
- * Provides:
- *   - Task HAL (timer tick, IRQ control, idle, sleep)
- *   - I/O HAL (write, read stubs)
- *   - io-console stubs
+ * Implements the hal.h I/O interface and the Machine_* hardware control
+ * functions on RP2350.
+ *
+ * See lib/picoruby/mrbgems/picoruby-machine/README.md
  */
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "hardware/timer.h"
+#include "hardware/watchdog.h"
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
+#include "pico/unique_id.h"
+#include "pico/aon_timer.h"
 
-#include "picoruby.h"
-#include "task_hal.h"
+#include "machine.h"
 #include "ringbuffer.h"
+#include "io-console.h"
 
 /* Forward declarations */
 int hal_write(int fd, const void *buf, int nbytes);
-void hal_stdin_push(uint8_t ch);
-bool io_raw_q(void);
-bool io_echo_q(void);
 
-/*-------------------------------------
- *
- * Task HAL — Timer tick for mruby-task scheduler
- *
- *------------------------------------*/
-
-#define ALARM_NUM 0
-#define ALARM_IRQ timer_hardware_alarm_get_irq_num(timer_hw, ALARM_NUM)
-
-#ifndef MRB_TICK_UNIT
-#define MRB_TICK_UNIT 1
-#endif
-#define US_PER_MS (MRB_TICK_UNIT * 1000)
-
-static volatile uint32_t interrupt_nesting = 0;
-static volatile bool in_tick_processing = false;
-static mrb_state *mrb_;
-
-/*-------------------------------------
- *
- * stdin RingBuffer (following picoruby-machine pattern)
- *
- *------------------------------------*/
-
-#ifndef PICORUBY_STDIN_BUFFER_SIZE
-#define PICORUBY_STDIN_BUFFER_SIZE 256
-#endif
-
-static uint8_t stdin_buf_mem[sizeof(RingBuffer) + PICORUBY_STDIN_BUFFER_SIZE]
-  __attribute__((aligned(4)));
-static RingBuffer *stdin_rb = (RingBuffer *)stdin_buf_mem;
-
-static void
-alarm_handler(void)
-{
-  if (in_tick_processing) {
-    timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + US_PER_MS;
-    hw_clear_bits(&timer_hw->intr, 1u << ALARM_NUM);
-    return;
-  }
-
-  in_tick_processing = true;
-  __dmb();
-
-  uint32_t current_time = timer_hw->timerawl;
-  uint32_t next_time = current_time + US_PER_MS;
-  timer_hw->alarm[ALARM_NUM] = next_time;
-  hw_clear_bits(&timer_hw->intr, 1u << ALARM_NUM);
-
-  mrb_tick(mrb_);
-
-  __dmb();
-  in_tick_processing = false;
-}
-
-void
-mrb_hal_task_init(mrb_state *mrb)
-{
-  mrb_ = mrb;
-  RingBuffer_init(stdin_rb, PICORUBY_STDIN_BUFFER_SIZE);
-  hw_set_bits(&timer_hw->inte, 1u << ALARM_NUM);
-  irq_set_exclusive_handler(ALARM_IRQ, alarm_handler);
-  irq_set_enabled(ALARM_IRQ, true);
-  /* Priority 0x20: below PIO-USB SOF timer (0x00) so that USB transactions
-   * are not preempted by the mruby task scheduler tick. */
-  irq_set_priority(ALARM_IRQ, 0x20);
-  timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + US_PER_MS;
-}
-
-void
-mrb_hal_task_final(mrb_state *mrb)
-{
-  (void)mrb;
-}
-
-void
-mrb_task_enable_irq(void)
-{
-  if (interrupt_nesting == 0) {
-    return;
-  }
-  interrupt_nesting--;
-  if (interrupt_nesting > 0) {
-    return;
-  }
-  __dmb();
-  asm volatile ("cpsie i" : : : "memory");
-}
-
-void
-mrb_task_disable_irq(void)
-{
-  asm volatile ("cpsid i" : : : "memory");
-  __dmb();
-  interrupt_nesting++;
-}
-
-void
-mrb_hal_task_idle_cpu(mrb_state *mrb)
-{
-  (void)mrb;
-  asm volatile (
-    "wfe\n"
-    "nop\n"
-    "sev\n"
-    : : : "memory"
-  );
-}
-
-void
-mrb_hal_task_sleep_us(mrb_state *mrb, mrb_int usec)
-{
-  (void)mrb;
-  sleep_us((uint32_t)usec);
-}
+/* ===================================================================
+ * HAL I/O (hal.h)
+ * =================================================================== */
 
 /*-------------------------------------
  *
@@ -148,28 +37,42 @@ mrb_hal_task_sleep_us(mrb_state *mrb, mrb_int usec)
  *
  *------------------------------------*/
 
-#define SIG_NONE            0
-#define SIGINT_RECEIVED     1
-#define SIGTSTP_RECEIVED    2
-
-volatile int sigint_status = SIG_NONE;
+volatile int sigint_status = MACHINE_SIG_NONE;
 
 /*-------------------------------------
  *
- * io-console stubs
+ * stdin RingBuffer
  *
  *------------------------------------*/
 
-bool
-io_raw_q(void)
+#ifndef PICORB_STDIN_BUFFER_SIZE
+#define PICORB_STDIN_BUFFER_SIZE 256
+#endif
+
+static uint8_t stdin_buf_mem[sizeof(RingBuffer) + PICORB_STDIN_BUFFER_SIZE]
+  __attribute__((aligned(4)));
+static RingBuffer *stdin_rb = (RingBuffer *)stdin_buf_mem;
+
+void
+hal_stdin_init(void)
 {
-  return false;
+  RingBuffer_init(stdin_rb, PICORB_STDIN_BUFFER_SIZE);
 }
 
-bool
-io_echo_q(void)
+void
+hal_stdin_push(uint8_t ch)
 {
-  return false;
+  if (!io_raw_q()) {
+    if (ch == 3) {
+      sigint_status = MACHINE_SIGINT_RECEIVED;
+      return;
+    }
+    if (ch == 26) {
+      sigint_status = MACHINE_SIGTSTP_RECEIVED;
+      return;
+    }
+  }
+  RingBuffer_push(stdin_rb, ch);
 }
 
 /*-------------------------------------
@@ -178,11 +81,11 @@ io_echo_q(void)
  *
  *------------------------------------*/
 
-#ifndef PICORUBY_CANONICAL_BUF_SIZE
-#define PICORUBY_CANONICAL_BUF_SIZE 256
+#ifndef PICORB_CANONICAL_BUF_SIZE
+#define PICORB_CANONICAL_BUF_SIZE 256
 #endif
 
-static uint8_t canon_buf[PICORUBY_CANONICAL_BUF_SIZE];
+static uint8_t canon_buf[PICORB_CANONICAL_BUF_SIZE];
 static int canon_len = 0;
 static int canon_read_pos = 0;
 static bool canon_eof = false;
@@ -204,7 +107,7 @@ canon_process_char(uint8_t raw)
     return CANON_ACCUMULATING;
   }
   if (raw == '\n' || raw == '\r') {
-    if (canon_len < PICORUBY_CANONICAL_BUF_SIZE) {
+    if (canon_len < PICORB_CANONICAL_BUF_SIZE) {
       canon_buf[canon_len++] = raw;
     }
     if (io_echo_q()) {
@@ -224,7 +127,7 @@ canon_process_char(uint8_t raw)
   if (raw == 27) {
     return CANON_ACCUMULATING;
   }
-  if (canon_len < PICORUBY_CANONICAL_BUF_SIZE) {
+  if (canon_len < PICORB_CANONICAL_BUF_SIZE) {
     canon_buf[canon_len++] = raw;
     if (io_echo_q()) {
       hal_write(1, &raw, 1);
@@ -270,33 +173,17 @@ hal_flush(int fd)
   return 0;
 }
 
-void
-hal_stdin_push(uint8_t ch)
-{
-  if (!io_raw_q()) {
-    if (ch == 3) {
-      sigint_status = SIGINT_RECEIVED;
-      return;
-    }
-    if (ch == 26) {
-      sigint_status = SIGTSTP_RECEIVED;
-      return;
-    }
-  }
-  RingBuffer_push(stdin_rb, ch);
-}
-
 int
 hal_getchar(void)
 {
   poll_stdio_to_ringbuffer();
 
-  if (sigint_status == SIGINT_RECEIVED) {
-    sigint_status = SIG_NONE;
+  if (sigint_status == MACHINE_SIGINT_RECEIVED) {
+    sigint_status = MACHINE_SIG_NONE;
     return 3;
   }
-  if (sigint_status == SIGTSTP_RECEIVED) {
-    sigint_status = SIG_NONE;
+  if (sigint_status == MACHINE_SIGTSTP_RECEIVED) {
+    sigint_status = MACHINE_SIG_NONE;
     return 26;
   }
 
@@ -369,16 +256,139 @@ hal_abort(const char *s)
   }
 }
 
+/* ===================================================================
+ * Machine_* functions (machine.h)
+ * =================================================================== */
+
 /*-------------------------------------
  *
- * Read-only data check (for MRB_USE_CUSTOM_RO_DATA_P)
+ * USB Device (stubs)
  *
  *------------------------------------*/
 
-extern char __etext;
+void
+Machine_tud_task(void)
+{
+}
 
 bool
-mrb_ro_data_p(const char *p)
+Machine_tud_mounted_q(void)
 {
-  return p < &__etext;
+  return false;
+}
+
+/*-------------------------------------
+ *
+ * Timing
+ *
+ *------------------------------------*/
+
+void
+Machine_delay_ms(uint32_t ms)
+{
+  sleep_ms(ms);
+}
+
+void
+Machine_busy_wait_ms(uint32_t ms)
+{
+  busy_wait_us_32(1000 * ms);
+}
+
+void
+Machine_busy_wait_us(uint32_t us)
+{
+  busy_wait_us_32(us);
+}
+
+uint64_t
+Machine_uptime_us(void)
+{
+  return time_us_64();
+}
+
+void
+Machine_uptime_formatted(char *buf, int maxlen)
+{
+  uint64_t us = Machine_uptime_us();
+  uint32_t sec = us / 1000000;
+  uint32_t min = sec / 60;
+  uint32_t hour = min / 60;
+  uint32_t day = hour / 24;
+  snprintf(buf, maxlen, "%ud %02u:%02u:%02u.%02u",
+           (unsigned)day, (unsigned)(hour % 24), (unsigned)(min % 60),
+           (unsigned)(sec % 60), (unsigned)((us % 1000000) / 10000));
+}
+
+/*-------------------------------------
+ *
+ * System
+ *
+ *------------------------------------*/
+
+bool
+Machine_get_unique_id(char *id_str)
+{
+  pico_get_unique_board_id_string(id_str,
+      PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1);
+  return true;
+}
+
+uint32_t
+Machine_stack_usage(void)
+{
+  return 0;
+}
+
+void
+Machine_exit(int status)
+{
+  (void)status;
+}
+
+void
+Machine_reboot(void)
+{
+  watchdog_reboot(0, 0, 0);
+}
+
+/*-------------------------------------
+ *
+ * Sleep
+ *
+ *------------------------------------*/
+
+void
+Machine_sleep(uint32_t seconds)
+{
+  sleep_ms(seconds * 1000);
+}
+
+void
+Machine_deep_sleep(uint8_t gpio_pin, bool edge, bool high)
+{
+  (void)gpio_pin;
+  (void)edge;
+  (void)high;
+}
+
+/*-------------------------------------
+ *
+ * Hardware clock (AON timer)
+ *
+ *------------------------------------*/
+
+bool
+Machine_set_hwclock(const struct timespec *ts)
+{
+  if (aon_timer_is_running()) {
+    return aon_timer_set_time(ts);
+  }
+  return aon_timer_start(ts);
+}
+
+bool
+Machine_get_hwclock(struct timespec *ts)
+{
+  return aon_timer_get_time(ts);
 }
