@@ -135,6 +135,87 @@ mrb_dvi_text_put_char(mrb_state *mrb, mrb_value klass)
   return mrb_nil_value();
 }
 
+/*
+ * DVI::Text.commit
+ */
+static mrb_value
+mrb_dvi_text_commit(mrb_state *mrb, mrb_value klass)
+{
+  dvi_text_commit();
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Text.scroll_up(lines, attr)
+ */
+static mrb_value
+mrb_dvi_text_scroll_up(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int lines, attr;
+  mrb_get_args(mrb, "ii", &lines, &attr);
+  dvi_text_scroll_up(lines, (uint8_t)attr);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Text.scroll_down(lines, attr)
+ */
+static mrb_value
+mrb_dvi_text_scroll_down(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int lines, attr;
+  mrb_get_args(mrb, "ii", &lines, &attr);
+  dvi_text_scroll_down(lines, (uint8_t)attr);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Text.clear_range(col, row, width, attr)
+ */
+static mrb_value
+mrb_dvi_text_clear_range(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int col, row, width, attr;
+  mrb_get_args(mrb, "iiii", &col, &row, &width, &attr);
+  dvi_text_clear_range(col, row, width, (uint8_t)attr);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Text.clear_line(row, attr)
+ */
+static mrb_value
+mrb_dvi_text_clear_line(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int row, attr;
+  mrb_get_args(mrb, "ii", &row, &attr);
+  dvi_text_clear_line(row, (uint8_t)attr);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Text.get_attr(col, row) -> Integer
+ */
+static mrb_value
+mrb_dvi_text_get_attr(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int col, row;
+  mrb_get_args(mrb, "ii", &col, &row);
+  return mrb_fixnum_value(dvi_text_get_attr(col, row));
+}
+
+/*
+ * DVI::Text.set_attr(col, row, attr)
+ */
+static mrb_value
+mrb_dvi_text_set_attr(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int col, row, attr;
+  mrb_get_args(mrb, "iii", &col, &row, &attr);
+  dvi_text_set_attr(col, row, (uint8_t)attr);
+  return mrb_nil_value();
+}
+
 void
 mrb_picoruby_dvi_gem_init(mrb_state *mrb)
 {
@@ -167,6 +248,20 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_text_put_string, MRB_ARGS_REQ(4));
   mrb_define_class_method_id(mrb, class_Text, MRB_SYM(clear),
                              mrb_dvi_text_clear, MRB_ARGS_REQ(1));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(commit),
+                             mrb_dvi_text_commit, MRB_ARGS_NONE());
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(scroll_up),
+                             mrb_dvi_text_scroll_up, MRB_ARGS_REQ(2));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(scroll_down),
+                             mrb_dvi_text_scroll_down, MRB_ARGS_REQ(2));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(clear_range),
+                             mrb_dvi_text_clear_range, MRB_ARGS_REQ(4));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(clear_line),
+                             mrb_dvi_text_clear_line, MRB_ARGS_REQ(2));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(get_attr),
+                             mrb_dvi_text_get_attr, MRB_ARGS_REQ(2));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(set_attr),
+                             mrb_dvi_text_set_attr, MRB_ARGS_REQ(3));
 
   // DVI::Graphics
   struct RClass *class_Graphics =

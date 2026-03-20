@@ -193,7 +193,12 @@ static uint8_t framebuf[DVI_GRAPHICS_WIDTH * DVI_GRAPHICS_HEIGHT];
 // ----------------------------------------------------------------------------
 // Text mode data
 
-static dvi_text_cell_t text_vram[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
+// Double-buffered text VRAM: Core 0 writes to write_vram (back buffer),
+// Core 1 reads from render_vram (front buffer). Pointer swap at VBlank.
+static dvi_text_cell_t text_vram_a[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
+static dvi_text_cell_t text_vram_b[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
+static dvi_text_cell_t *write_vram = text_vram_a;
+static dvi_text_cell_t * volatile render_vram = text_vram_a;
 static int text_cols = DVI_TEXT_MAX_COLS;
 static int text_rows = DVI_TEXT_MAX_ROWS;
 
@@ -228,8 +233,11 @@ static uint8_t text_palette[16];
 #define NARROW_CACHE_STRIDE 512
 static uint8_t narrow_row_cache[TEXT_GLYPH_HEIGHT_12WIDE * NARROW_CACHE_STRIDE];
 
-// Per-row wide character flag for narrow-only / mixed path dispatch.
-static uint8_t row_has_wide[DVI_TEXT_MAX_ROWS];
+// Per-row wide character flag for narrow-only / mixed path dispatch (double-buffered).
+static uint8_t row_has_wide_a[DVI_TEXT_MAX_ROWS];
+static uint8_t row_has_wide_b[DVI_TEXT_MAX_ROWS];
+static uint8_t *write_row_has_wide = row_has_wide_a;
+static uint8_t * volatile render_row_has_wide = row_has_wide_a;
 
 // Wide glyph row cache in SRAM (eliminates flash XIP access during rendering).
 // Row-major layout: wide_row_cache[glyph_y * WIDE_CACHE_STRIDE + slot].
@@ -249,9 +257,14 @@ static uint16_t wide_cache_next_slot;
 // Reverse mapping: cache slot -> linear JIS index (for cache rebuild).
 static uint16_t wide_cache_jis[WIDE_CACHE_SLOTS];
 
-// Per-row uniform attribute: the common attr byte, or 0xFF if mixed.
-// Enables skipping per-cell attr checks in the render loop.
-static uint8_t row_uniform_attr[DVI_TEXT_MAX_ROWS];
+// Per-row uniform attribute: the common attr byte, or 0xFF if mixed (double-buffered).
+static uint8_t row_uniform_attr_a[DVI_TEXT_MAX_ROWS];
+static uint8_t row_uniform_attr_b[DVI_TEXT_MAX_ROWS];
+static uint8_t *write_row_uniform_attr = row_uniform_attr_a;
+static uint8_t * volatile render_row_uniform_attr = row_uniform_attr_a;
+
+// Pending buffer swap request from Core 0, processed at VBlank by Core 1.
+static volatile bool swap_pending = false;
 
 // Pre-expanded palette: RGB332 byte replicated to all 4 lanes.
 static uint32_t text_palette32[16];
@@ -356,7 +369,7 @@ static uint16_t wide_cache_insert(uint16_t linear_jis) {
     // Scan VRAM, collect unique JIS indices from old slots
     int total = text_rows * text_cols;
     for (int i = 0; i < total; i++) {
-      dvi_text_cell_t *c = &text_vram[i];
+      dvi_text_cell_t *c = &write_vram[i];
       if (!(c->flags & DVI_CELL_FLAG_WIDE_L))
         continue;
       uint16_t old_slot = c->ch;
@@ -418,7 +431,7 @@ static void __scratch_x("")
   int glyph_y = scanline % TEXT_GLYPH_HEIGHT_12WIDE;
 
   const uint32_t *cell =
-      (const uint32_t *)&text_vram[text_row * TEXT_12WIDE_COLS];
+      (const uint32_t *)&render_vram[text_row * TEXT_12WIDE_COLS];
   const uint32_t *end = cell + TEXT_12WIDE_COLS;
   uint8_t *out_end = out + MODE_H_ACTIVE_PIXELS;
 
@@ -433,8 +446,8 @@ static void __scratch_x("")
   uint32_t bg4 = 0, xor4 = 0;
   uint32_t t1, t2;
 
-  if (!row_has_wide[text_row]) {
-    uint8_t uattr = row_uniform_attr[text_row];
+  if (!render_row_has_wide[text_row]) {
+    uint8_t uattr = render_row_uniform_attr[text_row];
     if (uattr != 0xFF) {
       // UNIFORM-ATTR + EXPANDED NIBBLE FAST PATH
       // All cells share the same attr: pre-compute bg/xor once, skip
@@ -574,7 +587,7 @@ static void __scratch_x("")
     const uint16_t *wcache = wide_row_cache + glyph_y * WIDE_CACHE_STRIDE;
     const uint32_t *exp = (const uint32_t *)font_byte_mask;
 
-    uint8_t uattr = row_uniform_attr[text_row];
+    uint8_t uattr = render_row_uniform_attr[text_row];
     if (uattr != 0xFF) {
       // UNIFORM-ATTR MIXED PATH: all cells share the same attr.
       // Pre-compute bg4/xor4 once, skip per-cell attr extraction.
@@ -948,6 +961,13 @@ void __scratch_x("") dma_irq_handler(void) {
   // blanking interval (~360K cycles) for pre-render work.
   if (cur_line == MODE_V_ACTIVE_LINES) {
     frame_count++;
+    // Swap text VRAM double-buffer pointers if Core 0 requested it.
+    if (swap_pending) {
+      render_vram = write_vram;
+      render_row_has_wide = write_row_has_wide;
+      render_row_uniform_attr = write_row_uniform_attr;
+      swap_pending = false;
+    }
     __asm volatile("sev"); // wake Core 0 WFE
   }
 
@@ -1083,11 +1103,22 @@ void dvi_start_mode(dvi_mode_t mode) {
   init_font_byte_mask();
   wide_cache_reset();
 
-  // Initialize text mode state
+  // Initialize text mode state (both VRAM buffers)
   memcpy(text_palette, default_palette, sizeof(default_palette));
   update_palette32();
-  memset(text_vram, 0, sizeof(text_vram));
-  memset(row_uniform_attr, 0, sizeof(row_uniform_attr));
+  memset(text_vram_a, 0, sizeof(text_vram_a));
+  memset(text_vram_b, 0, sizeof(text_vram_b));
+  memset(row_has_wide_a, 0, sizeof(row_has_wide_a));
+  memset(row_has_wide_b, 0, sizeof(row_has_wide_b));
+  memset(row_uniform_attr_a, 0, sizeof(row_uniform_attr_a));
+  memset(row_uniform_attr_b, 0, sizeof(row_uniform_attr_b));
+  write_vram = text_vram_a;
+  render_vram = text_vram_a;
+  write_row_has_wide = row_has_wide_a;
+  render_row_has_wide = row_has_wide_a;
+  write_row_uniform_attr = row_uniform_attr_a;
+  render_row_uniform_attr = row_uniform_attr_a;
+  swap_pending = false;
   memset(line_buf, 0, sizeof(line_buf));
   line_buf_next = 0;
 
@@ -1159,7 +1190,7 @@ void dvi_wait_vsync(void) {
 // ----------------------------------------------------------------------------
 // Text mode API
 
-dvi_text_cell_t *dvi_get_text_vram(void) { return text_vram; }
+dvi_text_cell_t *dvi_get_text_vram(void) { return write_vram; }
 
 int dvi_text_get_cols(void) { return text_cols; }
 
@@ -1220,23 +1251,23 @@ void dvi_text_set_palette(const uint8_t palette[16]) {
 void dvi_text_put_char(int col, int row, char ch, uint8_t attr) {
   if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
     return;
-  dvi_text_cell_t *c = &text_vram[row * text_cols + col];
+  dvi_text_cell_t *c = &write_vram[row * text_cols + col];
   c->ch = (uint8_t)ch;
   c->attr = attr;
   c->flags = 0;
-  if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
-    row_uniform_attr[row] = 0xFF;
+  if (write_row_uniform_attr[row] != 0xFF && write_row_uniform_attr[row] != attr)
+    write_row_uniform_attr[row] = 0xFF;
 }
 
 void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
   if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
     return;
-  dvi_text_cell_t *c = &text_vram[row * text_cols + col];
+  dvi_text_cell_t *c = &write_vram[row * text_cols + col];
   c->ch = (uint8_t)ch | 0x100; // bit 8 = bold indicator for 512-stride cache
   c->attr = attr;
   c->flags = DVI_CELL_FLAG_BOLD;
-  if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
-    row_uniform_attr[row] = 0xFF;
+  if (write_row_uniform_attr[row] != 0xFF && write_row_uniform_attr[row] != attr)
+    write_row_uniform_attr[row] = 0xFF;
 }
 
 void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
@@ -1246,17 +1277,17 @@ void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
   uint16_t slot = wide_cache_lookup(ch);
   if (slot == WIDE_HASH_EMPTY)
     slot = wide_cache_insert(ch);
-  dvi_text_cell_t *left = &text_vram[row * text_cols + col];
-  dvi_text_cell_t *right = &text_vram[row * text_cols + col + 1];
+  dvi_text_cell_t *left = &write_vram[row * text_cols + col];
+  dvi_text_cell_t *right = &write_vram[row * text_cols + col + 1];
   left->ch = slot; // cache slot, not JIS index
   left->attr = attr;
   left->flags = DVI_CELL_FLAG_WIDE_L;
   right->ch = 0;
   right->attr = attr;
   right->flags = DVI_CELL_FLAG_WIDE_R;
-  row_has_wide[row] = 1;
-  if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
-    row_uniform_attr[row] = 0xFF;
+  write_row_has_wide[row] = 1;
+  if (write_row_uniform_attr[row] != 0xFF && write_row_uniform_attr[row] != attr)
+    write_row_uniform_attr[row] = 0xFF;
 }
 
 void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
@@ -1266,8 +1297,8 @@ void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
   uint16_t slot = wide_cache_lookup(ch);
   if (slot == WIDE_HASH_EMPTY)
     slot = wide_cache_insert(ch);
-  dvi_text_cell_t *left = &text_vram[row * text_cols + col];
-  dvi_text_cell_t *right = &text_vram[row * text_cols + col + 1];
+  dvi_text_cell_t *left = &write_vram[row * text_cols + col];
+  dvi_text_cell_t *right = &write_vram[row * text_cols + col + 1];
   // Store bold-adjusted slot: render uses it directly without runtime bold
   // check.
   left->ch = slot + WIDE_CACHE_SLOTS;
@@ -1276,9 +1307,9 @@ void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
   right->ch = 0;
   right->attr = attr;
   right->flags = DVI_CELL_FLAG_WIDE_R | DVI_CELL_FLAG_BOLD;
-  row_has_wide[row] = 1;
-  if (row_uniform_attr[row] != 0xFF && row_uniform_attr[row] != attr)
-    row_uniform_attr[row] = 0xFF;
+  write_row_has_wide[row] = 1;
+  if (write_row_uniform_attr[row] != 0xFF && write_row_uniform_attr[row] != attr)
+    write_row_uniform_attr[row] = 0xFF;
 }
 
 // Decode one UTF-8 character from str, store codepoint in *cp.
@@ -1417,26 +1448,26 @@ void dvi_text_put_string_bold(int col, int row, const char *str, uint8_t attr) {
 
 void dvi_text_clear(uint8_t attr) {
   for (int i = 0; i < text_rows * text_cols; i++) {
-    text_vram[i].ch = ' ';
-    text_vram[i].attr = attr;
-    text_vram[i].flags = 0;
+    write_vram[i].ch = ' ';
+    write_vram[i].attr = attr;
+    write_vram[i].flags = 0;
   }
-  memset(row_has_wide, 0, sizeof(row_has_wide));
-  memset(row_uniform_attr, attr, text_rows);
+  memset(write_row_has_wide, 0, text_rows);
+  memset(write_row_uniform_attr, attr, text_rows);
   wide_cache_reset();
 }
 
 void dvi_text_clear_line(int row, uint8_t attr) {
   if (row < 0 || row >= text_rows)
     return;
-  dvi_text_cell_t *line = &text_vram[row * text_cols];
+  dvi_text_cell_t *line = &write_vram[row * text_cols];
   for (int i = 0; i < text_cols; i++) {
     line[i].ch = ' ';
     line[i].attr = attr;
     line[i].flags = 0;
   }
-  row_has_wide[row] = 0;
-  row_uniform_attr[row] = attr;
+  write_row_has_wide[row] = 0;
+  write_row_uniform_attr[row] = attr;
 }
 
 void dvi_text_set_palette_entry(int index, uint8_t color) {
@@ -1450,4 +1481,112 @@ uint8_t dvi_text_get_palette_entry(int index) {
   if (index < 0 || index >= 16)
     return 0;
   return text_palette[index];
+}
+
+// ----------------------------------------------------------------------------
+// Double-buffer commit
+
+void dvi_text_commit(void) {
+  swap_pending = true;
+  uint32_t last = frame_count;
+  while (frame_count == last) {
+    asm volatile("wfe" ::: "memory");
+  }
+  // Flip write buffer to the other array
+  if (write_vram == text_vram_a) {
+    write_vram = text_vram_b;
+    write_row_has_wide = row_has_wide_b;
+    write_row_uniform_attr = row_uniform_attr_b;
+  } else {
+    write_vram = text_vram_a;
+    write_row_has_wide = row_has_wide_a;
+    write_row_uniform_attr = row_uniform_attr_a;
+  }
+  // Copy front buffer state to new back buffer
+  memcpy(write_vram, render_vram,
+         text_rows * text_cols * sizeof(dvi_text_cell_t));
+  memcpy(write_row_has_wide, render_row_has_wide, text_rows);
+  memcpy(write_row_uniform_attr, render_row_uniform_attr, text_rows);
+}
+
+// ----------------------------------------------------------------------------
+// Extended text operations
+
+void dvi_text_scroll_up(int lines, uint8_t fill_attr) {
+  if (lines <= 0)
+    return;
+  if (lines >= text_rows) {
+    dvi_text_clear(fill_attr);
+    return;
+  }
+  int cols = text_cols;
+  int remaining = text_rows - lines;
+  memmove(&write_vram[0],
+          &write_vram[lines * cols],
+          remaining * cols * sizeof(dvi_text_cell_t));
+  memmove(&write_row_has_wide[0],
+          &write_row_has_wide[lines],
+          remaining);
+  memmove(&write_row_uniform_attr[0],
+          &write_row_uniform_attr[lines],
+          remaining);
+  for (int r = remaining; r < text_rows; r++)
+    dvi_text_clear_line(r, fill_attr);
+}
+
+void dvi_text_scroll_down(int lines, uint8_t fill_attr) {
+  if (lines <= 0)
+    return;
+  if (lines >= text_rows) {
+    dvi_text_clear(fill_attr);
+    return;
+  }
+  int cols = text_cols;
+  int remaining = text_rows - lines;
+  memmove(&write_vram[lines * cols],
+          &write_vram[0],
+          remaining * cols * sizeof(dvi_text_cell_t));
+  memmove(&write_row_has_wide[lines],
+          &write_row_has_wide[0],
+          remaining);
+  memmove(&write_row_uniform_attr[lines],
+          &write_row_uniform_attr[0],
+          remaining);
+  for (int r = 0; r < lines; r++)
+    dvi_text_clear_line(r, fill_attr);
+}
+
+void dvi_text_clear_range(int col, int row, int width, uint8_t attr) {
+  if (row < 0 || row >= text_rows)
+    return;
+  if (col < 0) {
+    width += col;
+    col = 0;
+  }
+  if (col + width > text_cols)
+    width = text_cols - col;
+  if (width <= 0)
+    return;
+  dvi_text_cell_t *line = &write_vram[row * text_cols + col];
+  for (int i = 0; i < width; i++) {
+    line[i].ch = ' ';
+    line[i].attr = attr;
+    line[i].flags = 0;
+  }
+  write_row_uniform_attr[row] = 0xFF;
+}
+
+uint8_t dvi_text_get_attr(int col, int row) {
+  if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
+    return 0;
+  return write_vram[row * text_cols + col].attr;
+}
+
+void dvi_text_set_attr(int col, int row, uint8_t attr) {
+  if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
+    return;
+  write_vram[row * text_cols + col].attr = attr;
+  if (write_row_uniform_attr[row] != 0xFF &&
+      write_row_uniform_attr[row] != attr)
+    write_row_uniform_attr[row] = 0xFF;
 }

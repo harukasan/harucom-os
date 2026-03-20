@@ -67,6 +67,17 @@ void dvi_text_put_string_bold(int col, int row, const char *str, uint8_t attr);
 void dvi_text_clear(uint8_t attr);
 void dvi_text_clear_line(int row, uint8_t attr);
 
+// Double-buffer commit: swap back/front buffers at VBlank, then copy
+// front buffer state to new back buffer. Blocks until VBlank.
+void dvi_text_commit(void);
+
+// Extended text operations
+void dvi_text_scroll_up(int lines, uint8_t fill_attr);
+void dvi_text_scroll_down(int lines, uint8_t fill_attr);
+void dvi_text_clear_range(int col, int row, int width, uint8_t attr);
+uint8_t dvi_text_get_attr(int col, int row);
+void dvi_text_set_attr(int col, int row, uint8_t attr);
+
 // Convert a JIS X 0208 code to a linear font index.
 static inline uint16_t dvi_jis_to_linear(uint16_t jis_code) {
     int ku = (jis_code >> 8) - 0x20;

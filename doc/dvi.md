@@ -24,9 +24,10 @@ Class: `DVI` (provided by picoruby-dvi mrbgem)
 
 ```ruby
 DVI.set_mode(DVI::TEXT_MODE)
+DVI::Text.clear(0x0F)
 loop do
   DVI::Text.put_string(0, 0, "Hello!", 0xF0)
-  DVI.wait_vsync
+  DVI::Text.commit
 end
 ```
 
@@ -52,10 +53,20 @@ Class: `DVI::Text` (provided by picoruby-dvi mrbgem)
 - [DVI::Text.put_char](#dvitextput_charcol-row-ch-attr)
 - [DVI::Text.put_string](#dvitextput_stringcol-row-str-attr)
 - [DVI::Text.clear](#dvitextclearattr)
+- [DVI::Text.clear_line](#dvitextclear_linerow-attr)
+- [DVI::Text.clear_range](#dvitextclear_rangecol-row-width-attr)
+- [DVI::Text.scroll_up](#dvitextscroll_uplines-attr)
+- [DVI::Text.scroll_down](#dvitextscroll_downlines-attr)
+- [DVI::Text.get_attr](#dvitextget_attrcol-row---integer)
+- [DVI::Text.set_attr](#dvitextset_attrcol-row-attr)
+- [DVI::Text.commit](#dvitextcommit)
 
-`DVI::Text` provides text mode rendering. Characters are placed on a
-106-column, 37-row grid. The `attr` byte encodes foreground (bits 7-4)
-and background (bits 3-0) palette indices.
+`DVI::Text` provides text mode rendering with double-buffered VRAM.
+Characters are placed on a 106-column, 37-row grid. The `attr` byte
+encodes foreground (bits 7-4) and background (bits 3-0) palette indices.
+
+All write operations modify the back buffer. Call `commit` to swap the
+back buffer to the front buffer at VBlank, preventing tearing.
 
 Constants: `DVI::Text::COLS` (106), `DVI::Text::ROWS` (37).
 
@@ -72,6 +83,46 @@ full-width (CJK) characters are supported.
 
 Clear the entire text VRAM, filling all cells with spaces and the given
 attribute.
+
+#### DVI::Text.clear_line(row, attr)
+
+Clear a single row, filling all cells with spaces and the given attribute.
+
+#### DVI::Text.clear_range(col, row, width, attr)
+
+Clear a partial range within a single row. Cells from `col` to
+`col + width - 1` are filled with spaces and the given attribute.
+
+#### DVI::Text.scroll_up(lines, attr)
+
+Scroll VRAM contents up by the specified number of lines. Bottom lines
+are cleared with the given attribute.
+
+#### DVI::Text.scroll_down(lines, attr)
+
+Scroll VRAM contents down by the specified number of lines. Top lines
+are cleared with the given attribute.
+
+#### DVI::Text.get_attr(col, row) -> Integer
+
+Read the attribute byte of the cell at the given position.
+
+#### DVI::Text.set_attr(col, row, attr)
+
+Write the attribute byte of the cell at the given position. Useful for
+cursor rendering via foreground/background inversion:
+
+```ruby
+attr = DVI::Text.get_attr(col, row)
+DVI::Text.set_attr(col, row, (attr & 0x0F) << 4 | (attr >> 4))
+```
+
+#### DVI::Text.commit
+
+Swap the back buffer to the front buffer at the next VBlank. Blocks
+until the swap completes, then copies the front buffer state to the new
+back buffer. All write operations between `commit` calls are
+accumulated in the back buffer and become visible atomically.
 
 ### DVI::Graphics
 
@@ -249,6 +300,68 @@ void dvi_text_clear(uint8_t attr);
 
 Clear the entire text VRAM with spaces and the given attribute.
 
+### dvi_text_clear_line
+
+```c
+void dvi_text_clear_line(int row, uint8_t attr);
+```
+
+Clear a single row with spaces and the given attribute.
+
+### dvi_text_clear_range
+
+```c
+void dvi_text_clear_range(int col, int row, int width, uint8_t attr);
+```
+
+Clear a partial range within a single row.
+
+### dvi_text_scroll_up
+
+```c
+void dvi_text_scroll_up(int lines, uint8_t fill_attr);
+```
+
+Scroll VRAM contents up by the specified number of lines. Bottom lines
+are cleared with the given attribute.
+
+### dvi_text_scroll_down
+
+```c
+void dvi_text_scroll_down(int lines, uint8_t fill_attr);
+```
+
+Scroll VRAM contents down by the specified number of lines. Top lines
+are cleared with the given attribute.
+
+### dvi_text_get_attr
+
+```c
+uint8_t dvi_text_get_attr(int col, int row);
+```
+
+Read the attribute byte of the cell at the given position.
+
+### dvi_text_set_attr
+
+```c
+void dvi_text_set_attr(int col, int row, uint8_t attr);
+```
+
+Write the attribute byte of the cell at the given position.
+
+### dvi_text_commit
+
+```c
+void dvi_text_commit(void);
+```
+
+Swap the back buffer to the front buffer at VBlank. Blocks until the
+swap completes, then copies front buffer state to the new back buffer.
+Text VRAM uses double buffering: Core 0 writes to the back buffer, and
+Core 1 renders from the front buffer. This prevents tearing during
+multi-cell updates such as scrolling or screen clearing.
+
 ## Hardware Configuration
 
 ### Pin Assignment
@@ -384,7 +497,8 @@ Core 1:
 interrupts on the calling core's NVIC. SEV is a cross-core event signal
 that wakes WFE on any core:
 
-- DMA IRQ handler (core 1): issues `SEV` after incrementing `frame_count`
+- DMA IRQ handler (core 1): increments `frame_count`, swaps text VRAM
+  double-buffer pointers if `swap_pending`, then issues `SEV`
 - `dvi_wait_vsync()` (any core): uses `WFE` to sleep until the event
 
 ### DMA Architecture
@@ -407,7 +521,7 @@ layout, line buffer design, and measured performance.
 | Region | Size | Contents |
 |---|---|---|
 | Flash (XIP) | ~920 KB | Firmware, font data (~400 KB), mruby library |
-| Main SRAM | ~192 KB | text_vram (15.7 KB), narrow_row_cache (6.6 KB), wide_row_cache (26 KB), line_buf (5.2 KB), framebuf (75 KB), stacks, BSS |
+| Main SRAM | ~208 KB | text_vram x2 (31.4 KB), narrow_row_cache (6.6 KB), wide_row_cache (26 KB), line_buf (5.2 KB), framebuf (75 KB), stacks, BSS |
 | SCRATCH_X | ~3.6 KB | IRQ handler + render code |
 | SCRATCH_Y | 4 KB | font_byte_mask (2 KB) + pico-sdk default stack (2 KB, unused after BSS stack switch) |
 | PSRAM (QMI CS1) | 8 MB | mruby heap |
