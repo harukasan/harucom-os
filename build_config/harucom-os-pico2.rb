@@ -41,10 +41,12 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
 
   conf.gembox "minimum"
   conf.gem gemdir: "#{MRUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-string-ext"
+  conf.gem gemdir: "#{MRUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-array-ext"
   conf.gem core: 'picoruby-gpio'
   conf.gem core: 'picoruby-require'
   conf.gem core: 'picoruby-vfs'
   conf.gem core: 'picoruby-filesystem-fat'
   conf.gem File.expand_path('../../mrbgems/picoruby-dvi', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-usb-host', __FILE__)
+  conf.gem File.expand_path('../../mrbgems/picoruby-keyboard-input', __FILE__)
 end
