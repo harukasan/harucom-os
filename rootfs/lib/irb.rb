@@ -40,7 +40,7 @@ class IRB
       break if script == "exit" || script == "quit"
 
       @sandbox.execute
-      @sandbox.wait(timeout: nil)
+      wait_sandbox
       @sandbox.suspend
 
       if @sandbox.result.is_a?(Exception)
@@ -52,5 +52,21 @@ class IRB
     end
   ensure
     @sandbox.terminate
+  end
+
+  private
+
+  def wait_sandbox
+    sleep_ms 5
+    while @sandbox.state != :DORMANT && @sandbox.state != :SUSPENDED
+      c = @keyboard.read_char
+      if c == 3
+        @sandbox.stop
+        puts "^C"
+        @console.commit
+        return
+      end
+      sleep_ms 5
+    end
   end
 end

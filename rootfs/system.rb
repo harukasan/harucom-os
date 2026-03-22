@@ -23,5 +23,21 @@ keyboard = Keyboard.new
 line_editor = LineEditor.new(console: console, keyboard: keyboard)
 $stdin = KeyboardInput.new(line_editor: line_editor)
 
+# Keyboard polling background task
+Task.new(name: "keyboard") do
+  begin
+    loop do
+      keyboard.poll
+      Task.pass
+    end
+  rescue Exception => e
+    puts "keyboard task error: #{e.message} (#{e.class})"
+  end
+end
+
 require "irb"
-IRB.new(console: console, keyboard: keyboard, line_editor: line_editor).start
+begin
+  IRB.new(console: console, keyboard: keyboard, line_editor: line_editor).start
+rescue Exception => e
+  puts "IRB error: #{e.message} (#{e.class})"
+end
