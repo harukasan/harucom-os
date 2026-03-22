@@ -3,11 +3,13 @@
 # Provides a terminal-like text surface on DVI text mode.
 # Compatible with $stdout (responds to puts, print, write, flush).
 # All output is mirrored to UART via the original STDOUT.
+# Supports scrollback buffer for viewing past output with PageUp/PageDown.
 
 class Console
   COLS = DVI::Text::COLS
   ROWS = DVI::Text::ROWS
   DEFAULT_ATTR = 0xF0 # white on black
+  SCROLLBACK_MAX = 200
 
   def initialize(attr: DEFAULT_ATTR)
     @col = 0
@@ -15,10 +17,13 @@ class Console
     @attr = attr
     @cursor_visible = false
     @uart = STDOUT
+    @scrollback = []
+    @scroll_offset = 0
+    @viewport_snapshot = nil
     clear
   end
 
-  attr_reader :col, :row, :attr
+  attr_reader :col, :row, :attr, :scroll_offset
 
   # $stdout compatible methods
 
@@ -102,10 +107,40 @@ class Console
     end
   end
 
-  # Scrolling
+  # Scrolling with scrollback buffer
 
   def scroll_up(lines = 1)
+    if @scroll_offset == 0
+      lines.times do |i|
+        @scrollback.push(DVI::Text.read_line(i))
+      end
+      @scrollback.shift while @scrollback.length > SCROLLBACK_MAX
+    end
     DVI::Text.scroll_up(lines, @attr)
+  end
+
+  # Scrollback navigation
+
+  def scroll_back(lines = 1)
+    return if @scrollback.empty?
+    if @scroll_offset == 0
+      save_viewport
+    end
+    @scroll_offset += lines
+    max = @scrollback.length
+    @scroll_offset = max if @scroll_offset > max
+    render_scrollback
+  end
+
+  def scroll_forward(lines = 1)
+    return if @scroll_offset == 0
+    @scroll_offset -= lines
+    if @scroll_offset <= 0
+      @scroll_offset = 0
+      restore_viewport
+    else
+      render_scrollback
+    end
   end
 
   # Screen management
@@ -143,6 +178,34 @@ class Console
   # VBlank sync
 
   def commit
+    DVI::Text.commit
+  end
+
+  private
+
+  def save_viewport
+    @viewport_snapshot = []
+    ROWS.times { |r| @viewport_snapshot.push(DVI::Text.read_line(r)) }
+  end
+
+  def restore_viewport
+    @viewport_snapshot.each_with_index do |line, r|
+      DVI::Text.write_line(r, line)
+    end
+    @viewport_snapshot = nil
+    DVI::Text.commit
+  end
+
+  def render_scrollback
+    base = @scrollback.length - @scroll_offset
+    ROWS.times do |screen_row|
+      buf_index = base + screen_row
+      if buf_index >= 0 && buf_index < @scrollback.length
+        DVI::Text.write_line(screen_row, @scrollback[buf_index])
+      else
+        DVI::Text.clear_line(screen_row, @attr)
+      end
+    end
     DVI::Text.commit
   end
 end

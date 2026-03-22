@@ -2,8 +2,30 @@
 
 #include <mruby.h>
 #include <mruby/presym.h>
+#include <mruby/data.h>
+#include <mruby/class.h>
 
 #include "dvi.h"
+
+/*
+ * DVI::Text::Line - opaque container for one row of VRAM cells.
+ * Used by read_line/write_line for scrollback buffer support.
+ */
+struct dvi_text_line {
+  dvi_text_cell_t cells[DVI_TEXT_MAX_COLS];
+};
+
+static void
+dvi_text_line_free(mrb_state *mrb, void *ptr)
+{
+  mrb_free(mrb, ptr);
+}
+
+static const mrb_data_type dvi_text_line_type = {
+  "DVI::Text::Line", dvi_text_line_free
+};
+
+static struct RClass *class_Line;
 
 /*
  * DVI.set_mode(mode)
@@ -216,6 +238,40 @@ mrb_dvi_text_set_attr(mrb_state *mrb, mrb_value klass)
   return mrb_nil_value();
 }
 
+/*
+ * DVI::Text.read_line(row) -> DVI::Text::Line
+ */
+static mrb_value
+mrb_dvi_text_read_line(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int row;
+  mrb_get_args(mrb, "i", &row);
+  if (row < 0 || row >= dvi_text_get_rows())
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "row out of range");
+  struct dvi_text_line *line =
+      (struct dvi_text_line *)mrb_malloc(mrb, sizeof(struct dvi_text_line));
+  dvi_text_read_line(row, line->cells);
+  return mrb_obj_value(
+      mrb_data_object_alloc(mrb, class_Line, line, &dvi_text_line_type));
+}
+
+/*
+ * DVI::Text.write_line(row, line)
+ */
+static mrb_value
+mrb_dvi_text_write_line(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int row;
+  mrb_value line_obj;
+  mrb_get_args(mrb, "io", &row, &line_obj);
+  if (row < 0 || row >= dvi_text_get_rows())
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "row out of range");
+  struct dvi_text_line *line =
+      (struct dvi_text_line *)mrb_data_get_ptr(mrb, line_obj, &dvi_text_line_type);
+  dvi_text_write_line(row, line->cells);
+  return mrb_nil_value();
+}
+
 void
 mrb_picoruby_dvi_gem_init(mrb_state *mrb)
 {
@@ -262,6 +318,15 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_text_get_attr, MRB_ARGS_REQ(2));
   mrb_define_class_method_id(mrb, class_Text, MRB_SYM(set_attr),
                              mrb_dvi_text_set_attr, MRB_ARGS_REQ(3));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(read_line),
+                             mrb_dvi_text_read_line, MRB_ARGS_REQ(1));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(write_line),
+                             mrb_dvi_text_write_line, MRB_ARGS_REQ(2));
+
+  // DVI::Text::Line (opaque container for scrollback)
+  class_Line = mrb_define_class_under_id(mrb, class_Text, MRB_SYM(Line),
+                                          mrb->object_class);
+  MRB_SET_INSTANCE_TT(class_Line, MRB_TT_CDATA);
 
   // DVI::Graphics
   struct RClass *class_Graphics =

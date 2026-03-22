@@ -14,13 +14,13 @@ class LineEditor
     @input_start_row = 0
   end
 
-  # Single-line input (Readline-like)
+  # Single-line input
   # Returns the input string, or nil on Ctrl-D (EOF)
   def readline(prompt)
     readmultiline(prompt, nil) { true }
   end
 
-  # Multi-line input (Reline-like)
+  # Multi-line input
   # The block receives the current input and returns true if complete.
   # Returns the completed string, or nil on Ctrl-D (EOF)
   def readmultiline(prompt, prompt_cont, &check)
@@ -40,11 +40,20 @@ class LineEditor
         next
       end
 
+      # Return to live view if scrolled back
+      if @console.scroll_offset > 0 && (c.is_a?(String) || c == :ENTER || c == :BSPACE)
+        @console.scroll_forward(@console.scroll_offset)
+      end
+
       case c
       when String
         @buffer.put(c)
       when :BSPACE, :LEFT, :RIGHT, :HOME, :END, :TAB
         @buffer.put(c)
+      when :PAGEUP
+        @console.scroll_back(Console::ROWS - 1)
+      when :PAGEDOWN
+        @console.scroll_forward(Console::ROWS - 1)
       when :UP
         @buffer.put(c) if @buffer.cursor_y > 0
       when :DOWN
