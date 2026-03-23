@@ -1590,3 +1590,14 @@ void dvi_text_set_attr(int col, int row, uint8_t attr) {
       write_row_uniform_attr[row] != attr)
     write_row_uniform_attr[row] = 0xFF;
 }
+
+void dvi_text_read_line(int row, dvi_text_cell_t *dst) {
+  if (row < 0 || row >= text_rows || !dst) return;
+  memcpy(dst, &write_vram[row * text_cols], text_cols * sizeof(dvi_text_cell_t));
+}
+
+void dvi_text_write_line(int row, const dvi_text_cell_t *src) {
+  if (row < 0 || row >= text_rows || !src) return;
+  memcpy(&write_vram[row * text_cols], src, text_cols * sizeof(dvi_text_cell_t));
+  write_row_uniform_attr[row] = 0xFF;
+}

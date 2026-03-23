@@ -78,6 +78,10 @@ void dvi_text_clear_range(int col, int row, int width, uint8_t attr);
 uint8_t dvi_text_get_attr(int col, int row);
 void dvi_text_set_attr(int col, int row, uint8_t attr);
 
+// Read/write a row of cells for scrollback buffer support
+void dvi_text_read_line(int row, dvi_text_cell_t *dst);
+void dvi_text_write_line(int row, const dvi_text_cell_t *src);
+
 // Convert a JIS X 0208 code to a linear font index.
 static inline uint16_t dvi_jis_to_linear(uint16_t jis_code) {
     int ku = (jis_code >> 8) - 0x20;

@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "init_rootfs.h"
 #include "dvi_output.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
@@ -36,147 +37,22 @@
 #include "fonts/font_mplus_f12r.h"
 #include "fonts/font_mplus_j12_combined.h"
 
-/* Mount FAT filesystem on flash, set up VFS and $LOAD_PATH,
- * then try to load /flash/main.rb. Falls back to embedded demo. */
+/* Minimal Ruby bootstrap: mount filesystem, set load path, load system.rb. */
 // clang-format off
-static const char ruby_code[] =
-    /* Mount filesystem (format on first boot) */
+static const char ruby_bootstrap[] =
     "fat = FAT.new(:flash, label: \"HARUCOM\")\n"
     "retry_count = 0\n"
     "begin\n"
-    "  VFS.mount(fat, \"/flash\")\n"
+    "  VFS.mount(fat, \"/\")\n"
     "rescue => e\n"
     "  fat._mkfs(\"flash:\")\n"
     "  retry_count = retry_count + 1\n"
     "  retry if retry_count == 1\n"
     "  raise e\n"
     "end\n"
-    "$LOAD_PATH = [\"/flash\"]\n"
+    "$LOAD_PATH = [\"/lib\"]\n"
     "\n"
-    "# USB host background task\n"
-    "Task.new(name: \"usb_host\") do\n"
-    "  loop do\n"
-    "    USB::Host.task\n"
-    "    Task.pass\n"
-    "  end\n"
-    "end\n"
-    "\n"
-    "# DVI Text API + Machine test\n"
-    "#\n"
-    "# Exercises: clear, put_string, commit, clear_line, clear_range,\n"
-    "#            scroll_up, scroll_down, get_attr, set_attr,\n"
-    "#            puts, print, Machine.uptime_us, Machine.unique_id,\n"
-    "#            Machine.reboot\n"
-    "#\n"
-    "# Each step waits for a keypress so you can visually verify the result.\n"
-    "\n"
-    "keyboard = Keyboard.new\n"
-    "\n"
-    "def wait_key(kb)\n"
-    "  loop do\n"
-    "    c = kb.read_char\n"
-    "    return c if c\n"
-    "    DVI.wait_vsync\n"
-    "  end\n"
-    "end\n"
-    "\n"
-    "def show_step(title, detail, step, kb)\n"
-    "  DVI::Text.clear_line(0, 0x1F)\n"
-    "  DVI::Text.put_string(0, 0, title, 0x1F)\n"
-    "  DVI::Text.clear_line(36, 0x8F)\n"
-    "  s = \"[\" + step.to_s + \"] Press any key\"\n"
-    "  DVI::Text.put_string(0, 36, s, 0x8F)\n"
-    "  if detail\n"
-    "    DVI::Text.put_string(0, 35, detail, 0xF0)\n"
-    "  end\n"
-    "  DVI::Text.commit\n"
-    "  wait_key(kb)\n"
-    "end\n"
-    "\n"
-    "# Step 1: clear + put_string + commit\n"
-    "DVI::Text.clear(0xF0)\n"
-    "37.times do |r|\n"
-    "  DVI::Text.put_string(0, r, \"Row \" + r.to_s, 0xF0)\n"
-    "end\n"
-    "show_step(\"1: clear + put_string\", \"All 37 rows filled\", 1, keyboard)\n"
-    "\n"
-    "# Step 2: clear_line\n"
-    "DVI::Text.clear_line(5, 0x4F)\n"
-    "DVI::Text.clear_line(10, 0x2F)\n"
-    "DVI::Text.clear_line(15, 0x6F)\n"
-    "show_step(\"2: clear_line\", \"Rows 5,10,15 cleared with colors\", 2, keyboard)\n"
-    "\n"
-    "# Step 3: clear_range\n"
-    "DVI::Text.clear_range(10, 3, 20, 0x4F)\n"
-    "DVI::Text.clear_range(10, 4, 20, 0x2F)\n"
-    "show_step(\"3: clear_range\", \"Cols 10-29 on rows 3-4 cleared\", 3, keyboard)\n"
-    "\n"
-    "# Step 4: scroll_up\n"
-    "DVI::Text.clear(0xF0)\n"
-    "37.times do |r|\n"
-    "  DVI::Text.put_string(0, r, \"Line \" + r.to_s, 0xF0)\n"
-    "end\n"
-    "DVI::Text.commit\n"
-    "wait_key(keyboard)\n"
-    "DVI::Text.scroll_up(5, 0xF0)\n"
-    "show_step(\"4: scroll_up(5)\", \"Lines shifted up by 5\", 4, keyboard)\n"
-    "\n"
-    "# Step 5: scroll_down\n"
-    "DVI::Text.scroll_down(3, 0xF0)\n"
-    "show_step(\"5: scroll_down(3)\", \"Lines shifted down by 3\", 5, keyboard)\n"
-    "\n"
-    "# Step 6: get_attr / set_attr (cursor simulation)\n"
-    "DVI::Text.clear(0xF0)\n"
-    "DVI::Text.put_string(0, 2, \"ABCDEFGHIJ\", 0xF0)\n"
-    "DVI::Text.commit\n"
-    "wait_key(keyboard)\n"
-    "5.times do |i|\n"
-    "  attr = DVI::Text.get_attr(i, 2)\n"
-    "  DVI::Text.set_attr(i, 2, (attr & 0x0F) << 4 | (attr >> 4))\n"
-    "end\n"
-    "show_step(\"6: get_attr/set_attr\", \"First 5 chars inverted\", 6, keyboard)\n"
-    "\n"
-    "# Step 7: rapid scroll stress test\n"
-    "DVI::Text.clear(0xF0)\n"
-    "DVI::Text.commit\n"
-    "100.times do |i|\n"
-    "  DVI::Text.scroll_up(1, 0xF0)\n"
-    "  DVI::Text.put_string(0, 36, \"Scroll line \" + i.to_s, 0xF0)\n"
-    "  DVI::Text.commit\n"
-    "end\n"
-    "show_step(\"7: rapid scroll (100 lines)\", \"No tearing expected\", 7, keyboard)\n"
-    "\n"
-    "# Step 8: Kernel#puts (output to UART)\n"
-    "DVI::Text.clear(0xF0)\n"
-    "puts \"Hello from puts! (check UART)\"\n"
-    "print \"print works too. \"\n"
-    "puts \"uptime: \" + Machine.uptime_formatted\n"
-    "show_step(\"8: puts/print\", \"Check UART for output\", 8, keyboard)\n"
-    "\n"
-    "# Step 9: Machine.uptime_us\n"
-    "DVI::Text.clear(0xF0)\n"
-    "t1 = Machine.uptime_us\n"
-    "sleep_ms 100\n"
-    "t2 = Machine.uptime_us\n"
-    "elapsed = t2 - t1\n"
-    "s = \"Elapsed: \" + elapsed.to_s + \" us (expect ~100000)\"\n"
-    "DVI::Text.put_string(0, 2, s, 0xF0)\n"
-    "ok = elapsed > 80000 && elapsed < 200000\n"
-    "DVI::Text.put_string(0, 3, ok ? \"OK\" : \"FAIL\", ok ? 0x2F : 0x4F)\n"
-    "show_step(\"9: Machine.uptime_us\", nil, 9, keyboard)\n"
-    "\n"
-    "# Step 10: Machine.unique_id\n"
-    "DVI::Text.clear(0xF0)\n"
-    "id = Machine.unique_id\n"
-    "DVI::Text.put_string(0, 2, \"ID: \" + id, 0xF0)\n"
-    "show_step(\"10: Machine.unique_id\", nil, 10, keyboard)\n"
-    "\n"
-    "# Step 11: Machine.reboot\n"
-    "DVI::Text.clear(0xF0)\n"
-    "DVI::Text.put_string(0, 2, \"Press any key to reboot...\", 0x4F)\n"
-    "DVI::Text.commit\n"
-    "wait_key(keyboard)\n"
-    "Machine.reboot\n";
+    "load \"/system.rb\"\n";
 
 mrb_state *global_mrb = NULL;
 
@@ -286,8 +162,8 @@ static bool dvi_diagnostic_callback(struct repeating_timer *t) {
 
 
 /*
- * run_mruby: mount filesystem, load /flash/main.rb if present,
- * fall back to embedded demo, then run the mruby task scheduler.
+ * run_mruby: mount filesystem, load /system.rb from flash,
+ * then run the mruby task scheduler.
  */
 static void run_mruby(void) {
     printf("Starting PicoRuby...\n");
@@ -299,8 +175,8 @@ static void run_mruby(void) {
     global_mrb = mrb;
 
     mrc_ccontext *cc = mrc_ccontext_new(mrb);
-    const uint8_t *src = (const uint8_t *)ruby_code;
-    mrc_irep *irep = mrc_load_string_cxt(cc, &src, strlen(ruby_code));
+    const uint8_t *src = (const uint8_t *)ruby_bootstrap;
+    mrc_irep *irep = mrc_load_string_cxt(cc, &src, strlen(ruby_bootstrap));
     if (!irep) {
         printf("compile failed\n");
         return;
@@ -399,6 +275,9 @@ static void harucom_main(void) {
 
     /* Initialize USB host (PIO-USB on RHPORT 1) */
     usb_host_init();
+
+    /* Initialize root filesystem (format if needed, write scripts) */
+    init_rootfs();
 
     /* Run mruby on core 0 (has default alarm pool, stdio, timers) */
     run_mruby();

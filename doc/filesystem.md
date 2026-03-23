@@ -70,16 +70,15 @@ Class: `VFS` (provided by [picoruby-vfs][pr-vfs])
 - [VFS.rename](#vfsrenamefrom-to)
 
 `VFS` provides a unified path namespace over mounted filesystem drivers.
-The FAT driver is mounted at `/flash` during boot:
+The FAT driver is mounted at `/` during boot:
 
 ```ruby
 fat = FAT.new(:flash, label: "HARUCOM")
-VFS.mount(fat, "/flash")
-$LOAD_PATH = ["/flash"]
+VFS.mount(fat, "/")
+$LOAD_PATH = ["/lib"]
 ```
 
-After mounting, file and directory operations use absolute paths under
-the mountpoint.
+After mounting, file and directory operations use absolute paths.
 
 #### VFS.mount(driver, mountpoint)
 
@@ -130,12 +129,12 @@ Rename a file or directory. Both paths must be on the same volume.
 
 ```ruby
 # Write a file
-f = VFS::File.open("/flash/hello.txt", "w")
+f = VFS::File.open("/hello.txt", "w")
 f.write("Hello from Harucom OS!")
 f.close
 
 # Read a file
-f = VFS::File.open("/flash/hello.txt", "r")
+f = VFS::File.open("/hello.txt", "r")
 content = f.read(256)
 f.close
 ```
@@ -179,7 +178,7 @@ is delegated to [picoruby-filesystem-fat][pr-fat]'s `FAT::Dir`.
 - [VFS::Dir#close](#vfsdirclose)
 
 ```ruby
-d = VFS::Dir.open("/flash")
+d = VFS::Dir.open("/")
 while (entry = d.read)
   # entry is a filename string
 end
@@ -275,17 +274,24 @@ Configuration constants (defined in [disk.h](../include/disk.h)):
 
 ### Boot Sequence
 
-Firmware startup initializes DVI output on Core 1, then runs the mruby VM
-on Core 0. The bootstrap Ruby script mounts the filesystem before any user
-code is loaded.
+Firmware startup initializes DVI output on Core 1, deploys Ruby scripts
+to flash, then runs the mruby VM on Core 0.
 
 1. Core 1 starts DVI output and copies the vector table to SRAM so that
    interrupt dispatch does not access flash during flash write operations.
-2. Core 0 opens the mruby VM, compiles and runs the bootstrap script.
-3. The bootstrap script mounts the filesystem and sets up `$LOAD_PATH`.
-4. User scripts on flash are loaded via `require`.
+2. Core 0 calls `deploy_ruby_scripts()` to write Ruby scripts from
+   firmware to the FAT filesystem using the FatFs C API.
+3. Core 0 opens the mruby VM, compiles and runs the bootstrap script.
+4. The bootstrap script mounts the filesystem and sets up `$LOAD_PATH`.
+5. `load "/system.rb"` loads the system entry point, which starts
+   background services and loads the application via `require`.
 
-The bootstrap script mounts the FAT volume at `/flash`. On first boot
+Ruby scripts are stored in the `rootfs/` directory of the source tree.
+At build time, `scripts/gen_ruby_scripts.rb` converts them to C byte
+arrays in `ruby_scripts.h`. At boot, `deploy_ruby_scripts()` writes
+them to flash before the mruby VM starts.
+
+The bootstrap script mounts the FAT volume at `/`. On first boot
 (no valid FAT volume), `VFS.mount` raises an exception. The rescue block
 formats the volume with `fat._mkfs` and retries. `fat._mkfs` is used
 instead of `fat.mkfs` because `mkfs` internally calls `setlabel`, which
@@ -295,20 +301,22 @@ requires the volume to be already mounted.
 fat = FAT.new(:flash, label: "HARUCOM")
 retry_count = 0
 begin
-  VFS.mount(fat, "/flash")
+  VFS.mount(fat, "/")
 rescue => e
   fat._mkfs("flash:")
   retry_count = retry_count + 1
   retry if retry_count == 1
   raise e
 end
-$LOAD_PATH = ["/flash"]
+$LOAD_PATH = ["/lib"]
+
+load "/system.rb"
 ```
 
-After mounting, `require "main"` searches `$LOAD_PATH` for
-`/flash/main.mrb` or `/flash/main.rb`. If found, the file is compiled
-(if `.rb`) and executed in a `Sandbox` instance. If not found, a
-`LoadError` is raised.
+`/system.rb` is the system entry point (analogous to DOS `COMMAND.COM`).
+It starts the USB host background task and loads the application.
+Libraries under `/lib/` are loaded via `require`, which searches
+`$LOAD_PATH` for `.mrb` then `.rb` files.
 
 ### Flash Write Safety
 
@@ -369,9 +377,16 @@ The filesystem support requires the following PicoRuby mrbgems, added in
 | File | Provides |
 |------|----------|
 | [flash_disk.c](../src/flash_disk.c) | FatFs block device for flash |
+| [init_rootfs.c](../src/init_rootfs.c) | Initialize root filesystem (format, write scripts) |
 | [platform.c](../src/platform.c) | `Platform_name()` returning "RP2350" |
 | [env.c](../src/env.c) | `ENV_setenv` / `ENV_unsetenv` / `ENV_get_key_value` stubs |
 | [disk.h](../include/disk.h) | Flash layout constants |
+
+### Build Tools
+
+| File | Provides |
+|------|----------|
+| [gen_ruby_scripts.rb](../scripts/gen_ruby_scripts.rb) | Convert `rootfs/*.rb` to C byte arrays (`ruby_scripts.h`) |
 
 ## References
 

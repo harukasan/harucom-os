@@ -107,12 +107,12 @@ class Keyboard
     @repeat_start_frame = 0
     @repeat_last_frame = 0
     @repeat_active = false
+    @queue = []
   end
 
-  # Read one key input.
-  # Returns String (printable char), Symbol (special key),
-  # Integer (control code 1-26), or nil (no input).
-  def read_char
+  # Poll USB keyboard for new input.
+  # Detects key presses, handles repeat, and queues results.
+  def poll
     current_keycodes = USB::Host.keyboard_keycodes
     modifier = USB::Host.keyboard_modifier
     now = DVI.frame_count
@@ -148,7 +148,17 @@ class Keyboard
     end
 
     @previous_keycodes = current_keycodes
-    result
+
+    if result
+      @queue.push(result)
+    end
+  end
+
+  # Read one queued key input.
+  # Returns String (printable char), Symbol (special key),
+  # Integer (control code 1-26), or nil (no input).
+  def read_char
+    @queue.shift
   end
 
   private
