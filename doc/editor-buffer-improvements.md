@@ -25,6 +25,18 @@ This requires changes to picoruby-editor (submodule). An alternative
 is to handle it in the editor application, but that duplicates
 Buffer's cursor logic.
 
+## Delete at End of Line
+
+`delete` removes the character at `cursor_x` within the current line
+but does nothing when the cursor is at the end of a line. In contrast,
+`put(:BSPACE)` at the beginning of a line joins it with the previous
+line. `delete` should mirror this behavior: when the cursor is at the
+end of a line, append the next line to the current line and remove it.
+
+The text editor currently works around this in application code
+(`rootfs/app/edit.rb`). Moving the logic into Buffer makes it
+consistent with Backspace and removes the need for the workaround.
+
 ## Tab Width
 
 `put(:TAB)` inserts two spaces unconditionally:
