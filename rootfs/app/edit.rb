@@ -29,14 +29,14 @@ EDIT_ATTR    = 0xF0 # white on black
 
 # State
 buffer = Editor::Buffer.new
-filepath = ARGV[0] || "/untitled.rb"
+filepath = ARGV[0]
 scroll_top = 0
 scroll_left = 0
 running = true
 message = nil
 
 # Load file
-if File.exist?(filepath)
+if filepath && File.exist?(filepath)
   content = File.open(filepath, "r") { |f| f.read }
   if content
     lines = content.split("\n")
@@ -53,7 +53,8 @@ def draw_status(console, filepath, buffer, scroll_top, message)
   line_num = buffer.cursor_y + 1
   col_num = Editor.byte_to_display_col(buffer.current_line, buffer.cursor_x) + 1
   modified = buffer.changed ? " [+]" : ""
-  status = " #{filepath}#{modified}  #{line_num}:#{col_num}"
+  name = filepath || "[untitled]"
+  status = " #{name}#{modified}  #{line_num}:#{col_num}"
 
   if message
     status = " #{message}"
@@ -71,6 +72,44 @@ def draw_command_bar(console)
   padding = Console::COLS - Editor.display_width(bar)
   bar += " " * padding if padding > 0
   console.put_string_at(0, COMMAND_ROW, Editor.display_slice(bar, 0, Console::COLS), COMMAND_ATTR)
+end
+
+# Prompt for text input on the command bar row.
+# Returns the entered string, or nil if cancelled with Escape.
+# When y_or_n: true, returns immediately on a single character input.
+def prompt_input(console, keyboard, label, y_or_n: false)
+  input = ""
+  loop do
+    # Draw prompt
+    display = " #{label}#{input}"
+    padding = Console::COLS - Editor.display_width(display)
+    display += " " * padding if padding > 0
+    console.put_string_at(0, COMMAND_ROW, Editor.display_slice(display, 0, Console::COLS), COMMAND_ATTR)
+    console.commit
+
+    c = keyboard.read_char
+    unless c
+      DVI.wait_vsync
+      next
+    end
+
+    case c
+    when :ENTER
+      return input
+    when :ESCAPE
+      return nil
+    when :BSPACE
+      if input.bytesize > 0
+        input = input.byteslice(0, Editor.prev_char_byte_pos(input, input.bytesize))
+      end
+    when String
+      if y_or_n
+        return c if c == "y" || c == "Y" || c == "n" || c == "N"
+      else
+        input += c
+      end
+    end
+  end
 end
 
 def draw_line(console, buffer, screen_row, scroll_top, scroll_left)
@@ -151,16 +190,37 @@ while running
 
   case c
   when 17 # Ctrl-Q
+    if buffer.changed
+      answer = prompt_input(console, keyboard, "Unsaved changes. Quit? (y/n): ", y_or_n: true)
+      draw_command_bar(console)
+      buffer.mark_dirty(:structure)
+      unless answer && (answer == "y" || answer == "Y")
+        message = "Quit cancelled"
+        next
+      end
+    end
     running = false
     next
   when 19 # Ctrl-S
-    File.open(filepath, "w") do |f|
-      buffer.lines.each_with_index do |line, i|
-        f.puts(line)
+    unless filepath
+      filepath = prompt_input(console, keyboard, "Save as: ")
+      draw_command_bar(console)
+      unless filepath && filepath.bytesize > 0
+        filepath = nil
+        message = "Save cancelled"
+        buffer.mark_dirty(:structure)
+        next
       end
     end
-    buffer.changed = false
-    message = "Saved #{filepath}"
+    begin
+      File.open(filepath, "w") do |f|
+        f.write(buffer.lines.join("\n") + "\n")
+      end
+      buffer.changed = false
+      message = "Saved #{filepath}"
+    rescue => e
+      message = "Save failed: #{e.message}"
+    end
   when :PAGEUP
     scroll_top -= EDIT_ROWS
     scroll_top = 0 if scroll_top < 0
