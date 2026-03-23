@@ -1,40 +1,59 @@
 # Keyboard Input
 
 The Keyboard class converts USB HID keycodes into characters, symbols,
-and control codes in pure Ruby. It polls [USB::Host][usb-host-doc] for
-raw keycode state and provides a single `read_char` method for the
-application layer.
+and control codes in pure Ruby. A background [Task][task] polls
+[USB::Host][usb-host-doc] for raw keycode state and queues results.
+The application reads from the queue via `read_char`.
 
 [usb-host-doc]: usb-host-keyboard.md
+[task]: https://github.com/picoruby/picoruby
 
 ## Ruby API
 
 Class: `Keyboard`
 
 - [Keyboard.new](#keyboardnew)
+- [Keyboard#poll](#keyboardpoll)
 - [Keyboard#read\_char](#keyboardread_char---string--symbol--integer--nil)
 
 A Keyboard instance tracks per-key state for press detection and repeat.
-The application creates one instance and calls `read_char` each iteration
-of its main loop.
+A background Task calls `poll` to detect key events and queue them.
+The application calls `read_char` to consume queued input.
 
 ```ruby
 keyboard = Keyboard.new
+
+# Background task polls keyboard state
+Task.new(name: "keyboard") do
+  loop do
+    keyboard.poll
+    Task.pass
+  end
+end
+
+# Application reads from queue
 loop do
   c = keyboard.read_char
   # c is String, Symbol, Integer, or nil
-  DVI.wait_vsync
+  DVI.wait_vsync unless c
 end
 ```
 
 ### Keyboard.new
 
-Creates a new Keyboard instance with empty previous-keycode state and no
-active repeat.
+Creates a new Keyboard instance with empty previous-keycode state, no
+active repeat, and an empty input queue.
+
+### Keyboard#poll
+
+Polls `USB::Host.keyboard_keycodes` and `USB::Host.keyboard_modifier`,
+detects newly pressed keys and key repeats, converts keycodes, and
+pushes results to the internal queue. Called from a background Task.
 
 ### Keyboard#read\_char -> String | Symbol | Integer | nil
 
-Reads one key input. Returns immediately (non-blocking).
+Pops one key input from the queue. Returns immediately (non-blocking).
+Returns nil when the queue is empty.
 
 | Type    | Meaning              | Examples                                    |
 |---------|----------------------|---------------------------------------------|
@@ -64,18 +83,66 @@ USB Keyboard -> TinyUSB callback -> keycode state (C)
                                          |
               USB::Host.keyboard_keycodes (Ruby poll)
                                          |
+              Keyboard#poll -> internal queue
+                                         |
               Keyboard#read_char -> String / Symbol / Integer / nil
 ```
 
 HAL stdin/stdout remain UART-only for debug. Keyboard input does not
 flow through `hal_stdin_push()`.
 
+### Background Task
+
+Keyboard polling runs in a dedicated background Task. This decouples
+input detection from the application's main loop, allowing key events
+to be captured even when the main task is busy (e.g. waiting for
+Sandbox execution to complete).
+
+```ruby
+Task.new(name: "keyboard") do
+  loop do
+    keyboard.poll
+    Task.pass
+  end
+end
+```
+
+`Task.pass` yields to the cooperative scheduler after each poll cycle.
+The scheduler runs the keyboard task whenever the main task yields
+(via `sleep_ms`, `DVI.wait_vsync`, etc.).
+
+### Input Queue
+
+`poll` pushes detected key events to a Ruby Array used as a FIFO queue.
+`read_char` pops from the front with `Array#shift`. At human typing
+speeds the queue rarely exceeds a few entries, so Array performance is
+sufficient.
+
+### Ctrl-C Interrupt
+
+During IRB code execution, the main task is in a polling loop checking
+Sandbox state. Each iteration also calls `read_char` to check for
+Ctrl-C (integer 3). When detected, IRB stops the Sandbox directly:
+
+```ruby
+while @sandbox.state != :DORMANT && @sandbox.state != :SUSPENDED
+  if @keyboard.read_char == 3
+    @sandbox.stop
+    break
+  end
+  sleep_ms 5
+end
+```
+
+During line editing, LineEditor handles Ctrl-C by clearing the input
+buffer and displaying `^C`.
+
 ### Key Press Detection
 
-Each call to `read_char` compares the current keycode array against the
+Each call to `poll` compares the current keycode array against the
 previous one using `Array#-`. Keys present in the current report but
 absent from the previous report are newly pressed. The first new key
-found is converted and returned.
+found is converted and queued.
 
 ### Keycode Conversion
 
@@ -104,17 +171,16 @@ Software repeat is implemented in Keyboard:
 
 ### Threading
 
-`USB::Host.task` runs in a background [mruby Task][task] (cooperative
-scheduling). `Keyboard#read_char` is called from the main loop on Core 0.
-No mutex or interrupt-disable is needed because all Ruby code runs on a
-single core.
-
-[task]: https://github.com/picoruby/picoruby
+`USB::Host.task` and `Keyboard#poll` each run in separate background
+[Tasks][task] (cooperative scheduling). `Keyboard#read_char` is called
+from the main task on Core 0. No mutex or interrupt-disable is needed
+because all Ruby code runs on a single core under the cooperative
+scheduler.
 
 ## File Layout
 
 - [mrbgems/picoruby-keyboard-input/](../mrbgems/picoruby-keyboard-input/)
-  - [mrblib/keyboard.rb](../mrbgems/picoruby-keyboard-input/mrblib/keyboard.rb) -- Keyboard class (lookup tables, read_char, repeat logic)
+  - [mrblib/keyboard.rb](../mrbgems/picoruby-keyboard-input/mrblib/keyboard.rb) -- Keyboard class (lookup tables, poll, read_char, repeat logic)
   - [mrbgem.rake](../mrbgems/picoruby-keyboard-input/mrbgem.rake) -- Gem specification
 
 ## References
