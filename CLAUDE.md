@@ -34,6 +34,7 @@ Design documents and implementation notes are in `doc/`:
 - [doc/usb-host-keyboard.md](doc/usb-host-keyboard.md) — USB host keyboard (PIO-USB, HID, Ruby/C API)
 - [doc/keyboard-input.md](doc/keyboard-input.md) — Keyboard input (background polling task, input queue, Ctrl-C interrupt, key repeat)
 - [doc/filesystem.md](doc/filesystem.md) — FAT filesystem on flash (FatFs, VFS, flash write safety)
+- [doc/editor-buffer-improvements.md](doc/editor-buffer-improvements.md) — Editor::Buffer improvement plan (desired column, tab width)
 
 ## Documentation style
 

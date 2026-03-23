@@ -39,6 +39,14 @@ class IRB
       next if script.empty?
       break if script == "exit" || script == "quit"
 
+      # Check for /app/ command before eval
+      words = script.split
+      if app_path = find_app(words[0])
+        run_app(app_path, words[1..])
+        @console.commit
+        next
+      end
+
       @sandbox.execute
       wait_sandbox
       @sandbox.suspend
@@ -55,6 +63,24 @@ class IRB
   end
 
   private
+
+  def find_app(name)
+    path = "/app/#{name}.rb"
+    File.exist?(path) ? path : nil
+  end
+
+  def run_app(path, args)
+    Object.const_set(:ARGV, args) unless Object.const_defined?(:ARGV)
+    ARGV.clear
+    args.each { |a| ARGV << a }
+    name = path.split("/")[-1].sub(".rb", "")
+    sandbox = Sandbox.new(name)
+    sandbox.load_file(path)
+    if error = sandbox.error
+      puts "#{error.message} (#{error.class})"
+    end
+    sandbox.terminate
+  end
 
   def wait_sandbox
     sleep_ms 5
