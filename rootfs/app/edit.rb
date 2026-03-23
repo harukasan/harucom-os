@@ -388,6 +388,8 @@ while running
     when :UP, :DOWN, :LEFT, :RIGHT
       undo_record_break(undo_stack)
       buffer.put(c)
+    when :ESCAPE
+      # Ignore
     else
       buffer.put(c)
     end
