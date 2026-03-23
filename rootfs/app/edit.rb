@@ -6,6 +6,8 @@
 # Keybindings:
 #   Ctrl-S: Save
 #   Ctrl-Q: Quit
+#   Ctrl-Z: Undo
+#   Ctrl-Y: Redo
 #   Arrow keys, Home, End: Cursor movement
 #   Backspace, Delete: Character deletion
 #   Enter: Insert new line
@@ -34,6 +36,96 @@ scroll_top = 0
 scroll_left = 0
 running = true
 message = nil
+
+# Undo stack
+# Each entry: [:insert, y, x, text] | [:delete, y, x, text]
+#           | [:split, y, x]        | [:join, y, x]
+UNDO_MAX = 200
+undo_stack = []
+redo_stack = []
+
+def undo_record(undo_stack, entry)
+  last = undo_stack[-1]
+  if last && entry[0] == :insert && last[0] == :insert &&
+     entry[1] == last[1] && entry[2] == last[2] + last[3].bytesize
+    # Consecutive insert on same line: extend text
+    last[3] += entry[3]
+    return
+  end
+  if last && entry[0] == :delete && last[0] == :delete &&
+     entry[1] == last[1] && entry[2] == last[2]
+    # Consecutive forward delete at same position: append text
+    last[3] += entry[3]
+    return
+  end
+  if last && entry[0] == :delete && last[0] == :delete &&
+     entry[1] == last[1] && entry[2] + entry[3].bytesize == last[2]
+    # Consecutive backspace: prepend text and update position
+    last[2] = entry[2]
+    last[3] = entry[3] + last[3]
+    return
+  end
+  undo_stack.push(entry)
+  undo_stack.shift if undo_stack.length > UNDO_MAX
+end
+
+def undo_record_break(undo_stack)
+  # Insert a nil marker to break grouping
+  undo_stack.push(nil) if undo_stack[-1] != nil && undo_stack.length > 0
+end
+
+def apply_entry(buffer, entry)
+  type, y, x, text = entry
+  case type
+  when :insert
+    buffer.move_to(x, y)
+    line = buffer.lines[y]
+    buffer.lines[y] = line.byteslice(0, x).to_s + text + line.byteslice(x, 65535).to_s
+    buffer.move_to(x + text.bytesize, y)
+  when :delete
+    buffer.move_to(x, y)
+    line = buffer.lines[y]
+    buffer.lines[y] = line.byteslice(0, x).to_s + line.byteslice(x + text.bytesize, 65535).to_s
+  when :split
+    line = buffer.lines[y]
+    buffer.lines[y] = line.byteslice(0, x).to_s
+    buffer.lines.insert(y + 1, line.byteslice(x, 65535).to_s)
+    buffer.move_to(0, y + 1)
+  when :join
+    buffer.lines[y] = buffer.lines[y] + buffer.lines[y + 1]
+    buffer.lines.delete_at(y + 1)
+    buffer.move_to(x, y)
+  end
+  buffer.mark_dirty(:structure)
+  buffer.changed = true
+end
+
+def reverse_type(type)
+  case type
+  when :insert then :delete
+  when :delete then :insert
+  when :split then :join
+  when :join then :split
+  end
+end
+
+def perform_undo(buffer, undo_stack, redo_stack)
+  undo_stack.pop while undo_stack[-1] == nil && undo_stack.length > 0
+  entry = undo_stack.pop
+  return false unless entry
+  reversed = [reverse_type(entry[0]), entry[1], entry[2], entry[3]]
+  apply_entry(buffer, reversed)
+  redo_stack.push(entry)
+  true
+end
+
+def perform_redo(buffer, undo_stack, redo_stack)
+  entry = redo_stack.pop
+  return false unless entry
+  apply_entry(buffer, entry)
+  undo_stack.push(entry)
+  true
+end
 
 # Load file
 if filepath && File.exist?(filepath)
@@ -68,7 +160,7 @@ def draw_status(console, filepath, buffer, scroll_top, message)
 end
 
 def draw_command_bar(console)
-  bar = " Ctrl-S:Save  Ctrl-Q:Quit"
+  bar = " Ctrl-S:Save  Ctrl-Q:Quit  Ctrl-Z:Undo  Ctrl-Y:Redo"
   padding = Console::COLS - Editor.display_width(bar)
   bar += " " * padding if padding > 0
   console.put_string_at(0, COMMAND_ROW, Editor.display_slice(bar, 0, Console::COLS), COMMAND_ATTR)
@@ -236,18 +328,35 @@ while running
     new_y = buffer.lines.length - 1 if new_y >= buffer.lines.length
     buffer.move_to(buffer.cursor_x, new_y)
     buffer.mark_dirty(:structure)
+  when 26 # Ctrl-Z
+    if perform_undo(buffer, undo_stack, redo_stack)
+      message = "Undo"
+    end
+  when 25 # Ctrl-Y
+    if perform_redo(buffer, undo_stack, redo_stack)
+      message = "Redo"
+    end
   when :HOME
+    undo_record_break(undo_stack)
     buffer.head
   when :END
+    undo_record_break(undo_stack)
     buffer.tail
   when :DELETE
+    redo_stack.clear
+    undo_record_break(undo_stack)
     if buffer.cursor_x >= buffer.current_line.bytesize && buffer.cursor_y + 1 < buffer.lines.length
       # At end of line: join with next line
+      undo_record(undo_stack, [:join, buffer.cursor_y, buffer.cursor_x])
       buffer.lines[buffer.cursor_y] = buffer.current_line + buffer.lines[buffer.cursor_y + 1]
       buffer.lines.delete_at(buffer.cursor_y + 1)
       buffer.changed = true
       buffer.mark_dirty(:structure)
     else
+      if buffer.cursor_x < buffer.current_line.bytesize
+        deleted = Editor.char_at_bytepos(buffer.current_line, buffer.cursor_x)
+        undo_record(undo_stack, [:delete, buffer.cursor_y, buffer.cursor_x, deleted])
+      end
       buffer.delete
       buffer.mark_dirty(:content)
     end
@@ -255,7 +364,33 @@ while running
     # Ignore other control codes
   else
     # String or Symbol: pass to buffer
-    buffer.put(c)
+    case c
+    when String
+      redo_stack.clear
+      undo_record(undo_stack, [:insert, buffer.cursor_y, buffer.cursor_x, c])
+      buffer.put(c)
+    when :ENTER
+      redo_stack.clear
+      undo_record(undo_stack, [:split, buffer.cursor_y, buffer.cursor_x])
+      undo_record_break(undo_stack)
+      buffer.put(c)
+    when :BSPACE
+      redo_stack.clear
+      if buffer.cursor_x > 0
+        prev_pos = Editor.prev_char_byte_pos(buffer.current_line, buffer.cursor_x)
+        deleted = buffer.current_line.byteslice(prev_pos, buffer.cursor_x - prev_pos)
+        undo_record(undo_stack, [:delete, buffer.cursor_y, prev_pos, deleted])
+      elsif buffer.cursor_y > 0
+        undo_record_break(undo_stack)
+        undo_record(undo_stack, [:join, buffer.cursor_y - 1, buffer.lines[buffer.cursor_y - 1].bytesize])
+      end
+      buffer.put(c)
+    when :UP, :DOWN, :LEFT, :RIGHT
+      undo_record_break(undo_stack)
+      buffer.put(c)
+    else
+      buffer.put(c)
+    end
   end
 
   # Adjust scroll for cursor visibility
