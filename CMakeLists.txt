@@ -103,9 +103,11 @@ set_target_properties(mruby PROPERTIES
 add_library(picoruby-dvi
     mrbgems/picoruby-dvi/ports/rp2350/dvi_clock.c
     mrbgems/picoruby-dvi/ports/rp2350/dvi_output.c
+    mrbgems/picoruby-dvi/src/dvi_graphics_draw.c
 )
 target_include_directories(picoruby-dvi PUBLIC
     mrbgems/picoruby-dvi/include
+    mrbgems/picoruby-dvi/src
     mrbgems/picoruby-dvi/ports/rp2350
     mrbgems/picoruby-dvi/ports/rp2350/fonts
 )

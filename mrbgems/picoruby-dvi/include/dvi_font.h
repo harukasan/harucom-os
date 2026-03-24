@@ -10,7 +10,7 @@ typedef struct {
     uint8_t glyph_height;  // pixels per glyph vertically (e.g., 13 for 12px font)
     uint16_t first_char;   // first character code in bitmap array
     uint16_t num_chars;    // number of glyphs in bitmap array
-    const uint8_t *bitmap; // 1bpp column-major bitmap data
+    const uint8_t *bitmap; // 1bpp bitmap, one byte per row, MSB = leftmost pixel
 } dvi_font_t;
 
 #endif

@@ -1,0 +1,137 @@
+# DVI Graphics + Text API test
+#
+# Exercises: Graphics primitives (draw_text, draw_line, fill, fill_rect),
+#            Text mode (clear, put_string, commit, scroll),
+#            Mode switching, Machine API
+#
+# Each step waits for a keypress so you can visually verify the result.
+
+keyboard = $keyboard
+
+def wait_key(kb)
+  loop do
+    c = kb.read_char
+    return c if c
+    DVI.wait_vsync
+  end
+end
+
+def show_step_text(title, detail, step, kb)
+  DVI::Text.clear_line(0, 0x1F)
+  DVI::Text.put_string(0, 0, title, 0x1F)
+  DVI::Text.clear_line(36, 0x8F)
+  s = "[" + step.to_s + "] Press any key"
+  DVI::Text.put_string(0, 36, s, 0x8F)
+  if detail
+    DVI::Text.put_string(0, 35, detail, 0xF0)
+  end
+  DVI::Text.commit
+  wait_key(kb)
+end
+
+def show_step_gfx(title, step, kb)
+  DVI::Graphics.fill_rect(0, 230, 320, 10, 0x00)
+  DVI::Graphics.draw_text(0, 232, "[" + step.to_s + "] " + title, 0xFF)
+  wait_key(kb)
+end
+
+# === Graphics Mode Tests ===
+
+DVI.set_mode(DVI::GRAPHICS_MODE)
+
+# Step 1: fill + draw_text (8x8 font)
+DVI::Graphics.fill(0x00)
+DVI::Graphics.draw_text(10, 10, "Hello, Harucom!", 0xFF)
+DVI::Graphics.draw_text(10, 20, "DVI::Graphics 8x8 font", 0xE0)
+DVI::Graphics.draw_text(10, 30, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0x1C)
+DVI::Graphics.draw_text(10, 40, "0123456789 !@#$%^&*()", 0xFC)
+show_step_gfx("draw_text 8x8", 1, keyboard)
+
+# Step 2: draw_text (12px font)
+DVI::Graphics.fill(0x00)
+DVI::Graphics.draw_text(10, 10, "M+ 12px font", 0xFF, DVI::Graphics::FONT_12PX)
+DVI::Graphics.draw_text(10, 26, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0xE0, DVI::Graphics::FONT_12PX)
+DVI::Graphics.draw_text(10, 42, "abcdefghijklmnopqrstuvwxyz", 0x1C, DVI::Graphics::FONT_12PX)
+DVI::Graphics.draw_text(10, 58, "0123456789 !@#$%^&*()", 0xFC, DVI::Graphics::FONT_12PX)
+show_step_gfx("draw_text 12px", 2, keyboard)
+
+# Step 3: draw_line
+DVI::Graphics.fill(0x00)
+DVI::Graphics.draw_line(0, 0, 319, 239, 0xE0)
+DVI::Graphics.draw_line(319, 0, 0, 239, 0x1C)
+DVI::Graphics.draw_line(160, 0, 160, 239, 0x03)
+DVI::Graphics.draw_line(0, 120, 319, 120, 0x03)
+# Radial lines from center
+16.times do |i|
+  angle = i * 3.14159 * 2 / 16
+  ex = 160 + (100 * Math.cos(angle)).to_i
+  ey = 120 + (80 * Math.sin(angle)).to_i
+  DVI::Graphics.draw_line(160, 120, ex, ey, 0xFF)
+end
+show_step_gfx("draw_line", 3, keyboard)
+
+# Step 4: fill_rect + draw_text overlay
+DVI::Graphics.fill(0x00)
+DVI::Graphics.fill_rect(20, 20, 120, 80, 0xE0)
+DVI::Graphics.fill_rect(100, 60, 120, 80, 0x1C)
+DVI::Graphics.fill_rect(180, 100, 120, 80, 0x03)
+DVI::Graphics.draw_text(30, 50, "RED", 0xFF)
+DVI::Graphics.draw_text(110, 90, "GREEN", 0xFF)
+DVI::Graphics.draw_text(190, 130, "BLUE", 0xFF)
+show_step_gfx("fill_rect + overlay", 4, keyboard)
+
+# Step 5: set_pixel pattern
+DVI::Graphics.fill(0x00)
+120.times do |y|
+  160.times do |x|
+    r = (x * 7 / 160) << 5
+    g = (y * 7 / 120) << 2
+    b = ((x + y) * 3 / 280)
+    DVI::Graphics.set_pixel(x + 80, y + 60, r | g | b)
+  end
+end
+DVI::Graphics.draw_text(100, 50, "RGB332 gradient", 0xFF)
+show_step_gfx("set_pixel gradient", 5, keyboard)
+
+# === Text Mode Tests ===
+
+DVI.set_mode(DVI::TEXT_MODE)
+
+# Step 6: text clear + put_string
+DVI::Text.clear(0xF0)
+37.times do |r|
+  DVI::Text.put_string(0, r, "Row " + r.to_s, 0xF0)
+end
+show_step_text("6: clear + put_string", "All 37 rows filled", 6, keyboard)
+
+# Step 7: scroll_up
+DVI::Text.clear(0xF0)
+37.times do |r|
+  DVI::Text.put_string(0, r, "Line " + r.to_s, 0xF0)
+end
+DVI::Text.commit
+wait_key(keyboard)
+DVI::Text.scroll_up(5, 0xF0)
+show_step_text("7: scroll_up(5)", "Lines shifted up by 5", 7, keyboard)
+
+# Step 8: scroll_down
+DVI::Text.scroll_down(3, 0xF0)
+show_step_text("8: scroll_down(3)", "Lines shifted down by 3", 8, keyboard)
+
+# Step 9: Machine info
+DVI::Text.clear(0xF0)
+t1 = Machine.uptime_us
+sleep_ms 100
+t2 = Machine.uptime_us
+elapsed = t2 - t1
+DVI::Text.put_string(0, 2, "Elapsed: " + elapsed.to_s + " us", 0xF0)
+ok = elapsed > 80000 && elapsed < 200000
+DVI::Text.put_string(0, 3, ok ? "OK" : "FAIL", ok ? 0x2F : 0x4F)
+id = Machine.unique_id
+DVI::Text.put_string(0, 5, "ID: " + id, 0xF0)
+show_step_text("9: Machine info", nil, 9, keyboard)
+
+# Done
+DVI::Text.clear(0xF0)
+DVI::Text.put_string(0, 2, "All tests complete!", 0x2F)
+DVI::Text.commit

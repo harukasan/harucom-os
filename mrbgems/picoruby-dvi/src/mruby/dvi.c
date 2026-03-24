@@ -6,6 +6,7 @@
 #include <mruby/class.h>
 
 #include "dvi.h"
+#include "dvi_graphics_draw.h"
 
 /*
  * DVI::Text::Line - opaque container for one row of VRAM cells.
@@ -117,6 +118,76 @@ mrb_dvi_fill_rect(mrb_state *mrb, mrb_value klass)
   for (mrb_int iy = 0; iy < h; iy++) {
     memset(&fb[(y + iy) * DVI_GRAPHICS_WIDTH + x], c, w);
   }
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_text(x, y, text, color [, font])
+ */
+static mrb_value
+mrb_dvi_draw_text(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int x, y, color, font_id = DVI_GRAPHICS_FONT_8X8;
+  const char *text;
+  mrb_get_args(mrb, "iizi|i", &x, &y, &text, &color, &font_id);
+  const dvi_font_t *font = dvi_graphics_get_font(font_id);
+  if (!font)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown font");
+  dvi_graphics_draw_text(dvi_get_framebuffer(),
+                         DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                         x, y, text, (uint8_t)color, font);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_line(x0, y0, x1, y1, color)
+ */
+static mrb_value
+mrb_dvi_draw_line(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int x0, y0, x1, y1, color;
+  mrb_get_args(mrb, "iiiii", &x0, &y0, &x1, &y1, &color);
+  dvi_graphics_draw_line(dvi_get_framebuffer(),
+                         DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                         x0, y0, x1, y1, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_image(data, x, y, w, h)
+ */
+static mrb_value
+mrb_dvi_draw_image(mrb_state *mrb, mrb_value klass)
+{
+  const char *data;
+  mrb_int data_len, x, y, w, h;
+  mrb_get_args(mrb, "siiii", &data, &data_len, &x, &y, &w, &h);
+  if (data_len < w * h)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
+  dvi_graphics_draw_image(dvi_get_framebuffer(),
+                          DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                          (const uint8_t *)data, x, y, w, h);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_image_masked(data, mask, x, y, w, h)
+ */
+static mrb_value
+mrb_dvi_draw_image_masked(mrb_state *mrb, mrb_value klass)
+{
+  const char *data, *mask;
+  mrb_int data_len, mask_len, x, y, w, h;
+  mrb_get_args(mrb, "ssiiii", &data, &data_len, &mask, &mask_len,
+               &x, &y, &w, &h);
+  if (data_len < w * h)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
+  if (mask_len < (w * h + 7) / 8)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "mask too short");
+  dvi_graphics_draw_image_masked(dvi_get_framebuffer(),
+                                 DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                                 (const uint8_t *)data, (const uint8_t *)mask,
+                                 x, y, w, h);
   return mrb_nil_value();
 }
 
@@ -336,6 +407,11 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                       mrb_fixnum_value(DVI_GRAPHICS_WIDTH));
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(HEIGHT),
                       mrb_fixnum_value(DVI_GRAPHICS_HEIGHT));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_8X8),
+                      mrb_fixnum_value(DVI_GRAPHICS_FONT_8X8));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_12PX),
+                      mrb_fixnum_value(DVI_GRAPHICS_FONT_12PX));
+
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_pixel),
                              mrb_dvi_set_pixel, MRB_ARGS_REQ(3));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(get_pixel),
@@ -344,6 +420,14 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_fill, MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_rect),
                              mrb_dvi_fill_rect, MRB_ARGS_REQ(5));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_text),
+                             mrb_dvi_draw_text, MRB_ARGS_ARG(4, 1));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_line),
+                             mrb_dvi_draw_line, MRB_ARGS_REQ(5));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image),
+                             mrb_dvi_draw_image, MRB_ARGS_REQ(5));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image_masked),
+                             mrb_dvi_draw_image_masked, MRB_ARGS_REQ(6));
 }
 
 void
