@@ -13,3 +13,6 @@
 [submodule "mrbgems/picoruby-dvi/lib/fonts/misc-misc"]
 	path = mrbgems/picoruby-dvi/lib/fonts/misc-misc
 	url = https://gitlab.freedesktop.org/xorg/font/misc-misc.git
+[submodule "mrbgems/picoruby-dvi/lib/fonts/spleen"]
+	path = mrbgems/picoruby-dvi/lib/fonts/spleen
+	url = https://github.com/fcambus/spleen.git

@@ -48,6 +48,9 @@ class DVI
     FONT_FIXED_4X6: Integer
     FONT_FIXED_5X7: Integer
     FONT_FIXED_6X13: Integer
+    FONT_SPLEEN_5X8: Integer
+    FONT_SPLEEN_8X16: Integer
+    FONT_SPLEEN_12X24: Integer
 
     def self.set_pixel: (Integer x, Integer y, Integer color) -> void
     def self.get_pixel: (Integer x, Integer y) -> Integer

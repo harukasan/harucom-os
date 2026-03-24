@@ -417,6 +417,12 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                       mrb_fixnum_value(DVI_GRAPHICS_FONT_FIXED_5X7));
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_FIXED_6X13),
                       mrb_fixnum_value(DVI_GRAPHICS_FONT_FIXED_6X13));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_SPLEEN_5X8),
+                      mrb_fixnum_value(DVI_GRAPHICS_FONT_SPLEEN_5X8));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_SPLEEN_8X16),
+                      mrb_fixnum_value(DVI_GRAPHICS_FONT_SPLEEN_8X16));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_SPLEEN_12X24),
+                      mrb_fixnum_value(DVI_GRAPHICS_FONT_SPLEEN_12X24));
 
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_pixel),
                              mrb_dvi_set_pixel, MRB_ARGS_REQ(3));
