@@ -47,41 +47,56 @@ DVI::Graphics.draw_text(10, 30, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0x1C)
 DVI::Graphics.draw_text(10, 40, "0123456789 !@#$%^&*()", 0xFC)
 show_step_gfx("draw_text 8x8", 1, keyboard)
 
-# Step 2: font showcase
+# Step 2-3: font showcase (2 pages)
 G = DVI::Graphics
-DVI::Graphics.fill(0x00)
-y = 4
-[
-  [G::FONT_8X8,        "8x8",        0xE0],
-  [G::FONT_MPLUS_12,   "M+ 12px",    0x1C],
-  [G::FONT_FIXED_4X6,  "Fixed 4x6",  0xFC],
-  [G::FONT_FIXED_5X7,  "Fixed 5x7",  0x03],
-  [G::FONT_FIXED_6X13, "Fixed 6x13", 0xFF],
-  [G::FONT_SPLEEN_5X8, "Spleen 5x8", 0xE3],
-].each do |font, label, color|
-  DVI::Graphics.draw_text(4, y, label, 0x8F, font)
-  DVI::Graphics.draw_text(4, y + 10, "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789", color, font)
-  DVI::Graphics.draw_text(4, y + 20, "abcdefghijklmnopqrstuvwxyz !@#$%^&*()", color, font)
-  y += 36
+all_fonts = [
+  [G::FONT_8X8,          "8x8",          0xE0],
+  [G::FONT_MPLUS_12,     "M+ 12px",      0x1C],
+  [G::FONT_FIXED_4X6,    "Fixed 4x6",    0xFC],
+  [G::FONT_FIXED_5X7,    "Fixed 5x7",    0x03],
+  [G::FONT_FIXED_6X13,   "Fixed 6x13",   0xFF],
+  [G::FONT_SPLEEN_5X8,   "Spleen 5x8",   0xE3],
+  [G::FONT_SPLEEN_8X16,  "Spleen 8x16",  0x1F],
+  [G::FONT_SPLEEN_12X24, "Spleen 12x24", 0xE0],
+  [G::FONT_DENKICHIP,    "DenkiChip",    0xFC],
+]
+page_size = 5
+page = 0
+while page * page_size < all_fonts.length
+  DVI::Graphics.fill(0x00)
+  y = 4
+  i = page * page_size
+  while i < all_fonts.length && i < (page + 1) * page_size
+    font, label, color = all_fonts[i]
+    DVI::Graphics.draw_text(4, y, label, 0x8F, font)
+    DVI::Graphics.draw_text(4, y + 10, "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789", color, font)
+    DVI::Graphics.draw_text(4, y + 20, "abcdefghijklmnopqrstuvwxyz !@#$%^&*()", color, font)
+    y += 42
+    i += 1
+  end
+  total_pages = (all_fonts.length + page_size - 1) / page_size
+  show_step_gfx("fonts #{page + 1}/#{total_pages}", page + 2, keyboard)
+  page += 1
 end
-show_step_gfx("font showcase", 2, keyboard)
 
-# Step 3: draw_line
+step = page + 1
+
+# draw_line
 DVI::Graphics.fill(0x00)
 DVI::Graphics.draw_line(0, 0, 319, 239, 0xE0)
 DVI::Graphics.draw_line(319, 0, 0, 239, 0x1C)
 DVI::Graphics.draw_line(160, 0, 160, 239, 0x03)
 DVI::Graphics.draw_line(0, 120, 319, 120, 0x03)
-# Radial lines from center
 16.times do |i|
   angle = i * 3.14159 * 2 / 16
   ex = 160 + (100 * Math.cos(angle)).to_i
   ey = 120 + (80 * Math.sin(angle)).to_i
   DVI::Graphics.draw_line(160, 120, ex, ey, 0xFF)
 end
-show_step_gfx("draw_line", 3, keyboard)
+show_step_gfx("draw_line", step, keyboard)
+step += 1
 
-# Step 4: fill_rect + draw_text overlay
+# fill_rect + draw_text overlay
 DVI::Graphics.fill(0x00)
 DVI::Graphics.fill_rect(20, 20, 120, 80, 0xE0)
 DVI::Graphics.fill_rect(100, 60, 120, 80, 0x1C)
@@ -89,9 +104,10 @@ DVI::Graphics.fill_rect(180, 100, 120, 80, 0x03)
 DVI::Graphics.draw_text(30, 50, "RED", 0xFF)
 DVI::Graphics.draw_text(110, 90, "GREEN", 0xFF)
 DVI::Graphics.draw_text(190, 130, "BLUE", 0xFF)
-show_step_gfx("fill_rect + overlay", 4, keyboard)
+show_step_gfx("fill_rect + overlay", step, keyboard)
+step += 1
 
-# Step 5: set_pixel pattern
+# set_pixel pattern
 DVI::Graphics.fill(0x00)
 120.times do |y|
   160.times do |x|
@@ -102,7 +118,7 @@ DVI::Graphics.fill(0x00)
   end
 end
 DVI::Graphics.draw_text(100, 50, "RGB332 gradient", 0xFF)
-show_step_gfx("set_pixel gradient", 5, keyboard)
+show_step_gfx("set_pixel gradient", step, keyboard)
 
 # === Text Mode Tests ===
 

@@ -10,6 +10,7 @@
 #include "font_spleen_5x8.h"
 #include "font_spleen_8x16.h"
 #include "font_spleen_12x24.h"
+#include "font_denkichip.h"
 
 static const dvi_font_t *const graphics_fonts[] = {
     [DVI_GRAPHICS_FONT_8X8]        = &font8x8_basic,
@@ -20,6 +21,7 @@ static const dvi_font_t *const graphics_fonts[] = {
     [DVI_GRAPHICS_FONT_SPLEEN_5X8] = &font_spleen_5x8,
     [DVI_GRAPHICS_FONT_SPLEEN_8X16] = &font_spleen_8x16,
     [DVI_GRAPHICS_FONT_SPLEEN_12X24] = &font_spleen_12x24,
+    [DVI_GRAPHICS_FONT_DENKICHIP]    = &font_denkichip,
 };
 
 #define GRAPHICS_FONT_COUNT \
@@ -32,51 +34,106 @@ const dvi_font_t *dvi_graphics_get_font(int font_id)
     return graphics_fonts[font_id];
 }
 
+// Decode one UTF-8 codepoint from *p, advance *p past consumed bytes.
+// Returns the codepoint, or -1 on invalid sequence.
+static int32_t utf8_decode(const char **p)
+{
+    const uint8_t *s = (const uint8_t *)*p;
+    int32_t cp;
+    int len;
+
+    if (s[0] < 0x80) {
+        cp = s[0]; len = 1;
+    } else if ((s[0] & 0xE0) == 0xC0) {
+        cp = s[0] & 0x1F; len = 2;
+    } else if ((s[0] & 0xF0) == 0xE0) {
+        cp = s[0] & 0x0F; len = 3;
+    } else if ((s[0] & 0xF8) == 0xF0) {
+        cp = s[0] & 0x07; len = 4;
+    } else {
+        *p += 1;
+        return -1;
+    }
+    for (int i = 1; i < len; i++) {
+        if ((s[i] & 0xC0) != 0x80) {
+            *p += 1;
+            return -1;
+        }
+        cp = (cp << 6) | (s[i] & 0x3F);
+    }
+    *p += len;
+    return cp;
+}
+
+// Render one glyph at (char_x, y) and return its advance width.
+static int draw_glyph(uint8_t *framebuffer, int fb_width, int fb_height,
+                       int char_x, int y, int idx,
+                       uint8_t color, const dvi_font_t *font)
+{
+    int gw = font->glyph_width;
+    int gh = font->glyph_height;
+    int bytes_per_row = (gw + 7) / 8;
+    const uint8_t *glyph = &font->bitmap[idx * bytes_per_row * gh];
+
+    for (int row = 0; row < gh; row++) {
+        int py = y + row;
+        if (py < 0)
+            continue;
+        if (py >= fb_height)
+            break;
+
+        for (int col = 0; col < gw; col++) {
+            int byte_idx = col / 8;
+            int bit_idx = 7 - (col % 8);
+            if (!(glyph[row * bytes_per_row + byte_idx] & (1 << bit_idx)))
+                continue;
+            int px = char_x + col;
+            if (px < 0)
+                continue;
+            if (px >= fb_width)
+                break;
+            framebuffer[py * fb_width + px] = color;
+        }
+    }
+
+    return (font->widths) ? font->widths[idx] : gw;
+}
+
 void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
                             int x, int y, const char *text,
                             uint8_t color, const dvi_font_t *font)
 {
     int gw = font->glyph_width;
-    int gh = font->glyph_height;
     int first = font->first_char;
     int num = font->num_chars;
-    const uint8_t *bitmap = font->bitmap;
+    int char_x = x;
 
-    for (int t = 0; text[t] != '\0'; t++) {
-        int char_x = x + t * gw;
-
-        // Skip if entirely off-screen
-        if (char_x + gw <= 0)
+    const char *p = text;
+    while (*p) {
+        int32_t cp = utf8_decode(&p);
+        if (cp < 0)
             continue;
+
+        // Skip if past right edge
         if (char_x >= width)
             break;
 
-        unsigned char c = (unsigned char)text[t];
-        int idx = c - first;
-        if (idx < 0 || idx >= num)
+        int idx = cp - first;
+        if (idx < 0 || idx >= num) {
+            // Unknown character: advance by default width
+            char_x += gw;
             continue;
-
-        const uint8_t *glyph = &bitmap[idx * gh];
-
-        for (int row = 0; row < gh; row++) {
-            int py = y + row;
-            if (py < 0)
-                continue;
-            if (py >= height)
-                break;
-
-            uint8_t bits = glyph[row];
-            for (int col = 0; col < gw; col++) {
-                if (!(bits & (0x80 >> col)))
-                    continue;
-                int px = char_x + col;
-                if (px < 0)
-                    continue;
-                if (px >= width)
-                    break;
-                framebuffer[py * width + px] = color;
-            }
         }
+
+        // Skip if entirely off left edge
+        int advance = (font->widths) ? font->widths[idx] : gw;
+        if (char_x + advance <= 0) {
+            char_x += advance;
+            continue;
+        }
+
+        draw_glyph(framebuffer, width, height, char_x, y, idx, color, font);
+        char_x += advance;
     }
 }
 

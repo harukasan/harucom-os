@@ -17,6 +17,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
   mplus_dir = "#{dir}/lib/fonts/mplus_bitmap_fonts-2.2.4"
   misc_dir = "#{dir}/lib/fonts/misc-misc"
   spleen_dir = "#{dir}/lib/fonts/spleen"
+  denkichip_dir = "#{dir}/lib/fonts/x8y12pxDenkiChip"
   font8x8_dir = "#{dir}/lib/fonts/font8x8"
 
   fonts = [
@@ -44,6 +45,9 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { src: "#{spleen_dir}/spleen-12x24.bdf",
       dst: "#{include_dir}/font_spleen_12x24.h",
       args: ["-n", "spleen_12x24"] },
+    { src: "#{denkichip_dir}/x8y12pxDenkiChip.bdf",
+      dst: "#{include_dir}/font_denkichip.h",
+      args: ["-n", "denkichip"] },
   ]
 
   fonts.each do |font|

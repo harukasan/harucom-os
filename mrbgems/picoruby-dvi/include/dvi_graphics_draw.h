@@ -17,6 +17,7 @@
 #define DVI_GRAPHICS_FONT_SPLEEN_5X8  5
 #define DVI_GRAPHICS_FONT_SPLEEN_8X16 6
 #define DVI_GRAPHICS_FONT_SPLEEN_12X24 7
+#define DVI_GRAPHICS_FONT_DENKICHIP    8
 
 // Get built-in font by ID. Returns NULL for unknown IDs.
 const dvi_font_t *dvi_graphics_get_font(int font_id);
