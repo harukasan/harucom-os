@@ -435,6 +435,8 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                       mrb_fixnum_value(DVI_GRAPHICS_FONT_DENKICHIP));
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_MPLUS_J12),
                       mrb_fixnum_value(DVI_GRAPHICS_FONT_MPLUS_J12));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_DENKICHIP_J),
+                      mrb_fixnum_value(DVI_GRAPHICS_FONT_DENKICHIP_J));
 
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_pixel),
                              mrb_dvi_set_pixel, MRB_ARGS_REQ(3));

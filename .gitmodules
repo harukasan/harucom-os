@@ -16,3 +16,6 @@
 [submodule "mrbgems/picoruby-dvi/lib/fonts/spleen"]
 	path = mrbgems/picoruby-dvi/lib/fonts/spleen
 	url = https://github.com/fcambus/spleen.git
+[submodule "mrbgems/picoruby-dvi/lib/fonts/x8y12pxDenkiChip"]
+	path = mrbgems/picoruby-dvi/lib/fonts/x8y12pxDenkiChip
+	url = https://github.com/hicchicc/x8y12pxDenkiChip.git

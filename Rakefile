@@ -1,3 +1,5 @@
+require "bundler/setup"
+
 PROJECT_DIR = __dir__
 BUILD_DIR   = File.join(PROJECT_DIR, "build")
 

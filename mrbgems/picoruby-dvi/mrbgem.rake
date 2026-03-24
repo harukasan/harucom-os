@@ -12,6 +12,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
 
   scripts_dir = "#{dir}/lib/scripts"
   bdf2c = "#{scripts_dir}/bdf2c.rb"
+  ttf2c = "#{scripts_dir}/ttf2c.rb"
   font8x8_to_c = "#{scripts_dir}/font8x8_to_c.rb"
   gen_uni2jis = "#{scripts_dir}/gen_uni2jis.rb"
   mplus_dir = "#{dir}/lib/fonts/mplus_bitmap_fonts-2.2.4"
@@ -45,9 +46,6 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { src: "#{spleen_dir}/spleen-12x24.bdf",
       dst: "#{include_dir}/font_spleen_12x24.h",
       args: ["-n", "spleen_12x24"] },
-    { src: "#{denkichip_dir}/x8y12pxDenkiChip.bdf",
-      dst: "#{include_dir}/font_denkichip.h",
-      args: ["-n", "denkichip"] },
   ]
 
   fonts.each do |font|
@@ -61,6 +59,22 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
   font8x8_dst = "#{include_dir}/font8x8_basic.h"
   file font8x8_dst => [font8x8_src, font8x8_to_c, include_dir] do
     sh "ruby #{font8x8_to_c} #{font8x8_src} -o #{font8x8_dst}"
+  end
+
+  # DenkiChip ASCII (TTF via FreeType)
+  project_root = File.expand_path('../..', dir)
+  bundle_exec = "BUNDLE_GEMFILE=#{project_root}/Gemfile bundle exec ruby"
+
+  denkichip_ttf = "#{denkichip_dir}/fonts/ttf/x8y12pxDenkiChip.ttf"
+  denkichip_dst = "#{include_dir}/font_denkichip.h"
+  file denkichip_dst => [denkichip_ttf, ttf2c, include_dir] do
+    sh "#{bundle_exec} #{ttf2c} #{denkichip_ttf} -s 12 -n denkichip -o #{denkichip_dst}"
+  end
+
+  # DenkiChip JIS (TTF via FreeType, JIS indexed)
+  denkichip_jis_dst = "#{include_dir}/font_denkichip_j.h"
+  file denkichip_jis_dst => [denkichip_ttf, ttf2c, include_dir] do
+    sh "#{bundle_exec} #{ttf2c} #{denkichip_ttf} -s 12 --jis -n denkichip_j -o #{denkichip_jis_dst}"
   end
 
   # JIS X 0208 interleaved regular+bold
@@ -83,6 +97,8 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
   if (tasks & %w(default all picoruby:debug picoruby:prod microruby:debug microruby:prod)).any?
     fonts.each { |font| Rake::Task[font[:dst]].invoke }
     Rake::Task[font8x8_dst].invoke
+    Rake::Task[denkichip_dst].invoke
+    Rake::Task[denkichip_jis_dst].invoke
     Rake::Task[jis_combined_dst].invoke
     Rake::Task[uni2jis_c].invoke
   end

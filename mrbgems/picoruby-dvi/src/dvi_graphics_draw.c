@@ -13,6 +13,7 @@
 #include "font_spleen_8x16.h"
 #include "font_spleen_12x24.h"
 #include "font_denkichip.h"
+#include "font_denkichip_j.h"
 
 static const dvi_font_t *const graphics_fonts[] = {
     [DVI_GRAPHICS_FONT_8X8]          = &font8x8_basic,
@@ -25,6 +26,7 @@ static const dvi_font_t *const graphics_fonts[] = {
     [DVI_GRAPHICS_FONT_SPLEEN_12X24] = &font_spleen_12x24,
     [DVI_GRAPHICS_FONT_DENKICHIP]    = &font_denkichip,
     [DVI_GRAPHICS_FONT_MPLUS_J12]    = &font_mplus_j12_wide,
+    [DVI_GRAPHICS_FONT_DENKICHIP_J]  = &font_denkichip_j,
 };
 
 #define GRAPHICS_FONT_COUNT \
@@ -157,7 +159,8 @@ void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
         if (wide_font) {
             int jis_idx = unicode_to_jis_index(cp);
             if (jis_idx >= 0 && jis_idx < wide_font->num_chars) {
-                int advance = wide_font->glyph_width;
+                int wgw = wide_font->glyph_width;
+                int advance = (wide_font->widths) ? wide_font->widths[jis_idx] : wgw;
                 if (char_x + advance > 0)
                     draw_glyph(framebuffer, width, height, char_x, y,
                                jis_idx, color, wide_font);
