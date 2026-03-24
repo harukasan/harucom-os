@@ -29,7 +29,7 @@ class IRB
         if input.chomp.end_with?("\\")
           false
         else
-          @sandbox.compile("begin; _ = (#{input}); rescue => _; end; _")
+          @sandbox.compile("begin; _ = (#{input}\n); rescue => _; end; _")
         end
       end
 
