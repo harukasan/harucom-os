@@ -186,19 +186,22 @@ def prompt_input(console, keyboard, label, y_or_n: false)
     end
 
     case c
-    when :ENTER
+    when Keyboard::ENTER
       return input
-    when :ESCAPE
+    when Keyboard::ESCAPE
       return nil
-    when :BSPACE
+    when Keyboard::BSPACE
       if input.bytesize > 0
         input = input.byteslice(0, Editor.prev_char_byte_pos(input, input.bytesize))
       end
-    when String
-      if y_or_n
-        return c if c == "y" || c == "Y" || c == "n" || c == "N"
-      else
-        input += c
+    else
+      if c.printable?
+        ch = c.to_s
+        if y_or_n
+          return ch if ch == "y" || ch == "Y" || ch == "n" || ch == "N"
+        else
+          input += ch
+        end
       end
     end
   end
@@ -281,7 +284,7 @@ while running
   buffer.clear_dirty
 
   case c
-  when 17 # Ctrl-Q
+  when Keyboard::CTRL_Q
     if buffer.changed
       answer = prompt_input(console, keyboard, "Unsaved changes. Quit? (y/n): ", y_or_n: true)
       draw_command_bar(console)
@@ -293,7 +296,7 @@ while running
     end
     running = false
     next
-  when 19 # Ctrl-S
+  when Keyboard::CTRL_S
     unless filepath
       filepath = prompt_input(console, keyboard, "Save as: ")
       draw_command_bar(console)
@@ -313,13 +316,21 @@ while running
     rescue => e
       message = "Save failed: #{e.message}"
     end
-  when :PAGEUP
+  when Keyboard::CTRL_Z
+    if perform_undo(buffer, undo_stack, redo_stack)
+      message = "Undo"
+    end
+  when Keyboard::CTRL_Y
+    if perform_redo(buffer, undo_stack, redo_stack)
+      message = "Redo"
+    end
+  when Keyboard::PAGEUP
     scroll_top -= EDIT_ROWS
     scroll_top = 0 if scroll_top < 0
     new_y = scroll_top
     buffer.move_to(buffer.cursor_x, new_y)
     buffer.mark_dirty(:structure)
-  when :PAGEDOWN
+  when Keyboard::PAGEDOWN
     max_scroll = buffer.lines.length - EDIT_ROWS
     max_scroll = 0 if max_scroll < 0
     scroll_top += EDIT_ROWS
@@ -328,25 +339,16 @@ while running
     new_y = buffer.lines.length - 1 if new_y >= buffer.lines.length
     buffer.move_to(buffer.cursor_x, new_y)
     buffer.mark_dirty(:structure)
-  when 26 # Ctrl-Z
-    if perform_undo(buffer, undo_stack, redo_stack)
-      message = "Undo"
-    end
-  when 25 # Ctrl-Y
-    if perform_redo(buffer, undo_stack, redo_stack)
-      message = "Redo"
-    end
-  when :HOME
+  when Keyboard::HOME
     undo_record_break(undo_stack)
     buffer.head
-  when :END
+  when Keyboard::END_KEY
     undo_record_break(undo_stack)
     buffer.tail
-  when :DELETE
+  when Keyboard::DELETE
     redo_stack.clear
     undo_record_break(undo_stack)
     if buffer.cursor_x >= buffer.current_line.bytesize && buffer.cursor_y + 1 < buffer.lines.length
-      # At end of line: join with next line
       undo_record(undo_stack, [:join, buffer.cursor_y, buffer.cursor_x])
       buffer.lines[buffer.cursor_y] = buffer.current_line + buffer.lines[buffer.cursor_y + 1]
       buffer.lines.delete_at(buffer.cursor_y + 1)
@@ -360,38 +362,35 @@ while running
       buffer.delete
       buffer.mark_dirty(:content)
     end
-  when Integer
-    # Ignore other control codes
+  when Keyboard::ENTER
+    redo_stack.clear
+    undo_record(undo_stack, [:split, buffer.cursor_y, buffer.cursor_x])
+    undo_record_break(undo_stack)
+    buffer.put(c.to_buffer_input)
+  when Keyboard::BSPACE
+    redo_stack.clear
+    if buffer.cursor_x > 0
+      prev_pos = Editor.prev_char_byte_pos(buffer.current_line, buffer.cursor_x)
+      deleted = buffer.current_line.byteslice(prev_pos, buffer.cursor_x - prev_pos)
+      undo_record(undo_stack, [:delete, buffer.cursor_y, prev_pos, deleted])
+    elsif buffer.cursor_y > 0
+      undo_record_break(undo_stack)
+      undo_record(undo_stack, [:join, buffer.cursor_y - 1, buffer.lines[buffer.cursor_y - 1].bytesize])
+    end
+    buffer.put(c.to_buffer_input)
+  when Keyboard::UP, Keyboard::DOWN, Keyboard::LEFT, Keyboard::RIGHT
+    undo_record_break(undo_stack)
+    buffer.put(c.to_buffer_input)
+  when Keyboard::ESCAPE
+    # Ignore
   else
-    # String or Symbol: pass to buffer
-    case c
-    when String
+    if c.printable?
       redo_stack.clear
-      undo_record(undo_stack, [:insert, buffer.cursor_y, buffer.cursor_x, c])
-      buffer.put(c)
-    when :ENTER
-      redo_stack.clear
-      undo_record(undo_stack, [:split, buffer.cursor_y, buffer.cursor_x])
-      undo_record_break(undo_stack)
-      buffer.put(c)
-    when :BSPACE
-      redo_stack.clear
-      if buffer.cursor_x > 0
-        prev_pos = Editor.prev_char_byte_pos(buffer.current_line, buffer.cursor_x)
-        deleted = buffer.current_line.byteslice(prev_pos, buffer.cursor_x - prev_pos)
-        undo_record(undo_stack, [:delete, buffer.cursor_y, prev_pos, deleted])
-      elsif buffer.cursor_y > 0
-        undo_record_break(undo_stack)
-        undo_record(undo_stack, [:join, buffer.cursor_y - 1, buffer.lines[buffer.cursor_y - 1].bytesize])
-      end
-      buffer.put(c)
-    when :UP, :DOWN, :LEFT, :RIGHT
-      undo_record_break(undo_stack)
-      buffer.put(c)
-    when :ESCAPE
-      # Ignore
+      undo_record(undo_stack, [:insert, buffer.cursor_y, buffer.cursor_x, c.to_s])
+      buffer.put(c.to_s)
     else
-      buffer.put(c)
+      input = c.to_buffer_input
+      buffer.put(input) if input
     end
   end
 

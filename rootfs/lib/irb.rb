@@ -86,7 +86,7 @@ class IRB
     sleep_ms 5
     while @sandbox.state != :DORMANT && @sandbox.state != :SUSPENDED
       c = @keyboard.read_char
-      if c == 3
+      if c == Keyboard::CTRL_C
         @sandbox.stop
         puts "^C"
         @console.commit

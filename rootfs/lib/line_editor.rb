@@ -41,43 +41,51 @@ class LineEditor
       end
 
       # Return to live view if scrolled back
-      if @console.scroll_offset > 0 && (c.is_a?(String) || c == :ENTER || c == :BSPACE)
-        @console.scroll_forward(@console.scroll_offset)
+      if @console.scroll_offset > 0
+        case c
+        when Keyboard::ENTER, Keyboard::BSPACE
+          @console.scroll_forward(@console.scroll_offset)
+        else
+          @console.scroll_forward(@console.scroll_offset) if c.printable?
+        end
       end
 
       case c
-      when String
-        @buffer.put(c)
-      when :BSPACE, :LEFT, :RIGHT, :HOME, :END, :TAB
-        @buffer.put(c)
-      when :PAGEUP
-        @console.scroll_back(Console::ROWS - 1)
-      when :PAGEDOWN
-        @console.scroll_forward(Console::ROWS - 1)
-      when :UP
-        @buffer.put(c) if @buffer.cursor_y > 0
-      when :DOWN
-        @buffer.put(c) if @buffer.cursor_y < @buffer.lines.length - 1
-      when :DELETE
-        @buffer.delete
-      when :ENTER
+      when Keyboard::CTRL_C
+        feed
+        @console.write("^C\n")
+        @buffer.clear
+        @input_start_row = @console.row
+      when Keyboard::CTRL_D
+        return nil if @buffer.empty?
+      when Keyboard::CTRL_L
+        @console.clear
+        @input_start_row = 0
+      when Keyboard::ENTER
         script = @buffer.dump.chomp
         if check.call(script)
           feed
           return script
         else
-          @buffer.put(:ENTER)
+          @buffer.put(c.to_buffer_input)
         end
-      when 3 # Ctrl-C
-        feed
-        @console.write("^C\n")
-        @buffer.clear
-        @input_start_row = @console.row
-      when 4 # Ctrl-D
-        return nil if @buffer.empty?
-      when 12 # Ctrl-L
-        @console.clear
-        @input_start_row = 0
+      when Keyboard::PAGEUP
+        @console.scroll_back(Console::ROWS - 1)
+      when Keyboard::PAGEDOWN
+        @console.scroll_forward(Console::ROWS - 1)
+      when Keyboard::UP
+        @buffer.put(c.to_buffer_input) if @buffer.cursor_y > 0
+      when Keyboard::DOWN
+        @buffer.put(c.to_buffer_input) if @buffer.cursor_y < @buffer.lines.length - 1
+      when Keyboard::DELETE
+        @buffer.delete
+      else
+        if c.printable?
+          @buffer.put(c.to_s)
+        else
+          input = c.to_buffer_input
+          @buffer.put(input) if input
+        end
       end
     end
   end
