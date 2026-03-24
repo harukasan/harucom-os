@@ -17,10 +17,11 @@ rake clean    # remove build/
 rake distclean # remove build/ and PicoRuby build
 ```
 
-**When changing `build_config/*.rb` (adding/removing gems, changing defines),
-you must run `rake distclean` before `rake`.** `rake clean` only removes the
-CMake build directory; it does not rebuild `libmruby.a`. The PicoRuby build
-cache is separate and only cleared by `distclean`.
+**When changing `build_config/*.rb` (adding/removing gems, changing defines)
+or adding new `MRB_SYM()` identifiers in C code, you must run
+`rake distclean` before `rake`.** `rake clean` only removes the CMake build
+directory; it does not rebuild `libmruby.a` or regenerate the presym table.
+The PicoRuby build cache is separate and only cleared by `distclean`.
 
 ## Documentation
 
@@ -104,6 +105,16 @@ Guidelines:
 - Documents describe the current state only, not historical changes or comparisons with previous implementations
 - Do not use em dashes (--) in comments or documentation; use commas, periods, or parentheses instead
 - Prefer full names over abbreviations in API naming (e.g. `pixel` not `px`, `framebuffer` not `fb`)
+
+## Hardware notes
+
+- **Flash: 128 Mbit (16 MB).** The linker script currently limits FLASH to
+  4 MB, but the actual chip capacity is much larger. Flash storage size is
+  not a constraint. Prefer data structures that minimize flash read count
+  (e.g. direct lookup tables) over compact representations that require
+  many accesses (e.g. binary search).
+- **PSRAM: 8 MB (APS6404L).** Mapped via QMI CS1 at `0x11000000`. Used for
+  the mruby heap.
 
 ## Common pitfalls
 

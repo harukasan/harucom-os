@@ -122,20 +122,28 @@ mrb_dvi_fill_rect(mrb_state *mrb, mrb_value klass)
 }
 
 /*
- * DVI::Graphics.draw_text(x, y, text, color [, font])
+ * DVI::Graphics.draw_text(x, y, text, color [, font [, wide_font]])
  */
 static mrb_value
 mrb_dvi_draw_text(mrb_state *mrb, mrb_value klass)
 {
-  mrb_int x, y, color, font_id = DVI_GRAPHICS_FONT_8X8;
+  mrb_int x, y, color;
+  mrb_int font_id = DVI_GRAPHICS_FONT_8X8;
+  mrb_int wide_font_id = -1;
   const char *text;
-  mrb_get_args(mrb, "iizi|i", &x, &y, &text, &color, &font_id);
+  mrb_get_args(mrb, "iizi|ii", &x, &y, &text, &color, &font_id, &wide_font_id);
   const dvi_font_t *font = dvi_graphics_get_font(font_id);
   if (!font)
     mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown font");
+  const dvi_font_t *wide_font = NULL;
+  if (wide_font_id >= 0) {
+    wide_font = dvi_graphics_get_font(wide_font_id);
+    if (!wide_font)
+      mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown wide font");
+  }
   dvi_graphics_draw_text(dvi_get_framebuffer(),
                          DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
-                         x, y, text, (uint8_t)color, font);
+                         x, y, text, (uint8_t)color, font, wide_font);
   return mrb_nil_value();
 }
 
@@ -425,6 +433,8 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                       mrb_fixnum_value(DVI_GRAPHICS_FONT_SPLEEN_12X24));
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_DENKICHIP),
                       mrb_fixnum_value(DVI_GRAPHICS_FONT_DENKICHIP));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_MPLUS_J12),
+                      mrb_fixnum_value(DVI_GRAPHICS_FONT_MPLUS_J12));
 
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_pixel),
                              mrb_dvi_set_pixel, MRB_ARGS_REQ(3));
@@ -435,7 +445,7 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_rect),
                              mrb_dvi_fill_rect, MRB_ARGS_REQ(5));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_text),
-                             mrb_dvi_draw_text, MRB_ARGS_ARG(4, 1));
+                             mrb_dvi_draw_text, MRB_ARGS_ARG(4, 2));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_line),
                              mrb_dvi_draw_line, MRB_ARGS_REQ(5));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image),

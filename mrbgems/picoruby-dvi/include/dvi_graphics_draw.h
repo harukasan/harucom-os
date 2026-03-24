@@ -18,16 +18,19 @@
 #define DVI_GRAPHICS_FONT_SPLEEN_8X16 6
 #define DVI_GRAPHICS_FONT_SPLEEN_12X24 7
 #define DVI_GRAPHICS_FONT_DENKICHIP    8
+#define DVI_GRAPHICS_FONT_MPLUS_J12   9
 
 // Get built-in font by ID. Returns NULL for unknown IDs.
 const dvi_font_t *dvi_graphics_get_font(int font_id);
 
-// Draw a null-terminated ASCII string at pixel position (x, y).
-// Characters render left-to-right, spaced by font->glyph_width pixels.
-// Clips to framebuffer bounds per pixel.
+// Draw a UTF-8 string at pixel position (x, y).
+// Characters render left-to-right with per-glyph advance widths.
+// If wide_font is non-NULL, codepoints not found in font are looked up
+// in wide_font via Unicode-to-JIS conversion (for CJK characters).
 void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
                             int x, int y, const char *text,
-                            uint8_t color, const dvi_font_t *font);
+                            uint8_t color, const dvi_font_t *font,
+                            const dvi_font_t *wide_font);
 
 // Draw a line from (x0, y0) to (x1, y1) using Bresenham's algorithm.
 // Clips each pixel to framebuffer bounds.

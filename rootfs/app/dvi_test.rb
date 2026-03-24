@@ -81,6 +81,19 @@ end
 
 step = page + 1
 
+# Japanese text rendering
+J12 = G::FONT_MPLUS_J12
+DVI::Graphics.fill(0x00)
+DVI::Graphics.draw_text(4, 4, "M+ 12px Japanese", 0x8F, G::FONT_MPLUS_12, J12)
+DVI::Graphics.draw_text(4, 20, "こんにちは世界！", 0xFF, G::FONT_MPLUS_12, J12)
+DVI::Graphics.draw_text(4, 36, "Harucom OSへようこそ", 0xE0, G::FONT_MPLUS_12, J12)
+DVI::Graphics.draw_text(4, 52, "漢字・ひらがな・カタカナ", 0x1C, G::FONT_MPLUS_12, J12)
+DVI::Graphics.draw_text(4, 68, "ABCDEFG abcdefg 0123456789", 0xFC, G::FONT_MPLUS_12, J12)
+DVI::Graphics.draw_text(4, 88, "混在テスト: Ruby on Harucom!", 0xFF, G::FONT_MPLUS_12, J12)
+DVI::Graphics.draw_text(4, 108, "記号テスト: ★●▲■◆○△□◇", 0xE3, G::FONT_MPLUS_12, J12)
+show_step_gfx("Japanese", step, keyboard)
+step += 1
+
 # draw_line
 DVI::Graphics.fill(0x00)
 DVI::Graphics.draw_line(0, 0, 319, 239, 0xE0)

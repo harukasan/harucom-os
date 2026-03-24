@@ -1335,23 +1335,9 @@ static const char *utf8_decode(const char *str, uint32_t *cp) {
   return str + 1;
 }
 
-// Look up a Unicode codepoint in the uni2jis table (binary search).
-static uint16_t unicode_to_jis(uint32_t cp) {
-  if (cp > 0xFFFF)
-    return 0;
-  uint16_t target = (uint16_t)cp;
-  int lo = 0, hi = UNI2JIS_TABLE_SIZE - 1;
-  while (lo <= hi) {
-    int mid = (lo + hi) / 2;
-    uint16_t mid_cp = uni2jis_table[mid].unicode;
-    if (mid_cp == target)
-      return uni2jis_table[mid].jis;
-    if (mid_cp < target)
-      lo = mid + 1;
-    else
-      hi = mid - 1;
-  }
-  return 0;
+// Wrapper for shared uni2jis_lookup (defined in uni2jis_table.h).
+static inline uint16_t unicode_to_jis(uint32_t cp) {
+  return uni2jis_lookup(cp);
 }
 
 void dvi_text_put_string(int col, int row, const char *str, uint8_t attr) {

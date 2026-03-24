@@ -15,12 +15,14 @@
 #include <stdint.h>
 
 typedef struct {
-    uint8_t glyph_width;   // max glyph width (bitmap storage width)
-    uint8_t glyph_height;  // pixels per glyph vertically
-    uint16_t first_char;   // first character code in bitmap array
-    uint16_t num_chars;    // number of glyphs in bitmap array
-    const uint8_t *bitmap; // 1bpp bitmap, one byte per row, MSB = leftmost pixel
-    const uint8_t *widths; // per-glyph advance widths (NULL = fixed width)
+    uint8_t glyph_width;    // max glyph width (bitmap storage width)
+    uint8_t glyph_height;   // pixels per glyph vertically
+    uint16_t first_char;    // first character code in bitmap array
+    uint16_t num_chars;     // number of glyphs in bitmap array
+    const uint8_t *bitmap;  // 1bpp bitmap, one byte per row, MSB = leftmost pixel
+    const uint8_t *widths;  // per-glyph advance widths (NULL = fixed width)
+    uint16_t glyph_stride;  // bytes between consecutive glyphs
+                            // (0 = auto: ((glyph_width+7)/8) * glyph_height)
 } dvi_font_t;
 
 #endif

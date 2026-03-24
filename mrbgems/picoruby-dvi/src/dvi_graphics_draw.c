@@ -2,8 +2,10 @@
 #include <stdlib.h>
 
 #include "dvi_graphics_draw.h"
+#include "uni2jis_table.h"
 #include "font8x8_basic.h"
 #include "font_mplus_f12r.h"
+#include "font_mplus_j12_combined.h"
 #include "font_fixed_4x6.h"
 #include "font_fixed_5x7.h"
 #include "font_fixed_6x13.h"
@@ -13,15 +15,16 @@
 #include "font_denkichip.h"
 
 static const dvi_font_t *const graphics_fonts[] = {
-    [DVI_GRAPHICS_FONT_8X8]        = &font8x8_basic,
-    [DVI_GRAPHICS_FONT_12PX]       = &font_mplus_f12r,
-    [DVI_GRAPHICS_FONT_FIXED_4X6]  = &font_fixed_4x6,
-    [DVI_GRAPHICS_FONT_FIXED_5X7]  = &font_fixed_5x7,
-    [DVI_GRAPHICS_FONT_FIXED_6X13] = &font_fixed_6x13,
-    [DVI_GRAPHICS_FONT_SPLEEN_5X8] = &font_spleen_5x8,
-    [DVI_GRAPHICS_FONT_SPLEEN_8X16] = &font_spleen_8x16,
+    [DVI_GRAPHICS_FONT_8X8]          = &font8x8_basic,
+    [DVI_GRAPHICS_FONT_12PX]         = &font_mplus_f12r,
+    [DVI_GRAPHICS_FONT_FIXED_4X6]    = &font_fixed_4x6,
+    [DVI_GRAPHICS_FONT_FIXED_5X7]    = &font_fixed_5x7,
+    [DVI_GRAPHICS_FONT_FIXED_6X13]   = &font_fixed_6x13,
+    [DVI_GRAPHICS_FONT_SPLEEN_5X8]   = &font_spleen_5x8,
+    [DVI_GRAPHICS_FONT_SPLEEN_8X16]  = &font_spleen_8x16,
     [DVI_GRAPHICS_FONT_SPLEEN_12X24] = &font_spleen_12x24,
     [DVI_GRAPHICS_FONT_DENKICHIP]    = &font_denkichip,
+    [DVI_GRAPHICS_FONT_MPLUS_J12]    = &font_mplus_j12_wide,
 };
 
 #define GRAPHICS_FONT_COUNT \
@@ -65,6 +68,27 @@ static int32_t utf8_decode(const char **p)
     return cp;
 }
 
+// Unicode to JIS X 0208 lookup.
+// Returns linear JIS index, or -1 if not found.
+static int unicode_to_jis_index(int32_t cp)
+{
+    uint16_t jis = uni2jis_lookup(cp);
+    if (jis == 0)
+        return -1;
+    int ku = (jis >> 8) - 0x20;
+    int ten = (jis & 0xFF) - 0x20;
+    return (ku - 1) * 94 + (ten - 1);
+}
+
+// Compute the byte offset for glyph at index idx.
+static inline int glyph_offset(const dvi_font_t *font, int idx)
+{
+    if (font->glyph_stride)
+        return idx * font->glyph_stride;
+    int bytes_per_row = (font->glyph_width + 7) / 8;
+    return idx * bytes_per_row * font->glyph_height;
+}
+
 // Render one glyph at (char_x, y) and return its advance width.
 static int draw_glyph(uint8_t *framebuffer, int fb_width, int fb_height,
                        int char_x, int y, int idx,
@@ -73,7 +97,7 @@ static int draw_glyph(uint8_t *framebuffer, int fb_width, int fb_height,
     int gw = font->glyph_width;
     int gh = font->glyph_height;
     int bytes_per_row = (gw + 7) / 8;
-    const uint8_t *glyph = &font->bitmap[idx * bytes_per_row * gh];
+    const uint8_t *glyph = &font->bitmap[glyph_offset(font, idx)];
 
     for (int row = 0; row < gh; row++) {
         int py = y + row;
@@ -101,7 +125,8 @@ static int draw_glyph(uint8_t *framebuffer, int fb_width, int fb_height,
 
 void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
                             int x, int y, const char *text,
-                            uint8_t color, const dvi_font_t *font)
+                            uint8_t color, const dvi_font_t *font,
+                            const dvi_font_t *wide_font)
 {
     int gw = font->glyph_width;
     int first = font->first_char;
@@ -114,26 +139,35 @@ void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
         if (cp < 0)
             continue;
 
-        // Skip if past right edge
         if (char_x >= width)
             break;
 
+        // Try primary font
         int idx = cp - first;
-        if (idx < 0 || idx >= num) {
-            // Unknown character: advance by default width
-            char_x += gw;
-            continue;
-        }
-
-        // Skip if entirely off left edge
-        int advance = (font->widths) ? font->widths[idx] : gw;
-        if (char_x + advance <= 0) {
+        if (idx >= 0 && idx < num) {
+            int advance = (font->widths) ? font->widths[idx] : gw;
+            if (char_x + advance > 0)
+                draw_glyph(framebuffer, width, height, char_x, y,
+                           idx, color, font);
             char_x += advance;
             continue;
         }
 
-        draw_glyph(framebuffer, width, height, char_x, y, idx, color, font);
-        char_x += advance;
+        // Try wide font via Unicode-to-JIS lookup
+        if (wide_font) {
+            int jis_idx = unicode_to_jis_index(cp);
+            if (jis_idx >= 0 && jis_idx < wide_font->num_chars) {
+                int advance = wide_font->glyph_width;
+                if (char_x + advance > 0)
+                    draw_glyph(framebuffer, width, height, char_x, y,
+                               jis_idx, color, wide_font);
+                char_x += advance;
+                continue;
+            }
+        }
+
+        // Unknown character: advance by primary font width
+        char_x += gw;
     }
 }
 

@@ -100,10 +100,13 @@ set_target_properties(mruby PROPERTIES
 )
 
 # --- DVI driver library (timing-critical, always -O2) ---
+set(UNI2JIS_TABLE_C ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems/picoruby-dvi/include/uni2jis_table.c)
+set_source_files_properties(${UNI2JIS_TABLE_C} PROPERTIES GENERATED TRUE)
 add_library(picoruby-dvi
     mrbgems/picoruby-dvi/ports/rp2350/dvi_clock.c
     mrbgems/picoruby-dvi/ports/rp2350/dvi_output.c
     mrbgems/picoruby-dvi/src/dvi_graphics_draw.c
+    ${UNI2JIS_TABLE_C}
 )
 add_dependencies(picoruby-dvi build_picoruby)
 target_include_directories(picoruby-dvi PUBLIC

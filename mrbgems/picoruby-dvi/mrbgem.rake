@@ -71,17 +71,19 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     sh "ruby #{bdf2c} #{jis_r_src} --jis --bold #{jis_b_src} -n mplus_j12_combined -o #{jis_combined_dst}"
   end
 
-  # Unicode-to-JIS conversion table
-  uni2jis_dst = "#{include_dir}/uni2jis_table.h"
-  file uni2jis_dst => [gen_uni2jis, include_dir] do
-    sh "ruby #{gen_uni2jis} -o #{uni2jis_dst}"
+  # Unicode-to-JIS conversion table (generates .c and .h)
+  uni2jis_c = "#{include_dir}/uni2jis_table.c"
+  uni2jis_h = "#{include_dir}/uni2jis_table.h"
+  file uni2jis_c => [gen_uni2jis, include_dir] do
+    sh "ruby #{gen_uni2jis} -o #{uni2jis_c}"
   end
+  file uni2jis_h => uni2jis_c
 
   tasks = Rake.application.top_level_tasks
   if (tasks & %w(default all picoruby:debug picoruby:prod microruby:debug microruby:prod)).any?
     fonts.each { |font| Rake::Task[font[:dst]].invoke }
     Rake::Task[font8x8_dst].invoke
     Rake::Task[jis_combined_dst].invoke
-    Rake::Task[uni2jis_dst].invoke
+    Rake::Task[uni2jis_c].invoke
   end
 end
