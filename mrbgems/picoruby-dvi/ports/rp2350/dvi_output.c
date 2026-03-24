@@ -61,10 +61,7 @@
 #define MODE_H_FRONT_PORCH 16
 #define MODE_H_SYNC_WIDTH 96
 #define MODE_H_BACK_PORCH 48
-#define MODE_H_ACTIVE_PIXELS                                                   \
-  640 // output pixel count (text: native, pixel: 320 rendered)
-#define MODE_H_RENDER_PIXELS                                                   \
-  320 // pixel mode render width (2x HSTX scaling -> 640 output)
+#define MODE_H_ACTIVE_PIXELS 640
 
 #define MODE_V_FRONT_PORCH 10
 #define MODE_V_SYNC_WIDTH 2
@@ -891,6 +888,26 @@ static void __force_inline __scratch_x("")
       int line = first_line + i;
       int grp = i * 8;
 
+#if DVI_GRAPHICS_SCALE == 1
+      // Native 640x480: DMA_SIZE_32, 4 pixels per word, no scaling
+      int fb_line = line;
+      if (full_build) {
+        buf[grp + 0] = ctrl_sync;
+        buf[grp + 1] = fifo;
+        buf[grp + 2] = count_of(hsync_cmd);
+        buf[grp + 3] = (uintptr_t)hsync_cmd;
+        buf[grp + 4] = ctrl_text_pixel;
+        buf[grp + 5] = fifo;
+        buf[grp + 6] = DVI_GRAPHICS_WIDTH / sizeof(uint32_t);
+        buf[grp + 7] =
+            (uintptr_t)&framebuf[fb_line * DVI_GRAPHICS_WIDTH];
+      } else {
+        buf[grp + 7] =
+            (uintptr_t)&framebuf[fb_line * DVI_GRAPHICS_WIDTH];
+      }
+#else
+      // Half 320x240: DMA_SIZE_8, byte-lane replication for 2x scaling
+      int fb_line = line >> 1;
       if (full_build) {
         buf[grp + 0] = ctrl_sync;
         buf[grp + 1] = fifo;
@@ -898,13 +915,14 @@ static void __force_inline __scratch_x("")
         buf[grp + 3] = (uintptr_t)hsync_cmd;
         buf[grp + 4] = ctrl_pixel;
         buf[grp + 5] = fifo;
-        buf[grp + 6] = MODE_H_RENDER_PIXELS;
+        buf[grp + 6] = DVI_GRAPHICS_WIDTH;
         buf[grp + 7] =
-            (uintptr_t)&framebuf[(line >> 1) * MODE_H_RENDER_PIXELS];
+            (uintptr_t)&framebuf[fb_line * DVI_GRAPHICS_WIDTH];
       } else {
         buf[grp + 7] =
-            (uintptr_t)&framebuf[(line >> 1) * MODE_H_RENDER_PIXELS];
+            (uintptr_t)&framebuf[fb_line * DVI_GRAPHICS_WIDTH];
       }
+#endif
     }
     if (full_build) {
       buf[BATCH_SIZE * 8 + 0] = ctrl_stop;
@@ -978,6 +996,14 @@ void __scratch_x("") dma_irq_handler(void) {
     if (pending >= 0) {
       next_mode = -1;
       active_mode = (dvi_mode_t)pending;
+#if DVI_GRAPHICS_SCALE == 1
+      // Both modes use ENC_N_SHIFTS=4 (4 unique pixels per 32-bit word)
+      hstx_ctrl_hw->expand_shift =
+          4 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
+          8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
+          1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
+          0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
+#else
       if (active_mode == DVI_MODE_TEXT) {
         hstx_ctrl_hw->expand_shift =
             4 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
@@ -991,6 +1017,7 @@ void __scratch_x("") dma_irq_handler(void) {
             1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
             0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
       }
+#endif
     }
   }
 
@@ -1039,6 +1066,13 @@ void dvi_start_mode(dvi_mode_t mode) {
                               1 << HSTX_CTRL_EXPAND_TMDS_L0_NBITS_LSB |
                               26 << HSTX_CTRL_EXPAND_TMDS_L0_ROT_LSB;
 
+#if DVI_GRAPHICS_SCALE == 1
+  // Both modes use DMA_SIZE_32 with 4 shifts of 8 bits (4 unique pixels per word)
+  hstx_ctrl_hw->expand_shift = 4 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
+                               8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
+                               1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
+                               0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
+#else
   if (mode == DVI_MODE_TEXT) {
     // Text mode: DMA_SIZE_32, 4 shifts of 8 bits = 4 unique pixels per word
     hstx_ctrl_hw->expand_shift = 4 << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
@@ -1052,6 +1086,7 @@ void dvi_start_mode(dvi_mode_t mode) {
                                  1 << HSTX_CTRL_EXPAND_SHIFT_RAW_N_SHIFTS_LSB |
                                  0 << HSTX_CTRL_EXPAND_SHIFT_RAW_SHIFT_LSB;
   }
+#endif
 
   // Serial output: CLKDIV=5, N_SHIFTS=5, SHIFT=2.
   hstx_ctrl_hw->csr = 0;

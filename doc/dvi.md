@@ -20,7 +20,7 @@ Class: `DVI` (provided by picoruby-dvi mrbgem)
 
 `DVI` provides display output control. Two display modes are available:
 `DVI::TEXT_MODE` (106x37 text grid at 640x480) and `DVI::GRAPHICS_MODE`
-(320x240 RGB332 framebuffer, 2x scaled).
+(640x480 RGB332 framebuffer).
 
 ```ruby
 DVI.set_mode(DVI::TEXT_MODE)
@@ -134,9 +134,11 @@ Class: `DVI::Graphics` (provided by picoruby-dvi mrbgem)
 - [DVI::Graphics.fill_rect](#dvigraphicsfill_rectx-y-width-height-color)
 
 `DVI::Graphics` provides pixel-level framebuffer access. The framebuffer
-is 320x240 pixels in RGB332 format, 2x scaled to 640x480 on output.
+resolution is set by `DVI_GRAPHICS_SCALE`: native 640x480 at scale 1
+(default), or 320x240 at scale 2 (2x scaled to 640x480 on output).
+RGB332 format (1 byte per pixel).
 
-Constants: `DVI::Graphics::WIDTH` (320), `DVI::Graphics::HEIGHT` (240).
+Constants: `DVI::Graphics::WIDTH` (640), `DVI::Graphics::HEIGHT` (480).
 
 ```ruby
 DVI.set_mode(DVI::GRAPHICS_MODE)
@@ -228,7 +230,9 @@ Block until the next VBlank. See
 uint8_t *dvi_get_framebuffer(void);
 ```
 
-Return a pointer to the 320x240 RGB332 framebuffer (75 KB in main SRAM).
+Return a pointer to the RGB332 framebuffer in main SRAM.
+Size depends on `DVI_GRAPHICS_SCALE`: 300 KB at scale 1 (640x480),
+75 KB at scale 2 (320x240).
 
 ### dvi_text_set_font
 
@@ -453,10 +457,13 @@ PLL_USB at 48 MHz). UART baud rates remain correct.
 
 Two display modes are supported, selected via `dvi_set_mode()`:
 
-**Graphics mode** (`DVI_MODE_GRAPHICS`): 320x240 RGB332 framebuffer (75 KB)
-in main SRAM. HSTX performs 2x horizontal scaling via DMA_SIZE_8 byte-lane
-replication (`ENC_N_SHIFTS=2`). Vertical 2x by line doubling in the DMA
-IRQ handler.
+**Graphics mode** (`DVI_MODE_GRAPHICS`): RGB332 framebuffer in main SRAM.
+Resolution is set at compile time by `DVI_GRAPHICS_SCALE` (defined in
+`dvi.h`, default 1). At scale 1, the framebuffer is 640x480 (300 KB)
+with DMA_SIZE_32 pixel transfer (`ENC_N_SHIFTS=4`), matching text mode.
+At scale 2, the framebuffer is 320x240 (75 KB) with 2x horizontal
+scaling via DMA_SIZE_8 byte-lane replication (`ENC_N_SHIFTS=2`) and
+vertical 2x by line doubling in the DMA IRQ handler.
 
 **Text mode** (`DVI_MODE_TEXT`): text VRAM (106 columns x 37 rows) rendered
 per-scanline at native 640x480 resolution. DMA uses DMA_SIZE_32 with

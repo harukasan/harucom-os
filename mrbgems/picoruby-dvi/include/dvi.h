@@ -8,9 +8,14 @@
 extern "C" {
 #endif
 
-// Graphics mode framebuffer dimensions (320x240, 2x scaled to 640x480)
-#define DVI_GRAPHICS_WIDTH  320
-#define DVI_GRAPHICS_HEIGHT 240
+// Graphics mode resolution scale factor.
+// 1 = native 640x480 (307.2 KB framebuffer)
+// 2 = half 320x240, 2x scaled to 640x480 (76.8 KB framebuffer)
+#ifndef DVI_GRAPHICS_SCALE
+#define DVI_GRAPHICS_SCALE 1
+#endif
+#define DVI_GRAPHICS_WIDTH  (640 / DVI_GRAPHICS_SCALE)
+#define DVI_GRAPHICS_HEIGHT (480 / DVI_GRAPHICS_SCALE)
 
 // Text mode grid dimensions (12px font: 6px half-width, 13px glyph height)
 #define DVI_TEXT_MAX_COLS 106
@@ -28,7 +33,7 @@ typedef struct {
 } dvi_text_cell_t;
 
 typedef enum {
-    DVI_MODE_GRAPHICS,  // 320x240 RGB332, 2x scaled to 640x480
+    DVI_MODE_GRAPHICS,  // RGB332 framebuffer (resolution set by DVI_GRAPHICS_SCALE)
     DVI_MODE_TEXT,      // text VRAM, native 640x480
 } dvi_mode_t;
 
