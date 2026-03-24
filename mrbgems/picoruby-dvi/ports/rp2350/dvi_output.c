@@ -30,7 +30,7 @@
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
-#include "fonts/uni2jis_table.h"
+#include "uni2jis_table.h"
 
 // ----------------------------------------------------------------------------
 // DVI constants

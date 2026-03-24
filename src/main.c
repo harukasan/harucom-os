@@ -33,9 +33,9 @@
 #include <mruby/array.h>
 #include <mruby/string.h>
 
-#include "fonts/font_mplus_f12b.h"
-#include "fonts/font_mplus_f12r.h"
-#include "fonts/font_mplus_j12_combined.h"
+#include "font_mplus_f12b.h"
+#include "font_mplus_f12r.h"
+#include "font_mplus_j12_combined.h"
 
 /* Minimal Ruby bootstrap: mount filesystem, set load path, load system.rb. */
 // clang-format off

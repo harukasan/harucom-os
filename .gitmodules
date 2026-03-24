@@ -7,3 +7,6 @@
 [submodule "lib/Pico-PIO-USB"]
 	path = lib/Pico-PIO-USB
 	url = https://github.com/sekigon-gonnoc/Pico-PIO-USB.git
+[submodule "mrbgems/picoruby-dvi/lib/fonts/font8x8"]
+	path = mrbgems/picoruby-dvi/lib/fonts/font8x8
+	url = https://github.com/dhepper/font8x8
