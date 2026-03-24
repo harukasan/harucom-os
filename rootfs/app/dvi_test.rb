@@ -47,13 +47,23 @@ DVI::Graphics.draw_text(10, 30, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0x1C)
 DVI::Graphics.draw_text(10, 40, "0123456789 !@#$%^&*()", 0xFC)
 show_step_gfx("draw_text 8x8", 1, keyboard)
 
-# Step 2: draw_text (12px font)
+# Step 2: font showcase
+G = DVI::Graphics
 DVI::Graphics.fill(0x00)
-DVI::Graphics.draw_text(10, 10, "M+ 12px font", 0xFF, DVI::Graphics::FONT_12PX)
-DVI::Graphics.draw_text(10, 26, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0xE0, DVI::Graphics::FONT_12PX)
-DVI::Graphics.draw_text(10, 42, "abcdefghijklmnopqrstuvwxyz", 0x1C, DVI::Graphics::FONT_12PX)
-DVI::Graphics.draw_text(10, 58, "0123456789 !@#$%^&*()", 0xFC, DVI::Graphics::FONT_12PX)
-show_step_gfx("draw_text 12px", 2, keyboard)
+y = 4
+[
+  [G::FONT_8X8,       "8x8",       0xE0],
+  [G::FONT_MPLUS_12,  "M+ 12px",   0x1C],
+  [G::FONT_FIXED_4X6, "Fixed 4x6", 0xFC],
+  [G::FONT_FIXED_5X7, "Fixed 5x7", 0x03],
+  [G::FONT_FIXED_6X13,"Fixed 6x13",0xFF],
+].each do |font, label, color|
+  DVI::Graphics.draw_text(4, y, label, 0x8F, font)
+  DVI::Graphics.draw_text(4, y + 12, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", color, font)
+  DVI::Graphics.draw_text(4, y + 24, "abcdefghijklmnopqrstuvwxyz 0123456789", color, font)
+  y += 42
+end
+show_step_gfx("font showcase", 2, keyboard)
 
 # Step 3: draw_line
 DVI::Graphics.fill(0x00)

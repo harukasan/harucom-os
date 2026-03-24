@@ -9,8 +9,11 @@
 #include "dvi_font.h"
 
 // Font ID constants (used by Ruby bindings)
-#define DVI_GRAPHICS_FONT_8X8   0
-#define DVI_GRAPHICS_FONT_12PX  1
+#define DVI_GRAPHICS_FONT_8X8       0
+#define DVI_GRAPHICS_FONT_12PX      1
+#define DVI_GRAPHICS_FONT_FIXED_4X6  2
+#define DVI_GRAPHICS_FONT_FIXED_5X7  3
+#define DVI_GRAPHICS_FONT_FIXED_6X13 4
 
 // Get built-in font by ID. Returns NULL for unknown IDs.
 const dvi_font_t *dvi_graphics_get_font(int font_id);

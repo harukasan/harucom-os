@@ -15,6 +15,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
   font8x8_to_c = "#{scripts_dir}/font8x8_to_c.rb"
   gen_uni2jis = "#{scripts_dir}/gen_uni2jis.rb"
   mplus_dir = "#{dir}/lib/fonts/mplus_bitmap_fonts-2.2.4"
+  misc_dir = "#{dir}/lib/fonts/misc-misc"
   font8x8_dir = "#{dir}/lib/fonts/font8x8"
 
   fonts = [
@@ -24,6 +25,15 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { src: "#{mplus_dir}/fonts_e/mplus_f12b.bdf",
       dst: "#{include_dir}/font_mplus_f12b.h",
       args: ["-n", "mplus_f12b"] },
+    { src: "#{misc_dir}/4x6.bdf",
+      dst: "#{include_dir}/font_fixed_4x6.h",
+      args: ["-n", "fixed_4x6"] },
+    { src: "#{misc_dir}/5x7.bdf",
+      dst: "#{include_dir}/font_fixed_5x7.h",
+      args: ["-n", "fixed_5x7"] },
+    { src: "#{misc_dir}/6x13.bdf",
+      dst: "#{include_dir}/font_fixed_6x13.h",
+      args: ["-n", "fixed_6x13"] },
   ]
 
   fonts.each do |font|

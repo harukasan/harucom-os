@@ -3,13 +3,17 @@
 
 #include "dvi_graphics_draw.h"
 #include "font8x8_basic.h"
-
-// M+ 12px regular font (6x13 half-width)
 #include "font_mplus_f12r.h"
+#include "font_fixed_4x6.h"
+#include "font_fixed_5x7.h"
+#include "font_fixed_6x13.h"
 
 static const dvi_font_t *const graphics_fonts[] = {
-    [DVI_GRAPHICS_FONT_8X8]  = &font8x8_basic,
-    [DVI_GRAPHICS_FONT_12PX] = &font_mplus_f12r,
+    [DVI_GRAPHICS_FONT_8X8]       = &font8x8_basic,
+    [DVI_GRAPHICS_FONT_12PX]      = &font_mplus_f12r,
+    [DVI_GRAPHICS_FONT_FIXED_4X6]  = &font_fixed_4x6,
+    [DVI_GRAPHICS_FONT_FIXED_5X7]  = &font_fixed_5x7,
+    [DVI_GRAPHICS_FONT_FIXED_6X13] = &font_fixed_6x13,
 };
 
 #define GRAPHICS_FONT_COUNT \
