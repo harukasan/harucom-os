@@ -59,3 +59,50 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
+
+## M+ BITMAP FONTS
+
+- Repository: https://ftp.iij.ad.jp/pub/osdn.jp/mplus-fonts/5030/
+- License:
+
+
+```
+-
+M+ BITMAP FONTS            Copyright 2002-2005  COZ <coz@users.sourceforge.jp>
+-
+
+LICENSE
+
+
+
+
+These fonts are free softwares.
+Unlimited permission is granted to use, copy, and distribute it, with
+or without modification, either commercially and noncommercially.
+THESE FONTS ARE PROVIDED "AS IS" WITHOUT WARRANTY.
+```
+
+## 8x8 monochrome bitmap font for rendering
+
+- Repository: https://github.com/dhepper/font8x8
+- License:
+
+```
+Credits
+=======
+These header files are directly derived from an assembler file fetched from:
+http://dimensionalrift.homelinux.net/combuster/mos3/?p=viewsource&file=/modules/gfx/font8_8.asm
+
+Original header:
+
+; Summary: font8_8.asm
+; 8x8 monochrome bitmap fonts for rendering
+;
+; Author:
+;     Marcel Sondaar
+;     International Business Machines (public domain VGA fonts)
+;
+; License:
+;     Public Domain
+;
+```
