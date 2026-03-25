@@ -7,6 +7,7 @@ class P5
     @fill_enabled = true
     @stroke_color = 0xFF
     @stroke_enabled = true
+    @stroke_weight = 1
     @font = G::FONT_8X8
     @wide_font = nil
     @text_color = 0xFF
@@ -50,6 +51,10 @@ class P5
     @stroke_enabled = false
   end
 
+  def stroke_weight(w)
+    @stroke_weight = w
+  end
+
   def text_font(font, wide_font = nil)
     @font = font
     @wide_font = wide_font
@@ -66,7 +71,13 @@ class P5
   end
 
   def line(x0, y0, x1, y1)
-    G.draw_line(x0, y0, x1, y1, @stroke_color) if @stroke_enabled
+    if @stroke_enabled
+      if @stroke_weight > 1
+        G.draw_thick_line(x0, y0, x1, y1, @stroke_weight, @stroke_color)
+      else
+        G.draw_line(x0, y0, x1, y1, @stroke_color)
+      end
+    end
   end
 
   def rect(x, y, w, h)
@@ -79,12 +90,23 @@ class P5
     G.draw_circle(cx, cy, r, @stroke_color) if @stroke_enabled
   end
 
+  def ellipse(cx, cy, rx, ry)
+    G.fill_ellipse(cx, cy, rx, ry, @fill_color) if @fill_enabled
+    G.draw_ellipse(cx, cy, rx, ry, @stroke_color) if @stroke_enabled
+  end
+
   def triangle(x0, y0, x1, y1, x2, y2)
     G.fill_triangle(x0, y0, x1, y1, x2, y2, @fill_color) if @fill_enabled
     if @stroke_enabled
-      G.draw_line(x0, y0, x1, y1, @stroke_color)
-      G.draw_line(x1, y1, x2, y2, @stroke_color)
-      G.draw_line(x2, y2, x0, y0, @stroke_color)
+      if @stroke_weight > 1
+        G.draw_thick_line(x0, y0, x1, y1, @stroke_weight, @stroke_color)
+        G.draw_thick_line(x1, y1, x2, y2, @stroke_weight, @stroke_color)
+        G.draw_thick_line(x2, y2, x0, y0, @stroke_weight, @stroke_color)
+      else
+        G.draw_line(x0, y0, x1, y1, @stroke_color)
+        G.draw_line(x1, y1, x2, y2, @stroke_color)
+        G.draw_line(x2, y2, x0, y0, @stroke_color)
+      end
     end
   end
 

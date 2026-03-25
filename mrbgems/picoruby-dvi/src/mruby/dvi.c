@@ -178,6 +178,48 @@ mrb_dvi_fill_triangle(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.fill_ellipse(cx, cy, rx, ry, color)
+ */
+static mrb_value
+mrb_dvi_fill_ellipse(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int cx, cy, rx, ry, color;
+  mrb_get_args(mrb, "iiiii", &cx, &cy, &rx, &ry, &color);
+  dvi_graphics_fill_ellipse(dvi_get_framebuffer(),
+                            DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                            cx, cy, rx, ry, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_ellipse(cx, cy, rx, ry, color)
+ */
+static mrb_value
+mrb_dvi_draw_ellipse(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int cx, cy, rx, ry, color;
+  mrb_get_args(mrb, "iiiii", &cx, &cy, &rx, &ry, &color);
+  dvi_graphics_draw_ellipse(dvi_get_framebuffer(),
+                            DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                            cx, cy, rx, ry, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_thick_line(x0, y0, x1, y1, thickness, color)
+ */
+static mrb_value
+mrb_dvi_draw_thick_line(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int x0, y0, x1, y1, thickness, color;
+  mrb_get_args(mrb, "iiiiii", &x0, &y0, &x1, &y1, &thickness, &color);
+  dvi_graphics_draw_thick_line(dvi_get_framebuffer(),
+                               DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                               x0, y0, x1, y1, thickness, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
  * DVI::Graphics.draw_text(x, y, text, color [, font [, wide_font]])
  */
 static mrb_value
@@ -489,6 +531,12 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_draw_circle, MRB_ARGS_REQ(4));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_triangle),
                              mrb_dvi_fill_triangle, MRB_ARGS_REQ(7));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_ellipse),
+                             mrb_dvi_fill_ellipse, MRB_ARGS_REQ(5));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_ellipse),
+                             mrb_dvi_draw_ellipse, MRB_ARGS_REQ(5));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_thick_line),
+                             mrb_dvi_draw_thick_line, MRB_ARGS_REQ(6));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_text),
                              mrb_dvi_draw_text, MRB_ARGS_ARG(4, 2));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_line),

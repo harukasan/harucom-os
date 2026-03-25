@@ -337,6 +337,197 @@ void dvi_graphics_fill_triangle(uint8_t *framebuffer, int width, int height,
     }
 }
 
+void dvi_graphics_fill_ellipse(uint8_t *framebuffer, int width, int height,
+                               int cx, int cy, int rx, int ry, uint8_t color)
+{
+    if (rx < 0 || ry < 0)
+        return;
+    if (rx == 0 && ry == 0) {
+        plot_pixel(framebuffer, width, height, cx, cy, color);
+        return;
+    }
+    if (rx == 0) {
+        // Vertical line
+        for (int y = -ry; y <= ry; y++)
+            plot_pixel(framebuffer, width, height, cx, cy + y, color);
+        return;
+    }
+    if (ry == 0) {
+        fill_span(framebuffer, width, height, cx - rx, cx + rx, cy, color);
+        return;
+    }
+
+    // Midpoint ellipse algorithm with horizontal span fill
+    long rx2 = (long)rx * rx;
+    long ry2 = (long)ry * ry;
+    long two_rx2 = 2 * rx2;
+    long two_ry2 = 2 * ry2;
+
+    // Region 1: dy/dx > -1
+    int x = 0, y = ry;
+    long dx = 0, dy = two_rx2 * y;
+    long d1 = ry2 - rx2 * ry + rx2 / 4;
+
+    while (dx < dy) {
+        fill_span(framebuffer, width, height, cx - x, cx + x, cy + y, color);
+        fill_span(framebuffer, width, height, cx - x, cx + x, cy - y, color);
+        x++;
+        dx += two_ry2;
+        if (d1 < 0) {
+            d1 += dx + ry2;
+        } else {
+            y--;
+            dy -= two_rx2;
+            d1 += dx - dy + ry2;
+        }
+    }
+
+    // Region 2: dy/dx <= -1
+    long d2 = ry2 * ((long)(2 * x + 1) * (2 * x + 1)) / 4
+            + rx2 * ((long)(y - 1) * (y - 1))
+            - rx2 * ry2;
+
+    while (y >= 0) {
+        fill_span(framebuffer, width, height, cx - x, cx + x, cy + y, color);
+        fill_span(framebuffer, width, height, cx - x, cx + x, cy - y, color);
+        y--;
+        dy -= two_rx2;
+        if (d2 > 0) {
+            d2 += rx2 - dy;
+        } else {
+            x++;
+            dx += two_ry2;
+            d2 += dx - dy + rx2;
+        }
+    }
+}
+
+void dvi_graphics_draw_ellipse(uint8_t *framebuffer, int width, int height,
+                               int cx, int cy, int rx, int ry, uint8_t color)
+{
+    if (rx < 0 || ry < 0)
+        return;
+    if (rx == 0 && ry == 0) {
+        plot_pixel(framebuffer, width, height, cx, cy, color);
+        return;
+    }
+    if (rx == 0) {
+        for (int y = -ry; y <= ry; y++)
+            plot_pixel(framebuffer, width, height, cx, cy + y, color);
+        return;
+    }
+    if (ry == 0) {
+        for (int x = -rx; x <= rx; x++)
+            plot_pixel(framebuffer, width, height, cx + x, cy, color);
+        return;
+    }
+
+    // Midpoint ellipse algorithm (outline only)
+    long rx2 = (long)rx * rx;
+    long ry2 = (long)ry * ry;
+    long two_rx2 = 2 * rx2;
+    long two_ry2 = 2 * ry2;
+
+    // Region 1
+    int x = 0, y = ry;
+    long dx = 0, dy = two_rx2 * y;
+    long d1 = ry2 - rx2 * ry + rx2 / 4;
+
+    while (dx < dy) {
+        plot_pixel(framebuffer, width, height, cx + x, cy + y, color);
+        plot_pixel(framebuffer, width, height, cx - x, cy + y, color);
+        plot_pixel(framebuffer, width, height, cx + x, cy - y, color);
+        plot_pixel(framebuffer, width, height, cx - x, cy - y, color);
+        x++;
+        dx += two_ry2;
+        if (d1 < 0) {
+            d1 += dx + ry2;
+        } else {
+            y--;
+            dy -= two_rx2;
+            d1 += dx - dy + ry2;
+        }
+    }
+
+    // Region 2
+    long d2 = ry2 * ((long)(2 * x + 1) * (2 * x + 1)) / 4
+            + rx2 * ((long)(y - 1) * (y - 1))
+            - rx2 * ry2;
+
+    while (y >= 0) {
+        plot_pixel(framebuffer, width, height, cx + x, cy + y, color);
+        plot_pixel(framebuffer, width, height, cx - x, cy + y, color);
+        plot_pixel(framebuffer, width, height, cx + x, cy - y, color);
+        plot_pixel(framebuffer, width, height, cx - x, cy - y, color);
+        y--;
+        dy -= two_rx2;
+        if (d2 > 0) {
+            d2 += rx2 - dy;
+        } else {
+            x++;
+            dx += two_ry2;
+            d2 += dx - dy + rx2;
+        }
+    }
+}
+
+void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height,
+                                  int x0, int y0, int x1, int y1,
+                                  int thickness, uint8_t color)
+{
+    if (thickness <= 1) {
+        dvi_graphics_draw_line(framebuffer, width, height, x0, y0, x1, y1, color);
+        return;
+    }
+
+    // Draw the line as a filled parallelogram perpendicular to the direction
+    int dx = x1 - x0;
+    int dy = y1 - y0;
+
+    if (dx == 0 && dy == 0) {
+        // Single point: draw a filled circle
+        dvi_graphics_fill_circle(framebuffer, width, height, x0, y0, thickness / 2, color);
+        return;
+    }
+
+    // For axis-aligned lines, use optimized fill
+    int half = thickness / 2;
+    if (dy == 0) {
+        // Horizontal line
+        int left = x0 < x1 ? x0 : x1;
+        int right = x0 < x1 ? x1 : x0;
+        for (int iy = -half; iy < thickness - half; iy++)
+            fill_span(framebuffer, width, height, left, right, y0 + iy, color);
+        return;
+    }
+    if (dx == 0) {
+        // Vertical line
+        int top = y0 < y1 ? y0 : y1;
+        int bot = y0 < y1 ? y1 : y0;
+        for (int iy = top; iy <= bot; iy++)
+            fill_span(framebuffer, width, height, x0 - half, x0 + thickness - half - 1, iy, color);
+        return;
+    }
+
+    // General case: draw multiple parallel lines offset perpendicular
+    // Perpendicular direction scaled by thickness
+    // Use Bresenham for each offset line
+    int abs_dx = abs(dx);
+    int abs_dy = abs(dy);
+
+    if (abs_dx >= abs_dy) {
+        // More horizontal: offset in y
+        for (int i = -half; i < thickness - half; i++)
+            dvi_graphics_draw_line(framebuffer, width, height,
+                                   x0, y0 + i, x1, y1 + i, color);
+    } else {
+        // More vertical: offset in x
+        for (int i = -half; i < thickness - half; i++)
+            dvi_graphics_draw_line(framebuffer, width, height,
+                                   x0 + i, y0, x1 + i, y1, color);
+    }
+}
+
 void dvi_graphics_draw_image(uint8_t *framebuffer, int width, int height,
                              const uint8_t *data, int x, int y,
                              int image_width, int image_height)

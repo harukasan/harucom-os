@@ -154,7 +154,39 @@ p5.text_color(0xFF)
 p5.text("triangle: fill+stroke, stroke only, fill only", 10, 10)
 show_step(p5, "triangle", 8, keyboard)
 
-# Step 9: combined scene
+# Step 9: ellipse
+p5.background(0x00)
+p5.fill(p5.color(100, 0, 200))
+p5.stroke(0xFF)
+p5.ellipse(160, 200, 120, 60)
+p5.fill(p5.color(0, 200, 100))
+p5.ellipse(400, 200, 60, 120)
+p5.no_fill
+p5.stroke(0xE0)
+p5.ellipse(320, 360, 150, 40)
+p5.text_color(0xFF)
+p5.text("ellipse: fill+stroke, no_fill", 10, 10)
+show_step(p5, "ellipse", 9, keyboard)
+
+# Step 10: stroke_weight
+p5.background(0x00)
+p5.stroke(0xFF)
+p5.stroke_weight(1)
+p5.line(40, 80, 600, 80)
+p5.stroke_weight(3)
+p5.line(40, 140, 600, 140)
+p5.stroke_weight(5)
+p5.line(40, 220, 600, 220)
+p5.stroke_weight(3)
+p5.stroke(0xE0)
+p5.fill(0x1C)
+p5.triangle(100, 420, 250, 300, 400, 420)
+p5.stroke_weight(1)
+p5.text_color(0xFF)
+p5.text("stroke_weight: 1, 3, 5 + thick triangle", 10, 10)
+show_step(p5, "stroke_weight", 10, keyboard)
+
+# Step 11: combined scene
 p5.background(p5.color(0, 0, 64))
 p5.fill(p5.color(200, 100, 0))
 p5.stroke(0xFF)
@@ -177,7 +209,7 @@ p5.text("fill+stroke", 50, 140)
 p5.text("stroke only", 350, 140)
 p5.text("fill only", 50, 340)
 p5.text("fill+stroke", 350, 340)
-show_step(p5, "combined scene", 9, keyboard)
+show_step(p5, "combined scene", 11, keyboard)
 
 # Restore text mode
 DVI.set_mode(DVI::TEXT_MODE)

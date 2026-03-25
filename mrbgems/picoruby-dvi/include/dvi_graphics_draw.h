@@ -57,4 +57,17 @@ void dvi_graphics_fill_triangle(uint8_t *framebuffer, int width, int height,
                                 int x0, int y0, int x1, int y1,
                                 int x2, int y2, uint8_t color);
 
+// Fill an ellipse centered at (cx, cy) with radii (rx, ry).
+void dvi_graphics_fill_ellipse(uint8_t *framebuffer, int width, int height,
+                               int cx, int cy, int rx, int ry, uint8_t color);
+
+// Draw an ellipse outline centered at (cx, cy) with radii (rx, ry).
+void dvi_graphics_draw_ellipse(uint8_t *framebuffer, int width, int height,
+                               int cx, int cy, int rx, int ry, uint8_t color);
+
+// Draw a line with a given thickness.
+void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height,
+                                  int x0, int y0, int x1, int y1,
+                                  int thickness, uint8_t color);
+
 #endif // DVI_GRAPHICS_DRAW_H
