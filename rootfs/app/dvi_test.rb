@@ -30,8 +30,8 @@ def show_step_text(title, detail, step, kb)
 end
 
 G = DVI::Graphics
-W = G::WIDTH
-H = G::HEIGHT
+W = G.width
+H = G.height
 
 def show_step_gfx(title, step, kb)
   G.fill_rect(0, H - 10, W, 10, 0x00)

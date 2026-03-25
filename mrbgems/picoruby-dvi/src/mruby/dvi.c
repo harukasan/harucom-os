@@ -60,6 +60,41 @@ mrb_dvi_frame_count(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.width
+ */
+static mrb_value
+mrb_dvi_graphics_width(mrb_state *mrb, mrb_value klass)
+{
+  return mrb_fixnum_value(dvi_graphics_get_width());
+}
+
+/*
+ * DVI::Graphics.height
+ */
+static mrb_value
+mrb_dvi_graphics_height(mrb_state *mrb, mrb_value klass)
+{
+  return mrb_fixnum_value(dvi_graphics_get_height());
+}
+
+/*
+ * DVI::Graphics.set_resolution(width, height)
+ */
+static mrb_value
+mrb_dvi_set_resolution(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int w, h;
+  mrb_get_args(mrb, "ii", &w, &h);
+  if (w == 640 && h == 480)
+    dvi_set_graphics_scale(1);
+  else if (w == 320 && h == 240)
+    dvi_set_graphics_scale(2);
+  else
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "resolution must be 640x480 or 320x240");
+  return mrb_nil_value();
+}
+
+/*
  * DVI::Graphics.commit
  */
 static mrb_value
@@ -101,9 +136,9 @@ mrb_dvi_set_pixel(mrb_state *mrb, mrb_value klass)
 {
   mrb_int x, y, color;
   mrb_get_args(mrb, "iii", &x, &y, &color);
-  if (x < 0 || x >= DVI_GRAPHICS_WIDTH || y < 0 || y >= DVI_GRAPHICS_HEIGHT)
+  if (x < 0 || x >= dvi_graphics_get_width() || y < 0 || y >= dvi_graphics_get_height())
     return mrb_nil_value();
-  dvi_get_framebuffer()[y * DVI_GRAPHICS_WIDTH + x] = (uint8_t)color;
+  dvi_get_framebuffer()[y * dvi_graphics_get_width() + x] = (uint8_t)color;
   return mrb_nil_value();
 }
 
@@ -115,9 +150,9 @@ mrb_dvi_get_pixel(mrb_state *mrb, mrb_value klass)
 {
   mrb_int x, y;
   mrb_get_args(mrb, "ii", &x, &y);
-  if (x < 0 || x >= DVI_GRAPHICS_WIDTH || y < 0 || y >= DVI_GRAPHICS_HEIGHT)
+  if (x < 0 || x >= dvi_graphics_get_width() || y < 0 || y >= dvi_graphics_get_height())
     return mrb_fixnum_value(0);
-  return mrb_fixnum_value(dvi_get_framebuffer()[y * DVI_GRAPHICS_WIDTH + x]);
+  return mrb_fixnum_value(dvi_get_framebuffer()[y * dvi_graphics_get_width() + x]);
 }
 
 /*
@@ -129,7 +164,7 @@ mrb_dvi_fill(mrb_state *mrb, mrb_value klass)
   mrb_int color;
   mrb_get_args(mrb, "i", &color);
   memset(dvi_get_framebuffer(), (uint8_t)color,
-         DVI_GRAPHICS_WIDTH * DVI_GRAPHICS_HEIGHT);
+         dvi_graphics_get_width() * dvi_graphics_get_height());
   return mrb_nil_value();
 }
 
@@ -142,7 +177,7 @@ mrb_dvi_fill_rect(mrb_state *mrb, mrb_value klass)
   mrb_int x, y, w, h, color;
   mrb_get_args(mrb, "iiiii", &x, &y, &w, &h, &color);
   dvi_graphics_fill_rect(dvi_get_framebuffer(),
-                         DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                         dvi_graphics_get_width(), dvi_graphics_get_height(),
                          x, y, w, h, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -156,7 +191,7 @@ mrb_dvi_draw_rect(mrb_state *mrb, mrb_value klass)
   mrb_int x, y, w, h, color;
   mrb_get_args(mrb, "iiiii", &x, &y, &w, &h, &color);
   dvi_graphics_draw_rect(dvi_get_framebuffer(),
-                         DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                         dvi_graphics_get_width(), dvi_graphics_get_height(),
                          x, y, w, h, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -170,7 +205,7 @@ mrb_dvi_fill_circle(mrb_state *mrb, mrb_value klass)
   mrb_int cx, cy, r, color;
   mrb_get_args(mrb, "iiii", &cx, &cy, &r, &color);
   dvi_graphics_fill_circle(dvi_get_framebuffer(),
-                           DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                           dvi_graphics_get_width(), dvi_graphics_get_height(),
                            cx, cy, r, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -184,7 +219,7 @@ mrb_dvi_draw_circle(mrb_state *mrb, mrb_value klass)
   mrb_int cx, cy, r, color;
   mrb_get_args(mrb, "iiii", &cx, &cy, &r, &color);
   dvi_graphics_draw_circle(dvi_get_framebuffer(),
-                           DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                           dvi_graphics_get_width(), dvi_graphics_get_height(),
                            cx, cy, r, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -198,7 +233,7 @@ mrb_dvi_fill_triangle(mrb_state *mrb, mrb_value klass)
   mrb_int x0, y0, x1, y1, x2, y2, color;
   mrb_get_args(mrb, "iiiiiii", &x0, &y0, &x1, &y1, &x2, &y2, &color);
   dvi_graphics_fill_triangle(dvi_get_framebuffer(),
-                             DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                             dvi_graphics_get_width(), dvi_graphics_get_height(),
                              x0, y0, x1, y1, x2, y2, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -213,7 +248,7 @@ mrb_dvi_fill_arc(mrb_state *mrb, mrb_value klass)
   mrb_float start_angle, stop_angle;
   mrb_get_args(mrb, "iiiffi", &cx, &cy, &r, &start_angle, &stop_angle, &color);
   dvi_graphics_fill_arc(dvi_get_framebuffer(),
-                        DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                        dvi_graphics_get_width(), dvi_graphics_get_height(),
                         cx, cy, r, (float)start_angle, (float)stop_angle,
                         (uint8_t)color);
   return mrb_nil_value();
@@ -229,7 +264,7 @@ mrb_dvi_draw_arc(mrb_state *mrb, mrb_value klass)
   mrb_float start_angle, stop_angle;
   mrb_get_args(mrb, "iiiffi", &cx, &cy, &r, &start_angle, &stop_angle, &color);
   dvi_graphics_draw_arc(dvi_get_framebuffer(),
-                        DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                        dvi_graphics_get_width(), dvi_graphics_get_height(),
                         cx, cy, r, (float)start_angle, (float)stop_angle,
                         (uint8_t)color);
   return mrb_nil_value();
@@ -244,7 +279,7 @@ mrb_dvi_fill_ellipse(mrb_state *mrb, mrb_value klass)
   mrb_int cx, cy, rx, ry, color;
   mrb_get_args(mrb, "iiiii", &cx, &cy, &rx, &ry, &color);
   dvi_graphics_fill_ellipse(dvi_get_framebuffer(),
-                            DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                            dvi_graphics_get_width(), dvi_graphics_get_height(),
                             cx, cy, rx, ry, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -258,7 +293,7 @@ mrb_dvi_draw_ellipse(mrb_state *mrb, mrb_value klass)
   mrb_int cx, cy, rx, ry, color;
   mrb_get_args(mrb, "iiiii", &cx, &cy, &rx, &ry, &color);
   dvi_graphics_draw_ellipse(dvi_get_framebuffer(),
-                            DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                            dvi_graphics_get_width(), dvi_graphics_get_height(),
                             cx, cy, rx, ry, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -272,7 +307,7 @@ mrb_dvi_draw_thick_line(mrb_state *mrb, mrb_value klass)
   mrb_int x0, y0, x1, y1, thickness, color;
   mrb_get_args(mrb, "iiiiii", &x0, &y0, &x1, &y1, &thickness, &color);
   dvi_graphics_draw_thick_line(dvi_get_framebuffer(),
-                               DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                               dvi_graphics_get_width(), dvi_graphics_get_height(),
                                x0, y0, x1, y1, thickness, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -298,7 +333,7 @@ mrb_dvi_draw_text(mrb_state *mrb, mrb_value klass)
       mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown wide font");
   }
   dvi_graphics_draw_text(dvi_get_framebuffer(),
-                         DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                         dvi_graphics_get_width(), dvi_graphics_get_height(),
                          x, y, text, (uint8_t)color, font, wide_font);
   return mrb_nil_value();
 }
@@ -312,7 +347,7 @@ mrb_dvi_draw_line(mrb_state *mrb, mrb_value klass)
   mrb_int x0, y0, x1, y1, color;
   mrb_get_args(mrb, "iiiii", &x0, &y0, &x1, &y1, &color);
   dvi_graphics_draw_line(dvi_get_framebuffer(),
-                         DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                         dvi_graphics_get_width(), dvi_graphics_get_height(),
                          x0, y0, x1, y1, (uint8_t)color);
   return mrb_nil_value();
 }
@@ -329,7 +364,7 @@ mrb_dvi_draw_image(mrb_state *mrb, mrb_value klass)
   if (data_len < w * h)
     mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
   dvi_graphics_draw_image(dvi_get_framebuffer(),
-                          DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                          dvi_graphics_get_width(), dvi_graphics_get_height(),
                           (const uint8_t *)data, x, y, w, h);
   return mrb_nil_value();
 }
@@ -349,7 +384,7 @@ mrb_dvi_draw_image_masked(mrb_state *mrb, mrb_value klass)
   if (mask_len < (w * h + 7) / 8)
     mrb_raise(mrb, E_ARGUMENT_ERROR, "mask too short");
   dvi_graphics_draw_image_masked(dvi_get_framebuffer(),
-                                 DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                                 dvi_graphics_get_width(), dvi_graphics_get_height(),
                                  (const uint8_t *)data, (const uint8_t *)mask,
                                  x, y, w, h);
   return mrb_nil_value();
@@ -567,11 +602,14 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
   struct RClass *class_Graphics =
       mrb_define_class_under_id(mrb, class_DVI, MRB_SYM(Graphics),
                                 mrb->object_class);
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(WIDTH),
-                      mrb_fixnum_value(DVI_GRAPHICS_WIDTH));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(HEIGHT),
-                      mrb_fixnum_value(DVI_GRAPHICS_HEIGHT));
   DVI_FONT_DEFINE_RUBY_CONSTANTS(mrb, class_Graphics);
+
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(width),
+                             mrb_dvi_graphics_width, MRB_ARGS_NONE());
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(height),
+                             mrb_dvi_graphics_height, MRB_ARGS_NONE());
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_resolution),
+                             mrb_dvi_set_resolution, MRB_ARGS_REQ(2));
 
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(BLEND_REPLACE),
                       mrb_fixnum_value(DVI_BLEND_REPLACE));

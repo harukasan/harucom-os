@@ -41,8 +41,9 @@ class DVI
   end
 
   class Graphics
-    WIDTH: Integer
-    HEIGHT: Integer
+    def self.width: () -> Integer
+    def self.height: () -> Integer
+    def self.set_resolution: (Integer width, Integer height) -> void
     FONT_8X8: Integer
     FONT_MPLUS_12: Integer
     FONT_FIXED_4X6: Integer

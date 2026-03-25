@@ -8,9 +8,13 @@
 extern "C" {
 #endif
 
-// Graphics mode resolution scale factor.
-// 1 = native 640x480 (307.2 KB framebuffer)
-// 2 = half 320x240, 2x scaled to 640x480 (76.8 KB framebuffer)
+// Maximum graphics resolution (used for buffer allocation only).
+// Runtime resolution is controlled by dvi_set_graphics_scale().
+#define DVI_GRAPHICS_MAX_WIDTH  640
+#define DVI_GRAPHICS_MAX_HEIGHT 480
+#define DVI_GRAPHICS_HALF_SIZE  ((DVI_GRAPHICS_MAX_WIDTH / 2) * (DVI_GRAPHICS_MAX_HEIGHT / 2))
+
+// Compile-time default scale (kept for backward compatibility).
 #ifndef DVI_GRAPHICS_SCALE
 #define DVI_GRAPHICS_SCALE 1
 #endif
@@ -52,6 +56,12 @@ void dvi_set_blanking(bool enable);
 uint8_t *dvi_get_framebuffer(void);
 uint32_t dvi_get_frame_count(void);
 void dvi_wait_vsync(void);
+
+// Runtime graphics resolution.
+// Scale 1 = 640x480 native, Scale 2 = 320x240 (2x scaled to 640x480).
+int dvi_graphics_get_width(void);
+int dvi_graphics_get_height(void);
+void dvi_set_graphics_scale(int scale);
 
 // Graphics double buffering.
 // Set a PSRAM back buffer for tear-free rendering. Drawing functions write

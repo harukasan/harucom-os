@@ -16,11 +16,11 @@ class P5
   end
 
   def width
-    G::WIDTH
+    G.width
   end
 
   def height
-    G::HEIGHT
+    G.height
   end
 
   # Screen management

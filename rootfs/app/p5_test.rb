@@ -346,7 +346,62 @@ p5.text_color(0xFF)
 p5.text("bezier (white, red) + curve (green)", 10, 10)
 show_step(p5, "bezier + curve", 18, keyboard)
 
-# Step 19: combined scene
+# Step 19: 320x240 resolution
+G.set_resolution(320, 240)
+p5.background(0x00)
+p5.fill(0xE0)
+p5.stroke(0xFF)
+p5.rect(10, 10, 100, 60)
+p5.fill(0x1C)
+p5.circle(200, 120, 50)
+p5.fill(0x03)
+p5.triangle(250, 200, 310, 100, 310, 200)
+p5.text_font(G::FONT_MPLUS_12)
+p5.text_color(0xFF)
+p5.text("320x240 mode (#{p5.width}x#{p5.height})", 10, 220)
+show_step(p5, "320x240", 19, keyboard)
+
+# Step 20: 320x240 arc animation
+PI = Math::PI
+angle = 0.0
+stp = PI * 2 / 60
+cx = p5.width / 2
+cy = p5.height / 2
+120.times do
+  p5.background(0x00)
+  p5.no_fill
+  p5.stroke(p5.color(80, 80, 80))
+  p5.circle(cx, cy, 60)
+  p5.fill(p5.color(0, 200, 0))
+  p5.no_stroke
+  p5.arc(cx, cy, 60, -PI / 2, -PI / 2 + angle)
+  pct = (angle / (PI * 2) * 100).to_i
+  p5.text_font(G::FONT_SPLEEN_12X24)
+  p5.text_color(0xFF)
+  p5.text("#{pct}%", cx - 24, cy - 12)
+  p5.commit
+  angle += stp
+  angle -= PI * 2 if angle >= PI * 2
+end
+p5.text_font(G::FONT_MPLUS_12)
+p5.text_color(0xFF)
+p5.text("320x240 arc animation", 10, 10)
+show_step(p5, "320x240 arc anim", 20, keyboard)
+
+# Step 21: back to 640x480
+G.set_resolution(640, 480)
+p5.background(0x00)
+p5.fill(0xE0)
+p5.stroke(0xFF)
+p5.rect(40, 60, 260, 180)
+p5.fill(0x1C)
+p5.circle(480, 240, 100)
+p5.text_font(G::FONT_SPLEEN_12X24)
+p5.text_color(0xFF)
+p5.text("Back to 640x480 (#{p5.width}x#{p5.height})", 10, 10)
+show_step(p5, "640x480 restored", 21, keyboard)
+
+# Step 22: combined scene
 p5.background(p5.color(0, 0, 64))
 p5.fill(p5.color(200, 100, 0))
 p5.stroke(0xFF)
@@ -369,7 +424,7 @@ p5.text("fill+stroke", 50, 140)
 p5.text("stroke only", 350, 140)
 p5.text("fill only", 50, 340)
 p5.text("fill+stroke", 350, 340)
-show_step(p5, "combined scene", 19, keyboard)
+show_step(p5, "combined scene", 22, keyboard)
 
 # Restore text mode
 DVI.set_mode(DVI::TEXT_MODE)
