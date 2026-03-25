@@ -86,6 +86,19 @@ void dvi_graphics_fill_ellipse(uint8_t *framebuffer, int width, int height,
 void dvi_graphics_draw_ellipse(uint8_t *framebuffer, int width, int height,
                                int cx, int cy, int rx, int ry, uint8_t color);
 
+// Fill an arc (pie slice) centered at (cx, cy) with radius r.
+// Angles are in units of 1/1024 of a full turn (0 = right, 256 = down,
+// 512 = left, 768 = up). This avoids floating-point in the C layer.
+void dvi_graphics_fill_arc(uint8_t *framebuffer, int width, int height,
+                           int cx, int cy, int r,
+                           int start_angle, int stop_angle, uint8_t color);
+
+// Draw an arc outline centered at (cx, cy) with radius r.
+// Angle units are the same as fill_arc (1/1024 of a full turn).
+void dvi_graphics_draw_arc(uint8_t *framebuffer, int width, int height,
+                           int cx, int cy, int r,
+                           int start_angle, int stop_angle, uint8_t color);
+
 // Draw a line with a given thickness.
 void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height,
                                   int x0, int y0, int x1, int y1,

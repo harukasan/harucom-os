@@ -288,7 +288,62 @@ p5.text_color(0xFF)
 p5.text("scale: 2x circle, 1.5x3 ellipse, 1x circle", 10, 10)
 show_step(p5, "scale + push/pop", 15, keyboard)
 
-# Step 16: combined scene
+# Step 16: arc
+p5.background(0x00)
+p5.reset_matrix
+PI = Math::PI
+p5.fill(0xE0)
+p5.stroke(0xFF)
+p5.arc(160, 240, 100, 0, PI)
+p5.fill(0x1C)
+p5.arc(320, 240, 100, 0, PI * 0.75)
+p5.fill(0x03)
+p5.no_stroke
+p5.arc(480, 240, 100, PI, PI * 1.75)
+p5.text_color(0xFF)
+p5.text("arc: 0-PI, 0-0.75PI, PI-1.75PI", 10, 10)
+show_step(p5, "arc", 16, keyboard)
+
+# Step 17: arc animation (circular progress bar)
+PI = Math::PI
+angle = 0.0
+step = PI * 2 / 60
+cx = W / 2
+cy = H / 2
+120.times do
+  p5.background(0x00)
+  p5.no_fill
+  p5.stroke(p5.color(80, 80, 80))
+  p5.circle(cx, cy, 100)
+  p5.fill(p5.color(0, 200, 0))
+  p5.no_stroke
+  p5.arc(cx, cy, 100, -PI / 2, -PI / 2 + angle)
+  pct = (angle / (PI * 2) * 100).to_i
+  p5.text_font(G::FONT_SPLEEN_12X24)
+  p5.text_color(0xFF)
+  p5.text("#{pct}%", cx - 24, cy - 12)
+  p5.commit
+  angle += step
+  angle -= PI * 2 if angle >= PI * 2
+end
+p5.text("arc animation: progress bar", 10, 10)
+show_step(p5, "arc animation", 17, keyboard)
+
+# Step 18: bezier + curve
+p5.background(0x00)
+p5.reset_matrix
+p5.no_fill
+p5.stroke(0xFF)
+p5.bezier(40, 300, 160, 40, 480, 40, 600, 300)
+p5.stroke(0xE0)
+p5.bezier(40, 400, 200, 100, 440, 100, 600, 400)
+p5.stroke(0x1C)
+p5.curve(0, 480, 100, 200, 540, 200, 640, 480)
+p5.text_color(0xFF)
+p5.text("bezier (white, red) + curve (green)", 10, 10)
+show_step(p5, "bezier + curve", 18, keyboard)
+
+# Step 19: combined scene
 p5.background(p5.color(0, 0, 64))
 p5.fill(p5.color(200, 100, 0))
 p5.stroke(0xFF)
@@ -311,7 +366,7 @@ p5.text("fill+stroke", 50, 140)
 p5.text("stroke only", 350, 140)
 p5.text("fill only", 50, 340)
 p5.text("fill+stroke", 350, 340)
-show_step(p5, "combined scene", 16, keyboard)
+show_step(p5, "combined scene", 19, keyboard)
 
 # Restore text mode
 DVI.set_mode(DVI::TEXT_MODE)

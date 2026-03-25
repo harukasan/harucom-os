@@ -194,6 +194,34 @@ mrb_dvi_fill_triangle(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.fill_arc(cx, cy, r, start_angle, stop_angle, color)
+ */
+static mrb_value
+mrb_dvi_fill_arc(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int cx, cy, r, start_angle, stop_angle, color;
+  mrb_get_args(mrb, "iiiiii", &cx, &cy, &r, &start_angle, &stop_angle, &color);
+  dvi_graphics_fill_arc(dvi_get_framebuffer(),
+                        DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                        cx, cy, r, start_angle, stop_angle, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_arc(cx, cy, r, start_angle, stop_angle, color)
+ */
+static mrb_value
+mrb_dvi_draw_arc(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int cx, cy, r, start_angle, stop_angle, color;
+  mrb_get_args(mrb, "iiiiii", &cx, &cy, &r, &start_angle, &stop_angle, &color);
+  dvi_graphics_draw_arc(dvi_get_framebuffer(),
+                        DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                        cx, cy, r, start_angle, stop_angle, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
  * DVI::Graphics.fill_ellipse(cx, cy, rx, ry, color)
  */
 static mrb_value
@@ -563,6 +591,10 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_fill_circle, MRB_ARGS_REQ(4));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_circle),
                              mrb_dvi_draw_circle, MRB_ARGS_REQ(4));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_arc),
+                             mrb_dvi_fill_arc, MRB_ARGS_REQ(6));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_arc),
+                             mrb_dvi_draw_arc, MRB_ARGS_REQ(6));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_triangle),
                              mrb_dvi_fill_triangle, MRB_ARGS_REQ(7));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_ellipse),

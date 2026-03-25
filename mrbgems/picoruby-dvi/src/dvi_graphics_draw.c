@@ -610,6 +610,111 @@ void dvi_graphics_draw_ellipse(uint8_t *framebuffer, int width, int height,
     }
 }
 
+// Check if a point (px, py) relative to center is within the arc's angle range.
+// Angles are in 1/1024 of a full turn. Handles wrapping (e.g. start=900, stop=100).
+static inline int in_arc_range(int px, int py, int start, int stop)
+{
+    // Convert (px, py) to angle in 0..1023 using atan2 approximation.
+    // We use octant-based lookup: map (px, py) to angle in 1024 units.
+    // atan2 approximation for integer coordinates.
+    int angle;
+    if (px == 0 && py == 0)
+        return 1;
+
+    // Use the relation: angle = atan2(py, px) mapped to 0..1023
+    // 0 = right (+x), 256 = down (+y), 512 = left (-x), 768 = up (-y)
+    int ax = abs(px), ay = abs(py);
+    // Quadrant angle (0..256) approximation: 256 * ay / (ax + ay)
+    int quadrant_angle;
+    if (ax + ay == 0)
+        return 1;
+    quadrant_angle = (256 * ay + (ax + ay) / 2) / (ax + ay);
+
+    if (px >= 0 && py >= 0)
+        angle = quadrant_angle;           // Q1: 0..256
+    else if (px < 0 && py >= 0)
+        angle = 512 - quadrant_angle;     // Q2: 256..512
+    else if (px < 0 && py < 0)
+        angle = 512 + quadrant_angle;     // Q3: 512..768
+    else
+        angle = 1024 - quadrant_angle;    // Q4: 768..1024 -> wrap to 0
+
+    angle &= 1023;
+
+    if (start <= stop)
+        return angle >= start && angle <= stop;
+    else
+        return angle >= start || angle <= stop;
+}
+
+void dvi_graphics_fill_arc(uint8_t *framebuffer, int width, int height,
+                           int cx, int cy, int r,
+                           int start_angle, int stop_angle, uint8_t color)
+{
+    if (r < 0)
+        return;
+
+    start_angle &= 1023;
+    stop_angle &= 1023;
+
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
+
+    // Row-by-row fill, testing each pixel against the arc angle range
+    int r2 = r * r;
+    int ix = r;
+    for (int iy = 0; iy <= r; iy++) {
+        int threshold = r2 - iy * iy;
+        while (ix * ix > threshold)
+            ix--;
+
+        // For each row, scan the span and only draw pixels in the arc range
+        for (int px = -ix; px <= ix; px++) {
+            // Check both +iy and -iy rows
+            if (in_arc_range(px, iy, start_angle, stop_angle))
+                DRAW_PIXEL(framebuffer, width, height, cx + px, cy + iy, color);
+            if (iy > 0 && in_arc_range(px, -iy, start_angle, stop_angle))
+                DRAW_PIXEL(framebuffer, width, height, cx + px, cy - iy, color);
+        }
+    }
+}
+
+void dvi_graphics_draw_arc(uint8_t *framebuffer, int width, int height,
+                           int cx, int cy, int r,
+                           int start_angle, int stop_angle, uint8_t color)
+{
+    if (r < 0)
+        return;
+
+    start_angle &= 1023;
+    stop_angle &= 1023;
+
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
+
+    // Midpoint circle algorithm, drawing only pixels in the arc range
+    int x = 0, y = r;
+    int d = 1 - r;
+
+    while (x <= y) {
+        // 8 octant points
+        if (in_arc_range( x,  y, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx + x, cy + y, color);
+        if (in_arc_range(-x,  y, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx - x, cy + y, color);
+        if (in_arc_range( x, -y, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx + x, cy - y, color);
+        if (in_arc_range(-x, -y, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx - x, cy - y, color);
+        if (in_arc_range( y,  x, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx + y, cy + x, color);
+        if (in_arc_range(-y,  x, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx - y, cy + x, color);
+        if (in_arc_range( y, -x, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx + y, cy - x, color);
+        if (in_arc_range(-y, -x, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx - y, cy - x, color);
+
+        if (d < 0) {
+            d += 2 * x + 3;
+        } else {
+            d += 2 * (x - y) + 5;
+            y--;
+        }
+        x++;
+    }
+}
+
 void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height,
                                   int x0, int y0, int x1, int y1,
                                   int thickness, uint8_t color)

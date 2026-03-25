@@ -202,6 +202,60 @@ class P5
     end
   end
 
+  # Arc (pie slice). Angles in radians (0 = right, PI/2 = down).
+  # C layer uses 1/1024 turn units; Ruby converts from radians.
+  ANGLE_SCALE = 1024.0 / (2.0 * Math::PI)
+
+  def arc(cx, cy, r, start_angle, stop_angle)
+    tcx, tcy = transform(cx, cy)
+    sa = (start_angle * ANGLE_SCALE).round & 1023
+    ea = (stop_angle * ANGLE_SCALE).round & 1023
+    G.fill_arc(tcx, tcy, r, sa, ea, @fill_color) if @fill_enabled
+    G.draw_arc(tcx, tcy, r, sa, ea, @stroke_color) if @stroke_enabled
+  end
+
+  # Cubic bezier curve from (x1,y1) to (x4,y4) with control points (x2,y2) and (x3,y3).
+  # Rendered as a series of line segments.
+  def bezier(x1, y1, x2, y2, x3, y3, x4, y4)
+    return unless @stroke_enabled
+    segments = 20
+    px, py = transform(x1, y1)
+    segments.times do |i|
+      t = (i + 1).to_f / segments
+      t2 = t * t
+      t3 = t2 * t
+      mt = 1.0 - t
+      mt2 = mt * mt
+      mt3 = mt2 * mt
+      nx = (mt3 * x1 + 3 * mt2 * t * x2 + 3 * mt * t2 * x3 + t3 * x4)
+      ny = (mt3 * y1 + 3 * mt2 * t * y2 + 3 * mt * t2 * y3 + t3 * y4)
+      qx, qy = transform(nx, ny)
+      draw_edge(px, py, qx, qy)
+      px = qx
+      py = qy
+    end
+  end
+
+  # Catmull-Rom spline through (x2,y2) to (x3,y3), shaped by (x1,y1) and (x4,y4).
+  # Rendered as a series of line segments.
+  def curve(x1, y1, x2, y2, x3, y3, x4, y4)
+    return unless @stroke_enabled
+    segments = 20
+    px, py = transform(x2, y2)
+    segments.times do |i|
+      t = (i + 1).to_f / segments
+      t2 = t * t
+      t3 = t2 * t
+      # Catmull-Rom basis matrix coefficients
+      nx = 0.5 * ((2*x2) + (-x1+x3)*t + (2*x1-5*x2+4*x3-x4)*t2 + (-x1+3*x2-3*x3+x4)*t3)
+      ny = 0.5 * ((2*y2) + (-y1+y3)*t + (2*y1-5*y2+4*y3-y4)*t2 + (-y1+3*y2-3*y3+y4)*t3)
+      qx, qy = transform(nx, ny)
+      draw_edge(px, py, qx, qy)
+      px = qx
+      py = qy
+    end
+  end
+
   # Text (translate only, rotation not supported)
 
   def text(str, x, y)
