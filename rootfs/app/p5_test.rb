@@ -186,7 +186,46 @@ p5.text_color(0xFF)
 p5.text("stroke_weight: 1, 3, 5 + thick triangle", 10, 10)
 show_step(p5, "stroke_weight", 10, keyboard)
 
-# Step 11: combined scene
+# Step 11: blend_mode ADD
+p5.background(0x00)
+p5.blend_mode(P5::REPLACE)
+p5.fill(p5.color(200, 0, 0))
+p5.no_stroke
+p5.circle(240, 200, 100)
+p5.fill(p5.color(0, 200, 0))
+p5.circle(320, 200, 100)
+p5.fill(p5.color(0, 0, 200))
+p5.circle(280, 280, 100)
+p5.blend_mode(P5::ADD)
+p5.fill(p5.color(200, 0, 0))
+p5.circle(240 + 250, 200, 100)
+p5.fill(p5.color(0, 200, 0))
+p5.circle(320 + 250, 200, 100)
+p5.fill(p5.color(0, 0, 200))
+p5.circle(280 + 250, 280, 100)
+p5.blend_mode(P5::REPLACE)
+p5.text_color(0xFF)
+p5.text("REPLACE (left) vs ADD (right)", 10, 10)
+show_step(p5, "blend ADD", 11, keyboard)
+
+# Step 12: alpha blending
+p5.background(p5.color(0, 0, 128))
+p5.blend_mode(P5::REPLACE)
+p5.fill(p5.color(200, 0, 0))
+p5.no_stroke
+p5.rect(80, 80, 240, 300)
+p5.alpha(128)
+p5.fill(p5.color(0, 200, 0))
+p5.rect(200, 140, 240, 300)
+p5.alpha(64)
+p5.fill(p5.color(255, 255, 0))
+p5.circle(420, 240, 100)
+p5.blend_mode(P5::REPLACE)
+p5.text_color(0xFF)
+p5.text("alpha blending: 128, 64", 10, 10)
+show_step(p5, "alpha blend", 12, keyboard)
+
+# Step 13: combined scene
 p5.background(p5.color(0, 0, 64))
 p5.fill(p5.color(200, 100, 0))
 p5.stroke(0xFF)
@@ -209,7 +248,7 @@ p5.text("fill+stroke", 50, 140)
 p5.text("stroke only", 350, 140)
 p5.text("fill only", 50, 340)
 p5.text("fill+stroke", 350, 340)
-show_step(p5, "combined scene", 11, keyboard)
+show_step(p5, "combined scene", 13, keyboard)
 
 # Restore text mode
 DVI.set_mode(DVI::TEXT_MODE)

@@ -5,6 +5,80 @@
 #include "dvi_graphics_draw.h"
 #include "uni2jis_table.h"
 
+// Global blend state.
+// Drawing functions dispatch to REPLACE-only or blend-aware paths based on
+// blend_mode. The REPLACE path uses fill_span/plot_pixel (inlined to memset
+// or direct store). The blend path uses blend_span/blend_pixel_at which
+// perform per-pixel compositing with source channel pre-extraction.
+static enum dvi_graphics_blend_mode blend_mode = DVI_BLEND_REPLACE;
+static uint8_t blend_alpha = 255;
+
+void dvi_graphics_set_blend_mode(enum dvi_graphics_blend_mode mode)
+{
+    blend_mode = mode;
+}
+
+void dvi_graphics_set_alpha(uint8_t alpha)
+{
+    blend_alpha = alpha;
+}
+
+// Blend src color onto dst using the current blend mode.
+// RGB332: R[7:5] G[4:2] B[1:0].
+// Used by write_pixel for single-pixel blending (text, draw_image_masked).
+static inline uint8_t blend_pixel(uint8_t dst, uint8_t src)
+{
+    if (blend_mode == DVI_BLEND_REPLACE)
+        return src;
+
+    int sr = (src >> 5) & 7, sg = (src >> 2) & 7, sb = src & 3;
+    int dr = (dst >> 5) & 7, dg = (dst >> 2) & 7, db = dst & 3;
+    int rr, rg, rb;
+
+    switch (blend_mode) {
+    case DVI_BLEND_ADD:
+        rr = sr + dr; if (rr > 7) rr = 7;
+        rg = sg + dg; if (rg > 7) rg = 7;
+        rb = sb + db; if (rb > 3) rb = 3;
+        break;
+    case DVI_BLEND_SUBTRACT:
+        rr = dr - sr; if (rr < 0) rr = 0;
+        rg = dg - sg; if (rg < 0) rg = 0;
+        rb = db - sb; if (rb < 0) rb = 0;
+        break;
+    case DVI_BLEND_MULTIPLY:
+        rr = sr * dr / 7;
+        rg = sg * dg / 7;
+        rb = sb * db / 3;
+        break;
+    case DVI_BLEND_SCREEN:
+        rr = 7 - (7 - sr) * (7 - dr) / 7;
+        rg = 7 - (7 - sg) * (7 - dg) / 7;
+        rb = 3 - (3 - sb) * (3 - db) / 3;
+        break;
+    case DVI_BLEND_ALPHA: {
+        int a = blend_alpha;
+        rr = (sr * a + dr * (255 - a)) / 255;
+        rg = (sg * a + dg * (255 - a)) / 255;
+        rb = (sb * a + db * (255 - a)) / 255;
+        break;
+    }
+    default:
+        return src;
+    }
+
+    return (uint8_t)((rr << 5) | (rg << 2) | rb);
+}
+
+// Write a pixel with blending.
+static inline void write_pixel(uint8_t *framebuffer, int offset, uint8_t color)
+{
+    if (blend_mode == DVI_BLEND_REPLACE)
+        framebuffer[offset] = color;
+    else
+        framebuffer[offset] = blend_pixel(framebuffer[offset], color);
+}
+
 const dvi_font_t *dvi_graphics_get_font(int font_id)
 {
     if (font_id < 0 || font_id >= (int)DVI_GRAPHICS_FONT_COUNT)
@@ -91,7 +165,7 @@ static int draw_glyph(uint8_t *framebuffer, int fb_width, int fb_height,
                 continue;
             if (px >= fb_width)
                 break;
-            framebuffer[py * fb_width + px] = color;
+            write_pixel(framebuffer, py * fb_width + px, color);
         }
     }
 
@@ -147,9 +221,129 @@ void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
     }
 }
 
+// Clip span coordinates. Returns 0 if span is invisible.
+static inline int clip_span(int width, int height, int *x0, int *x1, int y)
+{
+    if (y < 0 || y >= height)
+        return 0;
+    if (*x0 < 0) *x0 = 0;
+    if (*x1 >= width) *x1 = width - 1;
+    return *x0 <= *x1;
+}
+
+// Fill a horizontal span with memset (REPLACE only).
+// Inlined into drawing functions for the fast path.
+static inline void fill_span(uint8_t *framebuffer, int width, int height,
+                             int x0, int x1, int y, uint8_t color)
+{
+    if (!clip_span(width, height, &x0, &x1, y))
+        return;
+    memset(&framebuffer[y * width + x0], color, x1 - x0 + 1);
+}
+
+// Fill a horizontal span with per-pixel blending.
+// Each blend mode has a dedicated loop that pre-extracts the constant source
+// channels outside the loop, avoiding redundant work per pixel.
+static void blend_span(uint8_t *framebuffer, int width, int height,
+                       int x0, int x1, int y, uint8_t color)
+{
+    if (!clip_span(width, height, &x0, &x1, y))
+        return;
+
+    uint8_t *row = &framebuffer[y * width];
+    int sr = (color >> 5) & 7, sg = (color >> 2) & 7, sb = color & 3;
+
+    switch (blend_mode) {
+    case DVI_BLEND_ALPHA: {
+        int a = blend_alpha;
+        int inv_a = 255 - a;
+        int src_r = sr * a, src_g = sg * a, src_b = sb * a;
+        for (int ix = x0; ix <= x1; ix++) {
+            uint8_t dst = row[ix];
+            int dr = (dst >> 5) & 7, dg = (dst >> 2) & 7, db = dst & 3;
+            int rr = (src_r + dr * inv_a) / 255;
+            int rg = (src_g + dg * inv_a) / 255;
+            int rb = (src_b + db * inv_a) / 255;
+            row[ix] = (uint8_t)((rr << 5) | (rg << 2) | rb);
+        }
+        return;
+    }
+    case DVI_BLEND_ADD:
+        for (int ix = x0; ix <= x1; ix++) {
+            uint8_t dst = row[ix];
+            int rr = sr + ((dst >> 5) & 7); if (rr > 7) rr = 7;
+            int rg = sg + ((dst >> 2) & 7); if (rg > 7) rg = 7;
+            int rb = sb + (dst & 3);        if (rb > 3) rb = 3;
+            row[ix] = (uint8_t)((rr << 5) | (rg << 2) | rb);
+        }
+        return;
+    case DVI_BLEND_SUBTRACT:
+        for (int ix = x0; ix <= x1; ix++) {
+            uint8_t dst = row[ix];
+            int rr = ((dst >> 5) & 7) - sr; if (rr < 0) rr = 0;
+            int rg = ((dst >> 2) & 7) - sg; if (rg < 0) rg = 0;
+            int rb = (dst & 3) - sb;        if (rb < 0) rb = 0;
+            row[ix] = (uint8_t)((rr << 5) | (rg << 2) | rb);
+        }
+        return;
+    case DVI_BLEND_MULTIPLY:
+        for (int ix = x0; ix <= x1; ix++) {
+            uint8_t dst = row[ix];
+            int rr = sr * ((dst >> 5) & 7) / 7;
+            int rg = sg * ((dst >> 2) & 7) / 7;
+            int rb = sb * (dst & 3) / 3;
+            row[ix] = (uint8_t)((rr << 5) | (rg << 2) | rb);
+        }
+        return;
+    case DVI_BLEND_SCREEN: {
+        int inv_sr = 7 - sr, inv_sg = 7 - sg, inv_sb = 3 - sb;
+        for (int ix = x0; ix <= x1; ix++) {
+            uint8_t dst = row[ix];
+            int rr = 7 - inv_sr * (7 - ((dst >> 5) & 7)) / 7;
+            int rg = 7 - inv_sg * (7 - ((dst >> 2) & 7)) / 7;
+            int rb = 3 - inv_sb * (3 - (dst & 3)) / 3;
+            row[ix] = (uint8_t)((rr << 5) | (rg << 2) | rb);
+        }
+        return;
+    }
+    default:
+        return;
+    }
+}
+
+// Set a single pixel with direct store (REPLACE only).
+// Inlined into drawing functions for the fast path.
+static inline void plot_pixel(uint8_t *framebuffer, int width, int height,
+                              int x, int y, uint8_t color)
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+        framebuffer[y * width + x] = color;
+}
+
+// Set a single pixel with blending via write_pixel.
+static inline void blend_pixel_at(uint8_t *framebuffer, int width, int height,
+                                  int x, int y, uint8_t color)
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+        write_pixel(framebuffer, y * width + x, color);
+}
+
+// Blend-mode dispatch macros.
+// Drawing functions set `int blending = (blend_mode != DVI_BLEND_REPLACE)`
+// once, then use these macros in loops. The REPLACE branch inlines to
+// memset (DRAW_SPAN) or a direct store (DRAW_PIXEL) with no function call.
+// The blend branch calls blend_span/blend_pixel_at.
+#define DRAW_SPAN(fb, w, h, x0, x1, y, c) \
+    do { if (blending) blend_span(fb, w, h, x0, x1, y, c); \
+         else fill_span(fb, w, h, x0, x1, y, c); } while (0)
+#define DRAW_PIXEL(fb, w, h, x, y, c) \
+    do { if (blending) blend_pixel_at(fb, w, h, x, y, c); \
+         else plot_pixel(fb, w, h, x, y, c); } while (0)
+
 void dvi_graphics_draw_line(uint8_t *framebuffer, int width, int height,
                             int x0, int y0, int x1, int y1, uint8_t color)
 {
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
     int dx = abs(x1 - x0);
     int dy = abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -157,8 +351,7 @@ void dvi_graphics_draw_line(uint8_t *framebuffer, int width, int height,
     int err = (dx > dy ? dx : -dy) / 2;
 
     for (;;) {
-        if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height)
-            framebuffer[y0 * width + x0] = color;
+        DRAW_PIXEL(framebuffer, width, height, x0, y0, color);
 
         if (x0 == x1 && y0 == y1)
             break;
@@ -175,67 +368,45 @@ void dvi_graphics_draw_line(uint8_t *framebuffer, int width, int height,
     }
 }
 
+void dvi_graphics_fill_rect(uint8_t *framebuffer, int width, int height,
+                            int x, int y, int w, int h, uint8_t color)
+{
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > width) w = width - x;
+    if (y + h > height) h = height - y;
+    if (w <= 0 || h <= 0)
+        return;
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
+    for (int iy = 0; iy < h; iy++)
+        DRAW_SPAN(framebuffer, width, height, x, x + w - 1, y + iy, color);
+}
+
 void dvi_graphics_draw_rect(uint8_t *framebuffer, int width, int height,
                             int x, int y, int w, int h, uint8_t color)
 {
     if (w <= 0 || h <= 0)
         return;
 
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
     int x0 = x, y0 = y;
     int x1 = x + w - 1, y1 = y + h - 1;
 
     // Top edge
-    if (y0 >= 0 && y0 < height) {
-        int left = x0 < 0 ? 0 : x0;
-        int right = x1 >= width ? width - 1 : x1;
-        if (left <= right)
-            memset(&framebuffer[y0 * width + left], color, right - left + 1);
-    }
+    DRAW_SPAN(framebuffer, width, height, x0, x1, y0, color);
 
     // Bottom edge
-    if (h > 1 && y1 >= 0 && y1 < height) {
-        int left = x0 < 0 ? 0 : x0;
-        int right = x1 >= width ? width - 1 : x1;
-        if (left <= right)
-            memset(&framebuffer[y1 * width + left], color, right - left + 1);
+    if (h > 1)
+        DRAW_SPAN(framebuffer, width, height, x0, x1, y1, color);
+
+    // Left and right edges (inner rows only)
+    int top = (y0 + 1) < 0 ? 0 : y0 + 1;
+    int bottom = (y1 - 1) >= height ? height - 1 : y1 - 1;
+    for (int iy = top; iy <= bottom; iy++) {
+        DRAW_PIXEL(framebuffer, width, height, x0, iy, color);
+        if (w > 1)
+            DRAW_PIXEL(framebuffer, width, height, x1, iy, color);
     }
-
-    // Left edge
-    if (x0 >= 0 && x0 < width) {
-        int top = (y0 + 1) < 0 ? 0 : y0 + 1;
-        int bottom = (y1 - 1) >= height ? height - 1 : y1 - 1;
-        for (int iy = top; iy <= bottom; iy++)
-            framebuffer[iy * width + x0] = color;
-    }
-
-    // Right edge
-    if (w > 1 && x1 >= 0 && x1 < width) {
-        int top = (y0 + 1) < 0 ? 0 : y0 + 1;
-        int bottom = (y1 - 1) >= height ? height - 1 : y1 - 1;
-        for (int iy = top; iy <= bottom; iy++)
-            framebuffer[iy * width + x1] = color;
-    }
-}
-
-// Fill a horizontal span from x0 to x1 (inclusive) at row y, clipped.
-static inline void fill_span(uint8_t *framebuffer, int width, int height,
-                             int x0, int x1, int y, uint8_t color)
-{
-    if (y < 0 || y >= height)
-        return;
-    if (x0 < 0) x0 = 0;
-    if (x1 >= width) x1 = width - 1;
-    if (x0 > x1)
-        return;
-    memset(&framebuffer[y * width + x0], color, x1 - x0 + 1);
-}
-
-// Set a single pixel, clipped.
-static inline void plot_pixel(uint8_t *framebuffer, int width, int height,
-                              int x, int y, uint8_t color)
-{
-    if (x >= 0 && x < width && y >= 0 && y < height)
-        framebuffer[y * width + x] = color;
 }
 
 void dvi_graphics_fill_circle(uint8_t *framebuffer, int width, int height,
@@ -243,28 +414,22 @@ void dvi_graphics_fill_circle(uint8_t *framebuffer, int width, int height,
 {
     if (r < 0)
         return;
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
     if (r == 0) {
-        plot_pixel(framebuffer, width, height, cx, cy, color);
+        DRAW_PIXEL(framebuffer, width, height, cx, cy, color);
         return;
     }
 
-    // Midpoint circle algorithm with horizontal span fill
-    int x = 0, y = r;
-    int d = 1 - r;
-
-    while (x <= y) {
-        fill_span(framebuffer, width, height, cx - x, cx + x, cy + y, color);
-        fill_span(framebuffer, width, height, cx - x, cx + x, cy - y, color);
-        fill_span(framebuffer, width, height, cx - y, cx + y, cy + x, color);
-        fill_span(framebuffer, width, height, cx - y, cx + y, cy - x, color);
-
-        if (d < 0) {
-            d += 2 * x + 3;
-        } else {
-            d += 2 * (x - y) + 5;
-            y--;
-        }
-        x++;
+    // Row-by-row fill to avoid duplicate spans (which cause blend artifacts)
+    int ix = r;
+    int r2 = r * r;
+    for (int iy = 0; iy <= r; iy++) {
+        int threshold = r2 - iy * iy;
+        while (ix * ix > threshold)
+            ix--;
+        DRAW_SPAN(framebuffer, width, height, cx - ix, cx + ix, cy + iy, color);
+        if (iy > 0)
+            DRAW_SPAN(framebuffer, width, height, cx - ix, cx + ix, cy - iy, color);
     }
 }
 
@@ -273,8 +438,9 @@ void dvi_graphics_draw_circle(uint8_t *framebuffer, int width, int height,
 {
     if (r < 0)
         return;
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
     if (r == 0) {
-        plot_pixel(framebuffer, width, height, cx, cy, color);
+        DRAW_PIXEL(framebuffer, width, height, cx, cy, color);
         return;
     }
 
@@ -283,14 +449,14 @@ void dvi_graphics_draw_circle(uint8_t *framebuffer, int width, int height,
     int d = 1 - r;
 
     while (x <= y) {
-        plot_pixel(framebuffer, width, height, cx + x, cy + y, color);
-        plot_pixel(framebuffer, width, height, cx - x, cy + y, color);
-        plot_pixel(framebuffer, width, height, cx + x, cy - y, color);
-        plot_pixel(framebuffer, width, height, cx - x, cy - y, color);
-        plot_pixel(framebuffer, width, height, cx + y, cy + x, color);
-        plot_pixel(framebuffer, width, height, cx - y, cy + x, color);
-        plot_pixel(framebuffer, width, height, cx + y, cy - x, color);
-        plot_pixel(framebuffer, width, height, cx - y, cy - x, color);
+        DRAW_PIXEL(framebuffer, width, height, cx + x, cy + y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx - x, cy + y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx + x, cy - y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx - x, cy - y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx + y, cy + x, color);
+        DRAW_PIXEL(framebuffer, width, height, cx - y, cy + x, color);
+        DRAW_PIXEL(framebuffer, width, height, cx + y, cy - x, color);
+        DRAW_PIXEL(framebuffer, width, height, cx - y, cy - x, color);
 
         if (d < 0) {
             d += 2 * x + 3;
@@ -315,6 +481,7 @@ void dvi_graphics_fill_triangle(uint8_t *framebuffer, int width, int height,
         return;
 
     // Scanline fill using fixed-point edge interpolation
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
     for (int y = y0; y <= y2; y++) {
         // Edge from v0 to v2 (long edge, always active)
         int xa = x0 + (x2 - x0) * (y - y0) / (y2 - y0);
@@ -333,92 +500,64 @@ void dvi_graphics_fill_triangle(uint8_t *framebuffer, int width, int height,
         }
 
         if (xa > xb) { int t = xa; xa = xb; xb = t; }
-        fill_span(framebuffer, width, height, xa, xb, y, color);
+        DRAW_SPAN(framebuffer, width, height, xa, xb, y, color);
     }
 }
 
 void dvi_graphics_fill_ellipse(uint8_t *framebuffer, int width, int height,
                                int cx, int cy, int rx, int ry, uint8_t color)
 {
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
+
     if (rx < 0 || ry < 0)
         return;
     if (rx == 0 && ry == 0) {
-        plot_pixel(framebuffer, width, height, cx, cy, color);
+        DRAW_PIXEL(framebuffer, width, height, cx, cy, color);
         return;
     }
     if (rx == 0) {
-        // Vertical line
         for (int y = -ry; y <= ry; y++)
-            plot_pixel(framebuffer, width, height, cx, cy + y, color);
+            DRAW_PIXEL(framebuffer, width, height, cx, cy + y, color);
         return;
     }
     if (ry == 0) {
-        fill_span(framebuffer, width, height, cx - rx, cx + rx, cy, color);
+        DRAW_SPAN(framebuffer, width, height, cx - rx, cx + rx, cy, color);
         return;
     }
 
-    // Midpoint ellipse algorithm with horizontal span fill
+    // Row-by-row fill to avoid duplicate spans (which cause blend artifacts)
     long rx2 = (long)rx * rx;
     long ry2 = (long)ry * ry;
-    long two_rx2 = 2 * rx2;
-    long two_ry2 = 2 * ry2;
-
-    // Region 1: dy/dx > -1
-    int x = 0, y = ry;
-    long dx = 0, dy = two_rx2 * y;
-    long d1 = ry2 - rx2 * ry + rx2 / 4;
-
-    while (dx < dy) {
-        fill_span(framebuffer, width, height, cx - x, cx + x, cy + y, color);
-        fill_span(framebuffer, width, height, cx - x, cx + x, cy - y, color);
-        x++;
-        dx += two_ry2;
-        if (d1 < 0) {
-            d1 += dx + ry2;
-        } else {
-            y--;
-            dy -= two_rx2;
-            d1 += dx - dy + ry2;
-        }
-    }
-
-    // Region 2: dy/dx <= -1
-    long d2 = ry2 * ((long)(2 * x + 1) * (2 * x + 1)) / 4
-            + rx2 * ((long)(y - 1) * (y - 1))
-            - rx2 * ry2;
-
-    while (y >= 0) {
-        fill_span(framebuffer, width, height, cx - x, cx + x, cy + y, color);
-        fill_span(framebuffer, width, height, cx - x, cx + x, cy - y, color);
-        y--;
-        dy -= two_rx2;
-        if (d2 > 0) {
-            d2 += rx2 - dy;
-        } else {
-            x++;
-            dx += two_ry2;
-            d2 += dx - dy + rx2;
-        }
+    int ix = rx;
+    for (int iy = 0; iy <= ry; iy++) {
+        long threshold = rx2 * ry2 - (long)iy * iy * rx2;
+        while ((long)ix * ix * ry2 > threshold)
+            ix--;
+        DRAW_SPAN(framebuffer, width, height, cx - ix, cx + ix, cy + iy, color);
+        if (iy > 0)
+            DRAW_SPAN(framebuffer, width, height, cx - ix, cx + ix, cy - iy, color);
     }
 }
 
 void dvi_graphics_draw_ellipse(uint8_t *framebuffer, int width, int height,
                                int cx, int cy, int rx, int ry, uint8_t color)
 {
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
+
     if (rx < 0 || ry < 0)
         return;
     if (rx == 0 && ry == 0) {
-        plot_pixel(framebuffer, width, height, cx, cy, color);
+        DRAW_PIXEL(framebuffer, width, height, cx, cy, color);
         return;
     }
     if (rx == 0) {
         for (int y = -ry; y <= ry; y++)
-            plot_pixel(framebuffer, width, height, cx, cy + y, color);
+            DRAW_PIXEL(framebuffer, width, height, cx, cy + y, color);
         return;
     }
     if (ry == 0) {
         for (int x = -rx; x <= rx; x++)
-            plot_pixel(framebuffer, width, height, cx + x, cy, color);
+            DRAW_PIXEL(framebuffer, width, height, cx + x, cy, color);
         return;
     }
 
@@ -434,10 +573,10 @@ void dvi_graphics_draw_ellipse(uint8_t *framebuffer, int width, int height,
     long d1 = ry2 - rx2 * ry + rx2 / 4;
 
     while (dx < dy) {
-        plot_pixel(framebuffer, width, height, cx + x, cy + y, color);
-        plot_pixel(framebuffer, width, height, cx - x, cy + y, color);
-        plot_pixel(framebuffer, width, height, cx + x, cy - y, color);
-        plot_pixel(framebuffer, width, height, cx - x, cy - y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx + x, cy + y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx - x, cy + y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx + x, cy - y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx - x, cy - y, color);
         x++;
         dx += two_ry2;
         if (d1 < 0) {
@@ -455,10 +594,10 @@ void dvi_graphics_draw_ellipse(uint8_t *framebuffer, int width, int height,
             - rx2 * ry2;
 
     while (y >= 0) {
-        plot_pixel(framebuffer, width, height, cx + x, cy + y, color);
-        plot_pixel(framebuffer, width, height, cx - x, cy + y, color);
-        plot_pixel(framebuffer, width, height, cx + x, cy - y, color);
-        plot_pixel(framebuffer, width, height, cx - x, cy - y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx + x, cy + y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx - x, cy + y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx + x, cy - y, color);
+        DRAW_PIXEL(framebuffer, width, height, cx - x, cy - y, color);
         y--;
         dy -= two_rx2;
         if (d2 > 0) {
@@ -491,13 +630,14 @@ void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height,
     }
 
     // For axis-aligned lines, use optimized fill
+    int blending = (blend_mode != DVI_BLEND_REPLACE);
     int half = thickness / 2;
     if (dy == 0) {
         // Horizontal line
         int left = x0 < x1 ? x0 : x1;
         int right = x0 < x1 ? x1 : x0;
         for (int iy = -half; iy < thickness - half; iy++)
-            fill_span(framebuffer, width, height, left, right, y0 + iy, color);
+            DRAW_SPAN(framebuffer, width, height, left, right, y0 + iy, color);
         return;
     }
     if (dx == 0) {
@@ -505,7 +645,7 @@ void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height,
         int top = y0 < y1 ? y0 : y1;
         int bot = y0 < y1 ? y1 : y0;
         for (int iy = top; iy <= bot; iy++)
-            fill_span(framebuffer, width, height, x0 - half, x0 + thickness - half - 1, iy, color);
+            DRAW_SPAN(framebuffer, width, height, x0 - half, x0 + thickness - half - 1, iy, color);
         return;
     }
 

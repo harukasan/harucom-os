@@ -55,6 +55,15 @@ class DVI
     FONT_MPLUS_J12: Integer
     FONT_DENKICHIP_J: Integer
 
+    BLEND_REPLACE: Integer
+    BLEND_ADD: Integer
+    BLEND_SUBTRACT: Integer
+    BLEND_MULTIPLY: Integer
+    BLEND_SCREEN: Integer
+    BLEND_ALPHA: Integer
+
+    def self.set_blend_mode: (Integer mode) -> void
+    def self.set_alpha: (Integer alpha) -> void
     def self.set_pixel: (Integer x, Integer y, Integer color) -> void
     def self.get_pixel: (Integer x, Integer y) -> Integer
     def self.fill: (Integer color) -> void

@@ -60,6 +60,30 @@ mrb_dvi_frame_count(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.set_blend_mode(mode)
+ */
+static mrb_value
+mrb_dvi_set_blend_mode(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int mode;
+  mrb_get_args(mrb, "i", &mode);
+  dvi_graphics_set_blend_mode((enum dvi_graphics_blend_mode)mode);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.set_alpha(alpha)
+ */
+static mrb_value
+mrb_dvi_set_alpha(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int alpha;
+  mrb_get_args(mrb, "i", &alpha);
+  dvi_graphics_set_alpha((uint8_t)alpha);
+  return mrb_nil_value();
+}
+
+/*
  * DVI.set_pixel(x, y, color)
  */
 static mrb_value
@@ -107,17 +131,9 @@ mrb_dvi_fill_rect(mrb_state *mrb, mrb_value klass)
 {
   mrb_int x, y, w, h, color;
   mrb_get_args(mrb, "iiiii", &x, &y, &w, &h, &color);
-  uint8_t *fb = dvi_get_framebuffer();
-  uint8_t c = (uint8_t)color;
-  /* Clip to framebuffer bounds */
-  if (x < 0) { w += x; x = 0; }
-  if (y < 0) { h += y; y = 0; }
-  if (x + w > DVI_GRAPHICS_WIDTH) w = DVI_GRAPHICS_WIDTH - x;
-  if (y + h > DVI_GRAPHICS_HEIGHT) h = DVI_GRAPHICS_HEIGHT - y;
-  if (w <= 0 || h <= 0) return mrb_nil_value();
-  for (mrb_int iy = 0; iy < h; iy++) {
-    memset(&fb[(y + iy) * DVI_GRAPHICS_WIDTH + x], c, w);
-  }
+  dvi_graphics_fill_rect(dvi_get_framebuffer(),
+                         DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                         x, y, w, h, (uint8_t)color);
   return mrb_nil_value();
 }
 
@@ -514,6 +530,24 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(HEIGHT),
                       mrb_fixnum_value(DVI_GRAPHICS_HEIGHT));
   DVI_FONT_DEFINE_RUBY_CONSTANTS(mrb, class_Graphics);
+
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(BLEND_REPLACE),
+                      mrb_fixnum_value(DVI_BLEND_REPLACE));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(BLEND_ADD),
+                      mrb_fixnum_value(DVI_BLEND_ADD));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(BLEND_SUBTRACT),
+                      mrb_fixnum_value(DVI_BLEND_SUBTRACT));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(BLEND_MULTIPLY),
+                      mrb_fixnum_value(DVI_BLEND_MULTIPLY));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(BLEND_SCREEN),
+                      mrb_fixnum_value(DVI_BLEND_SCREEN));
+  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(BLEND_ALPHA),
+                      mrb_fixnum_value(DVI_BLEND_ALPHA));
+
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_blend_mode),
+                             mrb_dvi_set_blend_mode, MRB_ARGS_REQ(1));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_alpha),
+                             mrb_dvi_set_alpha, MRB_ARGS_REQ(1));
 
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_pixel),
                              mrb_dvi_set_pixel, MRB_ARGS_REQ(3));

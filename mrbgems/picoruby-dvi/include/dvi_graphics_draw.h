@@ -8,6 +8,22 @@
 #include <stdint.h>
 #include "dvi_font_registry.h"
 
+// Blend modes for pixel compositing.
+enum dvi_graphics_blend_mode {
+    DVI_BLEND_REPLACE  = 0,
+    DVI_BLEND_ADD      = 1,
+    DVI_BLEND_SUBTRACT = 2,
+    DVI_BLEND_MULTIPLY = 3,
+    DVI_BLEND_SCREEN   = 4,
+    DVI_BLEND_ALPHA    = 5,
+};
+
+// Set the current blend mode. Affects all subsequent drawing operations.
+void dvi_graphics_set_blend_mode(enum dvi_graphics_blend_mode mode);
+
+// Set the global alpha value (0-255) used by DVI_BLEND_ALPHA mode.
+void dvi_graphics_set_alpha(uint8_t alpha);
+
 // Get built-in font by ID. Returns NULL for unknown IDs.
 const dvi_font_t *dvi_graphics_get_font(int font_id);
 
@@ -38,6 +54,11 @@ void dvi_graphics_draw_image_masked(uint8_t *framebuffer, int width, int height,
                                     const uint8_t *data, const uint8_t *mask,
                                     int x, int y,
                                     int image_width, int image_height);
+
+// Fill an axis-aligned rectangle at (x, y) with size (w, h).
+// Clips to framebuffer bounds. Respects current blend mode.
+void dvi_graphics_fill_rect(uint8_t *framebuffer, int width, int height,
+                            int x, int y, int w, int h, uint8_t color);
 
 // Draw an axis-aligned rectangle outline at (x, y) with size (w, h).
 // Clips to framebuffer bounds.

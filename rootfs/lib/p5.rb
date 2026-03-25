@@ -55,6 +55,22 @@ class P5
     @stroke_weight = w
   end
 
+  # Blend mode constants
+  REPLACE  = G::BLEND_REPLACE
+  ADD      = G::BLEND_ADD
+  SUBTRACT = G::BLEND_SUBTRACT
+  MULTIPLY = G::BLEND_MULTIPLY
+  SCREEN   = G::BLEND_SCREEN
+
+  def blend_mode(mode)
+    G.set_blend_mode(mode)
+  end
+
+  def alpha(value)
+    G.set_blend_mode(G::BLEND_ALPHA)
+    G.set_alpha(value)
+  end
+
   def text_font(font, wide_font = nil)
     @font = font
     @wide_font = wide_font
