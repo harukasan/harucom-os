@@ -74,6 +74,20 @@ class P5
     G.draw_rect(x, y, w, h, @stroke_color) if @stroke_enabled
   end
 
+  def circle(cx, cy, r)
+    G.fill_circle(cx, cy, r, @fill_color) if @fill_enabled
+    G.draw_circle(cx, cy, r, @stroke_color) if @stroke_enabled
+  end
+
+  def triangle(x0, y0, x1, y1, x2, y2)
+    G.fill_triangle(x0, y0, x1, y1, x2, y2, @fill_color) if @fill_enabled
+    if @stroke_enabled
+      G.draw_line(x0, y0, x1, y1, @stroke_color)
+      G.draw_line(x1, y1, x2, y2, @stroke_color)
+      G.draw_line(x2, y2, x0, y0, @stroke_color)
+    end
+  end
+
   # Text
 
   def text(str, x, y)

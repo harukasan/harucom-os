@@ -217,6 +217,126 @@ void dvi_graphics_draw_rect(uint8_t *framebuffer, int width, int height,
     }
 }
 
+// Fill a horizontal span from x0 to x1 (inclusive) at row y, clipped.
+static inline void fill_span(uint8_t *framebuffer, int width, int height,
+                             int x0, int x1, int y, uint8_t color)
+{
+    if (y < 0 || y >= height)
+        return;
+    if (x0 < 0) x0 = 0;
+    if (x1 >= width) x1 = width - 1;
+    if (x0 > x1)
+        return;
+    memset(&framebuffer[y * width + x0], color, x1 - x0 + 1);
+}
+
+// Set a single pixel, clipped.
+static inline void plot_pixel(uint8_t *framebuffer, int width, int height,
+                              int x, int y, uint8_t color)
+{
+    if (x >= 0 && x < width && y >= 0 && y < height)
+        framebuffer[y * width + x] = color;
+}
+
+void dvi_graphics_fill_circle(uint8_t *framebuffer, int width, int height,
+                              int cx, int cy, int r, uint8_t color)
+{
+    if (r < 0)
+        return;
+    if (r == 0) {
+        plot_pixel(framebuffer, width, height, cx, cy, color);
+        return;
+    }
+
+    // Midpoint circle algorithm with horizontal span fill
+    int x = 0, y = r;
+    int d = 1 - r;
+
+    while (x <= y) {
+        fill_span(framebuffer, width, height, cx - x, cx + x, cy + y, color);
+        fill_span(framebuffer, width, height, cx - x, cx + x, cy - y, color);
+        fill_span(framebuffer, width, height, cx - y, cx + y, cy + x, color);
+        fill_span(framebuffer, width, height, cx - y, cx + y, cy - x, color);
+
+        if (d < 0) {
+            d += 2 * x + 3;
+        } else {
+            d += 2 * (x - y) + 5;
+            y--;
+        }
+        x++;
+    }
+}
+
+void dvi_graphics_draw_circle(uint8_t *framebuffer, int width, int height,
+                              int cx, int cy, int r, uint8_t color)
+{
+    if (r < 0)
+        return;
+    if (r == 0) {
+        plot_pixel(framebuffer, width, height, cx, cy, color);
+        return;
+    }
+
+    // Midpoint circle algorithm (outline only)
+    int x = 0, y = r;
+    int d = 1 - r;
+
+    while (x <= y) {
+        plot_pixel(framebuffer, width, height, cx + x, cy + y, color);
+        plot_pixel(framebuffer, width, height, cx - x, cy + y, color);
+        plot_pixel(framebuffer, width, height, cx + x, cy - y, color);
+        plot_pixel(framebuffer, width, height, cx - x, cy - y, color);
+        plot_pixel(framebuffer, width, height, cx + y, cy + x, color);
+        plot_pixel(framebuffer, width, height, cx - y, cy + x, color);
+        plot_pixel(framebuffer, width, height, cx + y, cy - x, color);
+        plot_pixel(framebuffer, width, height, cx - y, cy - x, color);
+
+        if (d < 0) {
+            d += 2 * x + 3;
+        } else {
+            d += 2 * (x - y) + 5;
+            y--;
+        }
+        x++;
+    }
+}
+
+void dvi_graphics_fill_triangle(uint8_t *framebuffer, int width, int height,
+                                int x0, int y0, int x1, int y1,
+                                int x2, int y2, uint8_t color)
+{
+    // Sort vertices by y: y0 <= y1 <= y2
+    if (y0 > y1) { int t; t = x0; x0 = x1; x1 = t; t = y0; y0 = y1; y1 = t; }
+    if (y0 > y2) { int t; t = x0; x0 = x2; x2 = t; t = y0; y0 = y2; y2 = t; }
+    if (y1 > y2) { int t; t = x1; x1 = x2; x2 = t; t = y1; y1 = y2; y2 = t; }
+
+    if (y0 == y2)
+        return;
+
+    // Scanline fill using fixed-point edge interpolation
+    for (int y = y0; y <= y2; y++) {
+        // Edge from v0 to v2 (long edge, always active)
+        int xa = x0 + (x2 - x0) * (y - y0) / (y2 - y0);
+        int xb;
+
+        if (y < y1) {
+            if (y1 == y0)
+                xb = x0;
+            else
+                xb = x0 + (x1 - x0) * (y - y0) / (y1 - y0);
+        } else {
+            if (y2 == y1)
+                xb = x1;
+            else
+                xb = x1 + (x2 - x1) * (y - y1) / (y2 - y1);
+        }
+
+        if (xa > xb) { int t = xa; xa = xb; xb = t; }
+        fill_span(framebuffer, width, height, xa, xb, y, color);
+    }
+}
+
 void dvi_graphics_draw_image(uint8_t *framebuffer, int width, int height,
                              const uint8_t *data, int x, int y,
                              int image_width, int image_height)

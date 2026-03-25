@@ -136,6 +136,48 @@ mrb_dvi_draw_rect(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.fill_circle(cx, cy, r, color)
+ */
+static mrb_value
+mrb_dvi_fill_circle(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int cx, cy, r, color;
+  mrb_get_args(mrb, "iiii", &cx, &cy, &r, &color);
+  dvi_graphics_fill_circle(dvi_get_framebuffer(),
+                           DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                           cx, cy, r, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_circle(cx, cy, r, color)
+ */
+static mrb_value
+mrb_dvi_draw_circle(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int cx, cy, r, color;
+  mrb_get_args(mrb, "iiii", &cx, &cy, &r, &color);
+  dvi_graphics_draw_circle(dvi_get_framebuffer(),
+                           DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                           cx, cy, r, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.fill_triangle(x0, y0, x1, y1, x2, y2, color)
+ */
+static mrb_value
+mrb_dvi_fill_triangle(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int x0, y0, x1, y1, x2, y2, color;
+  mrb_get_args(mrb, "iiiiiii", &x0, &y0, &x1, &y1, &x2, &y2, &color);
+  dvi_graphics_fill_triangle(dvi_get_framebuffer(),
+                             DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                             x0, y0, x1, y1, x2, y2, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
  * DVI::Graphics.draw_text(x, y, text, color [, font [, wide_font]])
  */
 static mrb_value
@@ -441,6 +483,12 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_fill_rect, MRB_ARGS_REQ(5));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_rect),
                              mrb_dvi_draw_rect, MRB_ARGS_REQ(5));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_circle),
+                             mrb_dvi_fill_circle, MRB_ARGS_REQ(4));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_circle),
+                             mrb_dvi_draw_circle, MRB_ARGS_REQ(4));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_triangle),
+                             mrb_dvi_fill_triangle, MRB_ARGS_REQ(7));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_text),
                              mrb_dvi_draw_text, MRB_ARGS_ARG(4, 2));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_line),

@@ -44,4 +44,17 @@ void dvi_graphics_draw_image_masked(uint8_t *framebuffer, int width, int height,
 void dvi_graphics_draw_rect(uint8_t *framebuffer, int width, int height,
                             int x, int y, int w, int h, uint8_t color);
 
+// Fill a circle centered at (cx, cy) with radius r.
+void dvi_graphics_fill_circle(uint8_t *framebuffer, int width, int height,
+                              int cx, int cy, int r, uint8_t color);
+
+// Draw a circle outline centered at (cx, cy) with radius r.
+void dvi_graphics_draw_circle(uint8_t *framebuffer, int width, int height,
+                              int cx, int cy, int r, uint8_t color);
+
+// Fill a triangle with vertices (x0,y0), (x1,y1), (x2,y2).
+void dvi_graphics_fill_triangle(uint8_t *framebuffer, int width, int height,
+                                int x0, int y0, int x1, int y1,
+                                int x2, int y2, uint8_t color);
+
 #endif // DVI_GRAPHICS_DRAW_H

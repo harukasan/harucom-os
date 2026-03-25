@@ -122,7 +122,39 @@ p5.text_color(0xFF)
 p5.text("color() helper + gradient", 10, 10)
 show_step(p5, "color gradient", 6, keyboard)
 
-# Step 7: combined scene
+# Step 7: circle
+p5.background(0x00)
+p5.fill(0xE0)
+p5.stroke(0xFF)
+p5.circle(160, 200, 80)
+p5.fill(0x1C)
+p5.circle(320, 200, 100)
+p5.no_fill
+p5.stroke(0x03)
+p5.circle(480, 200, 60)
+p5.fill(p5.color(200, 100, 0))
+p5.no_stroke
+p5.circle(320, 360, 50)
+p5.text_color(0xFF)
+p5.text("circle: fill+stroke, no_fill, no_stroke", 10, 10)
+show_step(p5, "circle", 7, keyboard)
+
+# Step 8: triangle
+p5.background(0x00)
+p5.fill(0xE0)
+p5.stroke(0xFF)
+p5.triangle(100, 300, 250, 60, 400, 300)
+p5.no_fill
+p5.stroke(0x1C)
+p5.triangle(300, 300, 450, 60, 600, 300)
+p5.fill(0x03)
+p5.no_stroke
+p5.triangle(200, 440, 320, 320, 440, 440)
+p5.text_color(0xFF)
+p5.text("triangle: fill+stroke, stroke only, fill only", 10, 10)
+show_step(p5, "triangle", 8, keyboard)
+
+# Step 9: combined scene
 p5.background(p5.color(0, 0, 64))
 p5.fill(p5.color(200, 100, 0))
 p5.stroke(0xFF)
@@ -145,7 +177,7 @@ p5.text("fill+stroke", 50, 140)
 p5.text("stroke only", 350, 140)
 p5.text("fill only", 50, 340)
 p5.text("fill+stroke", 350, 340)
-show_step(p5, "combined scene", 7, keyboard)
+show_step(p5, "combined scene", 9, keyboard)
 
 # Restore text mode
 DVI.set_mode(DVI::TEXT_MODE)
