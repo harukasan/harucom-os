@@ -29,9 +29,13 @@ def show_step_text(title, detail, step, kb)
   wait_key(kb)
 end
 
+G = DVI::Graphics
+W = G::WIDTH
+H = G::HEIGHT
+
 def show_step_gfx(title, step, kb)
-  DVI::Graphics.fill_rect(0, 230, 320, 10, 0x00)
-  DVI::Graphics.draw_text(0, 232, "[" + step.to_s + "] " + title, 0xFF)
+  G.fill_rect(0, H - 10, W, 10, 0x00)
+  G.draw_text(0, H - 8, "[" + step.to_s + "] " + title, 0xFF)
   wait_key(kb)
 end
 
@@ -40,15 +44,14 @@ end
 DVI.set_mode(DVI::GRAPHICS_MODE)
 
 # Step 1: fill + draw_text (8x8 font)
-DVI::Graphics.fill(0x00)
-DVI::Graphics.draw_text(10, 10, "Hello, Harucom!", 0xFF)
-DVI::Graphics.draw_text(10, 20, "DVI::Graphics 8x8 font", 0xE0)
-DVI::Graphics.draw_text(10, 30, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0x1C)
-DVI::Graphics.draw_text(10, 40, "0123456789 !@#$%^&*()", 0xFC)
+G.fill(0x00)
+G.draw_text(10, 10, "Hello, Harucom!", 0xFF)
+G.draw_text(10, 20, "DVI::Graphics 8x8 font", 0xE0)
+G.draw_text(10, 30, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0x1C)
+G.draw_text(10, 40, "0123456789 !@#$%^&*()", 0xFC)
 show_step_gfx("draw_text 8x8", 1, keyboard)
 
-# Step 2-3: font showcase (2 pages)
-G = DVI::Graphics
+# Step 2+: font showcase (paginated)
 all_fonts = [
   [G::FONT_8X8,          "8x8",          0xE0],
   [G::FONT_MPLUS_12,     "M+ 12px",      0x1C],
@@ -81,15 +84,15 @@ all_fonts = [
 page_size = 5
 page = 0
 while page * page_size < all_fonts.length
-  DVI::Graphics.fill(0x00)
+  G.fill(0x00)
   y = 4
   i = page * page_size
   while i < all_fonts.length && i < (page + 1) * page_size
     font, label, color = all_fonts[i]
-    DVI::Graphics.draw_text(4, y, label, 0x8F, font)
-    DVI::Graphics.draw_text(4, y + 10, "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789", color, font)
-    DVI::Graphics.draw_text(4, y + 20, "abcdefghijklmnopqrstuvwxyz !@#$%^&*()", color, font)
-    y += 42
+    G.draw_text(4, y, label, 0x8F, font)
+    G.draw_text(4, y + 14, "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789", color, font)
+    G.draw_text(4, y + 46, "abcdefghijklmnopqrstuvwxyz !@#$%^&*()", color, font)
+    y += 84
     i += 1
   end
   total_pages = (all_fonts.length + page_size - 1) / page_size
@@ -97,70 +100,76 @@ while page * page_size < all_fonts.length
   page += 1
 end
 
-step = page + 1
+step = page + 2
 
 # Japanese text rendering
 J12 = G::FONT_MPLUS_J12
-DVI::Graphics.fill(0x00)
-DVI::Graphics.draw_text(4, 4, "M+ 12px Japanese", 0x8F, G::FONT_MPLUS_12, J12)
-DVI::Graphics.draw_text(4, 20, "こんにちは世界！", 0xFF, G::FONT_MPLUS_12, J12)
-DVI::Graphics.draw_text(4, 36, "Harucom OSへようこそ", 0xE0, G::FONT_MPLUS_12, J12)
-DVI::Graphics.draw_text(4, 52, "漢字・ひらがな・カタカナ", 0x1C, G::FONT_MPLUS_12, J12)
-DVI::Graphics.draw_text(4, 68, "ABCDEFG abcdefg 0123456789", 0xFC, G::FONT_MPLUS_12, J12)
-DVI::Graphics.draw_text(4, 88, "混在テスト: Ruby on Harucom!", 0xFF, G::FONT_MPLUS_12, J12)
-DVI::Graphics.draw_text(4, 108, "記号テスト: ★●▲■◆○△□◇", 0xE3, G::FONT_MPLUS_12, J12)
+G.fill(0x00)
+G.draw_text(4, 4, "M+ 12px Japanese", 0x8F, G::FONT_MPLUS_12, J12)
+G.draw_text(4, 20, "こんにちは世界！", 0xFF, G::FONT_MPLUS_12, J12)
+G.draw_text(4, 36, "Harucom OSへようこそ", 0xE0, G::FONT_MPLUS_12, J12)
+G.draw_text(4, 52, "漢字・ひらがな・カタカナ", 0x1C, G::FONT_MPLUS_12, J12)
+G.draw_text(4, 68, "ABCDEFG abcdefg 0123456789", 0xFC, G::FONT_MPLUS_12, J12)
+G.draw_text(4, 88, "混在テスト: Ruby on Harucom!", 0xFF, G::FONT_MPLUS_12, J12)
+G.draw_text(4, 108, "記号テスト: ★●▲■◆○△□◇", 0xE3, G::FONT_MPLUS_12, J12)
 show_step_gfx("M+ Japanese", step, keyboard)
 step += 1
 
 # DenkiChip Japanese text rendering
 DJ = G::FONT_DENKICHIP_J
-DVI::Graphics.fill(0x00)
-DVI::Graphics.draw_text(4, 4, "DenkiChip Japanese", 0x8F, G::FONT_DENKICHIP, DJ)
-DVI::Graphics.draw_text(4, 20, "こんにちは世界！", 0xFF, G::FONT_DENKICHIP, DJ)
-DVI::Graphics.draw_text(4, 36, "Harucom OSへようこそ", 0xE0, G::FONT_DENKICHIP, DJ)
-DVI::Graphics.draw_text(4, 52, "漢字・ひらがな・カタカナ", 0x1C, G::FONT_DENKICHIP, DJ)
-DVI::Graphics.draw_text(4, 68, "ABCDEFG abcdefg 0123456789", 0xFC, G::FONT_DENKICHIP, DJ)
-DVI::Graphics.draw_text(4, 88, "混在テスト: Ruby on Harucom!", 0xFF, G::FONT_DENKICHIP, DJ)
+G.fill(0x00)
+G.draw_text(4, 4, "DenkiChip Japanese", 0x8F, G::FONT_DENKICHIP, DJ)
+G.draw_text(4, 20, "こんにちは世界！", 0xFF, G::FONT_DENKICHIP, DJ)
+G.draw_text(4, 36, "Harucom OSへようこそ", 0xE0, G::FONT_DENKICHIP, DJ)
+G.draw_text(4, 52, "漢字・ひらがな・カタカナ", 0x1C, G::FONT_DENKICHIP, DJ)
+G.draw_text(4, 68, "ABCDEFG abcdefg 0123456789", 0xFC, G::FONT_DENKICHIP, DJ)
+G.draw_text(4, 88, "混在テスト: Ruby on Harucom!", 0xFF, G::FONT_DENKICHIP, DJ)
 show_step_gfx("DenkiChip JP", step, keyboard)
 step += 1
 
 # draw_line
-DVI::Graphics.fill(0x00)
-DVI::Graphics.draw_line(0, 0, 319, 239, 0xE0)
-DVI::Graphics.draw_line(319, 0, 0, 239, 0x1C)
-DVI::Graphics.draw_line(160, 0, 160, 239, 0x03)
-DVI::Graphics.draw_line(0, 120, 319, 120, 0x03)
+cx = W / 2
+cy = H / 2
+G.fill(0x00)
+G.draw_line(0, 0, W - 1, H - 1, 0xE0)
+G.draw_line(W - 1, 0, 0, H - 1, 0x1C)
+G.draw_line(cx, 0, cx, H - 1, 0x03)
+G.draw_line(0, cy, W - 1, cy, 0x03)
 16.times do |i|
   angle = i * 3.14159 * 2 / 16
-  ex = 160 + (100 * Math.cos(angle)).to_i
-  ey = 120 + (80 * Math.sin(angle)).to_i
-  DVI::Graphics.draw_line(160, 120, ex, ey, 0xFF)
+  ex = cx + (200 * Math.cos(angle)).to_i
+  ey = cy + (160 * Math.sin(angle)).to_i
+  G.draw_line(cx, cy, ex, ey, 0xFF)
 end
 show_step_gfx("draw_line", step, keyboard)
 step += 1
 
 # fill_rect + draw_text overlay
-DVI::Graphics.fill(0x00)
-DVI::Graphics.fill_rect(20, 20, 120, 80, 0xE0)
-DVI::Graphics.fill_rect(100, 60, 120, 80, 0x1C)
-DVI::Graphics.fill_rect(180, 100, 120, 80, 0x03)
-DVI::Graphics.draw_text(30, 50, "RED", 0xFF)
-DVI::Graphics.draw_text(110, 90, "GREEN", 0xFF)
-DVI::Graphics.draw_text(190, 130, "BLUE", 0xFF)
+G.fill(0x00)
+G.fill_rect(40, 40, 240, 160, 0xE0)
+G.fill_rect(200, 120, 240, 160, 0x1C)
+G.fill_rect(360, 200, 240, 160, 0x03)
+G.draw_text(60, 100, "RED", 0xFF)
+G.draw_text(220, 180, "GREEN", 0xFF)
+G.draw_text(380, 260, "BLUE", 0xFF)
 show_step_gfx("fill_rect + overlay", step, keyboard)
 step += 1
 
 # set_pixel pattern
-DVI::Graphics.fill(0x00)
-120.times do |y|
-  160.times do |x|
-    r = (x * 7 / 160) << 5
-    g = (y * 7 / 120) << 2
-    b = ((x + y) * 3 / 280)
-    DVI::Graphics.set_pixel(x + 80, y + 60, r | g | b)
+G.fill(0x00)
+gh = H * 2 / 3
+gw = W * 2 / 3
+ox = (W - gw) / 2
+oy = (H - gh) / 2
+gh.times do |y|
+  gw.times do |x|
+    r = (x * 7 / gw) << 5
+    g = (y * 7 / gh) << 2
+    b = ((x + y) * 3 / (gw + gh))
+    G.set_pixel(x + ox, y + oy, r | g | b)
   end
 end
-DVI::Graphics.draw_text(100, 50, "RGB332 gradient", 0xFF)
+G.draw_text(ox + 10, oy - 10, "RGB332 gradient", 0xFF)
 show_step_gfx("set_pixel gradient", step, keyboard)
 
 # === Text Mode Tests ===
