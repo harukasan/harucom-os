@@ -415,28 +415,7 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                       mrb_fixnum_value(DVI_GRAPHICS_WIDTH));
   mrb_define_const_id(mrb, class_Graphics, MRB_SYM(HEIGHT),
                       mrb_fixnum_value(DVI_GRAPHICS_HEIGHT));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_8X8),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_8X8));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_MPLUS_12),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_12PX));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_FIXED_4X6),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_FIXED_4X6));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_FIXED_5X7),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_FIXED_5X7));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_FIXED_6X13),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_FIXED_6X13));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_SPLEEN_5X8),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_SPLEEN_5X8));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_SPLEEN_8X16),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_SPLEEN_8X16));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_SPLEEN_12X24),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_SPLEEN_12X24));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_DENKICHIP),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_DENKICHIP));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_MPLUS_J12),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_MPLUS_J12));
-  mrb_define_const_id(mrb, class_Graphics, MRB_SYM(FONT_DENKICHIP_J),
-                      mrb_fixnum_value(DVI_GRAPHICS_FONT_DENKICHIP_J));
+  DVI_FONT_DEFINE_RUBY_CONSTANTS(mrb, class_Graphics);
 
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(set_pixel),
                              mrb_dvi_set_pixel, MRB_ARGS_REQ(3));

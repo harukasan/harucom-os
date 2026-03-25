@@ -1,40 +1,13 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define DVI_FONT_REGISTRY_IMPLEMENTATION
 #include "dvi_graphics_draw.h"
 #include "uni2jis_table.h"
-#include "font8x8_basic.h"
-#include "font_mplus_f12r.h"
-#include "font_mplus_j12_combined.h"
-#include "font_fixed_4x6.h"
-#include "font_fixed_5x7.h"
-#include "font_fixed_6x13.h"
-#include "font_spleen_5x8.h"
-#include "font_spleen_8x16.h"
-#include "font_spleen_12x24.h"
-#include "font_denkichip.h"
-#include "font_denkichip_j.h"
-
-static const dvi_font_t *const graphics_fonts[] = {
-    [DVI_GRAPHICS_FONT_8X8]          = &font8x8_basic,
-    [DVI_GRAPHICS_FONT_12PX]         = &font_mplus_f12r,
-    [DVI_GRAPHICS_FONT_FIXED_4X6]    = &font_fixed_4x6,
-    [DVI_GRAPHICS_FONT_FIXED_5X7]    = &font_fixed_5x7,
-    [DVI_GRAPHICS_FONT_FIXED_6X13]   = &font_fixed_6x13,
-    [DVI_GRAPHICS_FONT_SPLEEN_5X8]   = &font_spleen_5x8,
-    [DVI_GRAPHICS_FONT_SPLEEN_8X16]  = &font_spleen_8x16,
-    [DVI_GRAPHICS_FONT_SPLEEN_12X24] = &font_spleen_12x24,
-    [DVI_GRAPHICS_FONT_DENKICHIP]    = &font_denkichip,
-    [DVI_GRAPHICS_FONT_MPLUS_J12]    = &font_mplus_j12_wide,
-    [DVI_GRAPHICS_FONT_DENKICHIP_J]  = &font_denkichip_j,
-};
-
-#define GRAPHICS_FONT_COUNT \
-    (sizeof(graphics_fonts) / sizeof(graphics_fonts[0]))
 
 const dvi_font_t *dvi_graphics_get_font(int font_id)
 {
-    if (font_id < 0 || font_id >= (int)GRAPHICS_FONT_COUNT)
+    if (font_id < 0 || font_id >= (int)DVI_GRAPHICS_FONT_COUNT)
         return NULL;
     return graphics_fonts[font_id];
 }

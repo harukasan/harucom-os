@@ -19,3 +19,6 @@
 [submodule "mrbgems/picoruby-dvi/lib/fonts/x8y12pxDenkiChip"]
 	path = mrbgems/picoruby-dvi/lib/fonts/x8y12pxDenkiChip
 	url = https://github.com/hicchicc/x8y12pxDenkiChip.git
+[submodule "mrbgems/picoruby-dvi/lib/fonts/adobe-75dpi"]
+	path = mrbgems/picoruby-dvi/lib/fonts/adobe-75dpi
+	url = https://gitlab.freedesktop.org/xorg/font/adobe-75dpi.git
