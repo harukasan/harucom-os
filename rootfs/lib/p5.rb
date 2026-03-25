@@ -11,6 +11,8 @@ class P5
     @font = G::FONT_8X8
     @wide_font = nil
     @text_color = 0xFF
+    @matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    @matrix_stack = []
   end
 
   def width
@@ -80,70 +82,147 @@ class P5
     @text_color = color
   end
 
+  # Coordinate transforms
+  #
+  # Transform state is a 2x3 affine matrix [a, b, c, d, tx, ty]:
+  #   x' = a*x + b*y + tx
+  #   y' = c*x + d*y + ty
+  #
+  # Drawing functions check translate_only? for a fast path (integer add)
+  # and fall back to full matrix transform for rotation/scale.
+
+  def translate(tx, ty)
+    @matrix = matrix_multiply([1.0, 0.0, 0.0, 1.0, tx.to_f, ty.to_f], @matrix)
+  end
+
+  def rotate(angle)
+    c = Math.cos(angle)
+    s = Math.sin(angle)
+    @matrix = matrix_multiply([c, -s, s, c, 0.0, 0.0], @matrix)
+  end
+
+  def scale(sx, sy = sx)
+    @matrix = matrix_multiply([sx.to_f, 0.0, 0.0, sy.to_f, 0.0, 0.0], @matrix)
+  end
+
+  def push_matrix
+    @matrix_stack.push(@matrix.dup)
+  end
+
+  def pop_matrix
+    @matrix = @matrix_stack.pop if @matrix_stack.length > 0
+  end
+
+  def reset_matrix
+    @matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+  end
+
   # Shape drawing
 
   def point(x, y)
-    G.set_pixel(x, y, @stroke_color) if @stroke_enabled
+    return unless @stroke_enabled
+    px, py = transform(x, y)
+    G.set_pixel(px, py, @stroke_color)
   end
 
   def line(x0, y0, x1, y1)
-    if @stroke_enabled
-      if @stroke_weight > 1
-        G.draw_thick_line(x0, y0, x1, y1, @stroke_weight, @stroke_color)
-      else
-        G.draw_line(x0, y0, x1, y1, @stroke_color)
-      end
+    return unless @stroke_enabled
+    ax, ay = transform(x0, y0)
+    bx, by = transform(x1, y1)
+    if @stroke_weight > 1
+      G.draw_thick_line(ax, ay, bx, by, @stroke_weight, @stroke_color)
+    else
+      G.draw_line(ax, ay, bx, by, @stroke_color)
     end
   end
 
   def rect(x, y, w, h)
-    G.fill_rect(x, y, w, h, @fill_color) if @fill_enabled
-    G.draw_rect(x, y, w, h, @stroke_color) if @stroke_enabled
-  end
-
-  def circle(cx, cy, r)
-    G.fill_circle(cx, cy, r, @fill_color) if @fill_enabled
-    G.draw_circle(cx, cy, r, @stroke_color) if @stroke_enabled
-  end
-
-  def ellipse(cx, cy, rx, ry)
-    G.fill_ellipse(cx, cy, rx, ry, @fill_color) if @fill_enabled
-    G.draw_ellipse(cx, cy, rx, ry, @stroke_color) if @stroke_enabled
-  end
-
-  def triangle(x0, y0, x1, y1, x2, y2)
-    G.fill_triangle(x0, y0, x1, y1, x2, y2, @fill_color) if @fill_enabled
-    if @stroke_enabled
-      if @stroke_weight > 1
-        G.draw_thick_line(x0, y0, x1, y1, @stroke_weight, @stroke_color)
-        G.draw_thick_line(x1, y1, x2, y2, @stroke_weight, @stroke_color)
-        G.draw_thick_line(x2, y2, x0, y0, @stroke_weight, @stroke_color)
-      else
-        G.draw_line(x0, y0, x1, y1, @stroke_color)
-        G.draw_line(x1, y1, x2, y2, @stroke_color)
-        G.draw_line(x2, y2, x0, y0, @stroke_color)
+    if translate_only?
+      tx = @matrix[4].round
+      ty = @matrix[5].round
+      G.fill_rect(x + tx, y + ty, w, h, @fill_color) if @fill_enabled
+      G.draw_rect(x + tx, y + ty, w, h, @stroke_color) if @stroke_enabled
+    else
+      x0, y0 = transform(x, y)
+      x1, y1 = transform(x + w, y)
+      x2, y2 = transform(x + w, y + h)
+      x3, y3 = transform(x, y + h)
+      if @fill_enabled
+        G.fill_triangle(x0, y0, x1, y1, x2, y2, @fill_color)
+        G.fill_triangle(x0, y0, x2, y2, x3, y3, @fill_color)
+      end
+      if @stroke_enabled
+        draw_edge(x0, y0, x1, y1)
+        draw_edge(x1, y1, x2, y2)
+        draw_edge(x2, y2, x3, y3)
+        draw_edge(x3, y3, x0, y0)
       end
     end
   end
 
-  # Text
-
-  def text(str, x, y)
-    if @wide_font
-      G.draw_text(x, y, str, @text_color, @font, @wide_font)
+  def circle(cx, cy, r)
+    tcx, tcy = transform(cx, cy)
+    if translate_only?
+      G.fill_circle(tcx, tcy, r, @fill_color) if @fill_enabled
+      G.draw_circle(tcx, tcy, r, @stroke_color) if @stroke_enabled
     else
-      G.draw_text(x, y, str, @text_color, @font)
+      sx = Math.sqrt(@matrix[0] * @matrix[0] + @matrix[2] * @matrix[2])
+      sy = Math.sqrt(@matrix[1] * @matrix[1] + @matrix[3] * @matrix[3])
+      rx = (r * sx).round
+      ry = (r * sy).round
+      G.fill_ellipse(tcx, tcy, rx, ry, @fill_color) if @fill_enabled
+      G.draw_ellipse(tcx, tcy, rx, ry, @stroke_color) if @stroke_enabled
     end
   end
 
-  # Image
+  def ellipse(cx, cy, rx, ry)
+    tcx, tcy = transform(cx, cy)
+    if translate_only?
+      G.fill_ellipse(tcx, tcy, rx, ry, @fill_color) if @fill_enabled
+      G.draw_ellipse(tcx, tcy, rx, ry, @stroke_color) if @stroke_enabled
+    else
+      sx = Math.sqrt(@matrix[0] * @matrix[0] + @matrix[2] * @matrix[2])
+      sy = Math.sqrt(@matrix[1] * @matrix[1] + @matrix[3] * @matrix[3])
+      trx = (rx * sx).round
+      try_ = (ry * sy).round
+      G.fill_ellipse(tcx, tcy, trx, try_, @fill_color) if @fill_enabled
+      G.draw_ellipse(tcx, tcy, trx, try_, @stroke_color) if @stroke_enabled
+    end
+  end
+
+  def triangle(x0, y0, x1, y1, x2, y2)
+    ax, ay = transform(x0, y0)
+    bx, by = transform(x1, y1)
+    cx, cy = transform(x2, y2)
+    G.fill_triangle(ax, ay, bx, by, cx, cy, @fill_color) if @fill_enabled
+    if @stroke_enabled
+      draw_edge(ax, ay, bx, by)
+      draw_edge(bx, by, cx, cy)
+      draw_edge(cx, cy, ax, ay)
+    end
+  end
+
+  # Text (translate only, rotation not supported)
+
+  def text(str, x, y)
+    tx, ty = transform(x, y)
+    if @wide_font
+      G.draw_text(tx, ty, str, @text_color, @font, @wide_font)
+    else
+      G.draw_text(tx, ty, str, @text_color, @font)
+    end
+  end
+
+  # Image (translate only, rotation not supported)
 
   def image(data, x, y, w, h)
-    G.draw_image(data, x, y, w, h)
+    tx, ty = transform(x, y)
+    G.draw_image(data, tx, ty, w, h)
   end
 
   def image_masked(data, mask, x, y, w, h)
-    G.draw_image_masked(data, mask, x, y, w, h)
+    tx, ty = transform(x, y)
+    G.draw_image_masked(data, mask, tx, ty, w, h)
   end
 
   # Pixel access
@@ -160,5 +239,32 @@ class P5
 
   def color(r, g, b)
     (r & 0xE0) | ((g >> 3) & 0x1C) | (b >> 6)
+  end
+
+  private
+
+  def transform(x, y)
+    m = @matrix
+    [(m[0] * x + m[1] * y + m[4]).round,
+     (m[2] * x + m[3] * y + m[5]).round]
+  end
+
+  def translate_only?
+    m = @matrix
+    m[0] == 1.0 && m[1] == 0.0 && m[2] == 0.0 && m[3] == 1.0
+  end
+
+  def matrix_multiply(a, b)
+    [a[0]*b[0] + a[1]*b[2], a[0]*b[1] + a[1]*b[3],
+     a[2]*b[0] + a[3]*b[2], a[2]*b[1] + a[3]*b[3],
+     a[0]*b[4] + a[1]*b[5] + a[4], a[2]*b[4] + a[3]*b[5] + a[5]]
+  end
+
+  def draw_edge(x0, y0, x1, y1)
+    if @stroke_weight > 1
+      G.draw_thick_line(x0, y0, x1, y1, @stroke_weight, @stroke_color)
+    else
+      G.draw_line(x0, y0, x1, y1, @stroke_color)
+    end
   end
 end

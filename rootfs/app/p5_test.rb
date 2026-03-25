@@ -225,7 +225,70 @@ p5.text_color(0xFF)
 p5.text("alpha blending: 128, 64", 10, 10)
 show_step(p5, "alpha blend", 12, keyboard)
 
-# Step 13: combined scene
+# Step 13: translate
+p5.background(0x00)
+p5.reset_matrix
+p5.fill(0xE0)
+p5.stroke(0xFF)
+p5.rect(10, 40, 80, 60)
+p5.translate(200, 0)
+p5.fill(0x1C)
+p5.rect(10, 40, 80, 60)
+p5.translate(200, 0)
+p5.fill(0x03)
+p5.rect(10, 40, 80, 60)
+p5.reset_matrix
+p5.text_color(0xFF)
+p5.text("translate: 3 rects offset by 200px", 10, 10)
+show_step(p5, "translate", 13, keyboard)
+
+# Step 14: rotate
+p5.background(0x00)
+p5.reset_matrix
+cx = W / 2
+cy = H / 2
+p5.fill(0xE0)
+p5.stroke(0xFF)
+8.times do |i|
+  p5.push_matrix
+  p5.translate(cx, cy)
+  p5.rotate(i * 3.14159 * 2 / 8)
+  p5.rect(-60, -20, 120, 40)
+  p5.pop_matrix
+end
+p5.reset_matrix
+p5.text_color(0xFF)
+p5.text("rotate: 8 rotated rects", 10, 10)
+show_step(p5, "rotate", 14, keyboard)
+
+# Step 15: scale + push/pop
+p5.background(0x00)
+p5.reset_matrix
+p5.push_matrix
+p5.translate(160, 240)
+p5.scale(2.0)
+p5.fill(p5.color(200, 0, 0))
+p5.stroke(0xFF)
+p5.circle(0, 0, 40)
+p5.pop_matrix
+p5.push_matrix
+p5.translate(320, 240)
+p5.scale(1.5, 3.0)
+p5.fill(p5.color(0, 200, 0))
+p5.circle(0, 0, 40)
+p5.pop_matrix
+p5.push_matrix
+p5.translate(480, 240)
+p5.fill(p5.color(0, 0, 200))
+p5.stroke(0xFF)
+p5.circle(0, 0, 40)
+p5.pop_matrix
+p5.reset_matrix
+p5.text_color(0xFF)
+p5.text("scale: 2x circle, 1.5x3 ellipse, 1x circle", 10, 10)
+show_step(p5, "scale + push/pop", 15, keyboard)
+
+# Step 16: combined scene
 p5.background(p5.color(0, 0, 64))
 p5.fill(p5.color(200, 100, 0))
 p5.stroke(0xFF)
@@ -248,7 +311,7 @@ p5.text("fill+stroke", 50, 140)
 p5.text("stroke only", 350, 140)
 p5.text("fill only", 50, 340)
 p5.text("fill+stroke", 350, 340)
-show_step(p5, "combined scene", 13, keyboard)
+show_step(p5, "combined scene", 16, keyboard)
 
 # Restore text mode
 DVI.set_mode(DVI::TEXT_MODE)
