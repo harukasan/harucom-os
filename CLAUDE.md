@@ -28,6 +28,7 @@ The PicoRuby build cache is separate and only cleared by `distclean`.
 Design documents and implementation notes are in `doc/`:
 
 - [doc/psram.md](doc/psram.md) — PSRAM driver (APS6404L, QMI CS1 initialization, XIP mapping)
+- [doc/p5.md](doc/p5.md) — P5 drawing library (Processing-inspired API, shapes, transforms, blend modes)
 - [doc/dvi.md](doc/dvi.md) — DVI output (HSTX, DMA, text/pixel modes, stability analysis)
 - [doc/dvi/batch-rendering.md](doc/dvi/batch-rendering.md) — Batch scanline rendering (N=4, line buffers, descriptor layout)
 - [doc/dvi/text-mode-rendering.md](doc/dvi/text-mode-rendering.md) — Text mode rendering (VRAM, font cache, scanline renderer)

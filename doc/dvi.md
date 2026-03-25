@@ -128,23 +128,68 @@ accumulated in the back buffer and become visible atomically.
 
 Class: `DVI::Graphics` (provided by picoruby-dvi mrbgem)
 
+- [DVI::Graphics.width](#dvigraphicswidth---integer)
+- [DVI::Graphics.height](#dvigraphicsheight---integer)
+- [DVI::Graphics.set_resolution](#dvigraphicsset_resolutionwidth-height)
+- [DVI::Graphics.commit](#dvigraphicscommit)
 - [DVI::Graphics.set_pixel](#dvigraphicsset_pixelx-y-color)
 - [DVI::Graphics.get_pixel](#dvigraphicsget_pixelx-y---integer)
 - [DVI::Graphics.fill](#dvigraphicsfillcolor)
 - [DVI::Graphics.fill_rect](#dvigraphicsfill_rectx-y-width-height-color)
+- [DVI::Graphics.draw_rect](#dvigraphicsdraw_rectx-y-width-height-color)
+- [DVI::Graphics.fill_circle](#dvigraphicsfill_circlecx-cy-r-color)
+- [DVI::Graphics.draw_circle](#dvigraphicsdraw_circlecx-cy-r-color)
+- [DVI::Graphics.fill_ellipse](#dvigraphicsfill_ellipsecx-cy-rx-ry-color)
+- [DVI::Graphics.draw_ellipse](#dvigraphicsdraw_ellipsecx-cy-rx-ry-color)
+- [DVI::Graphics.fill_triangle](#dvigraphicsfill_trianglex0-y0-x1-y1-x2-y2-color)
+- [DVI::Graphics.fill_arc](#dvigraphicsfill_arccx-cy-r-start-stop-color)
+- [DVI::Graphics.draw_arc](#dvigraphicsdraw_arccx-cy-r-start-stop-color)
+- [DVI::Graphics.draw_line](#dvigraphicsdraw_linex0-y0-x1-y1-color)
+- [DVI::Graphics.draw_thick_line](#dvigraphicsdraw_thick_linex0-y0-x1-y1-thickness-color)
+- [DVI::Graphics.draw_text](#dvigraphicsdraw_textx-y-text-color-font-wide_font)
+- [DVI::Graphics.text_width](#dvigraphicstext_widthtext-font-wide_font---integer)
+- [DVI::Graphics.font_height](#dvigraphicsfont_heightfont---integer)
+- [DVI::Graphics.draw_image](#dvigraphicsdraw_imagedata-x-y-w-h)
+- [DVI::Graphics.draw_image_masked](#dvigraphicsdraw_image_maskeddata-mask-x-y-w-h)
+- [DVI::Graphics.set_blend_mode](#dvigraphicsset_blend_modemode)
+- [DVI::Graphics.set_alpha](#dvigraphicsset_alphavalue)
 
-`DVI::Graphics` provides pixel-level framebuffer access. The framebuffer
-resolution is set by `DVI_GRAPHICS_SCALE`: native 640x480 at scale 1
-(default), or 320x240 at scale 2 (2x scaled to 640x480 on output).
-RGB332 format (1 byte per pixel).
+`DVI::Graphics` provides pixel-level framebuffer access with drawing
+primitives. Resolution is switchable at runtime between 640x480 (native)
+and 320x240 (2x scaled to 640x480 on output). RGB332 format (1 byte per
+pixel).
 
-Constants: `DVI::Graphics::WIDTH` (640), `DVI::Graphics::HEIGHT` (480).
+Double buffering is enabled automatically: at 640x480 the back buffer is
+in PSRAM, at 320x240 it uses spare SRAM (fast). `commit` copies the back
+buffer to the front buffer at VBlank.
+
+For a higher-level stateful API, see the [P5 drawing library](p5.md).
 
 ```ruby
 DVI.set_mode(DVI::GRAPHICS_MODE)
 DVI::Graphics.fill(0x00)
 DVI::Graphics.fill_rect(10, 10, 100, 50, 0xE0)
+DVI::Graphics.commit
 ```
+
+#### DVI::Graphics.width -> Integer
+
+Return the current framebuffer width (640 or 320).
+
+#### DVI::Graphics.height -> Integer
+
+Return the current framebuffer height (480 or 240).
+
+#### DVI::Graphics.set_resolution(width, height)
+
+Switch graphics resolution. Valid pairs: (640, 480) and (320, 240). The
+scale change is applied immediately for drawing and the HSTX is
+reconfigured at the next VBlank.
+
+#### DVI::Graphics.commit
+
+Wait for VBlank, then copy the back buffer to the front buffer. Skips
+the copy if the framebuffer has not been modified since the last commit.
 
 #### DVI::Graphics.set_pixel(x, y, color)
 
@@ -161,6 +206,78 @@ Fill the entire framebuffer with the given color.
 #### DVI::Graphics.fill_rect(x, y, width, height, color)
 
 Fill a rectangular region with the given color.
+
+#### DVI::Graphics.draw_rect(x, y, width, height, color)
+
+Draw a rectangle outline with the given color.
+
+#### DVI::Graphics.fill_circle(cx, cy, r, color)
+
+Fill a circle centered at (cx, cy) with radius r.
+
+#### DVI::Graphics.draw_circle(cx, cy, r, color)
+
+Draw a circle outline centered at (cx, cy) with radius r.
+
+#### DVI::Graphics.fill_ellipse(cx, cy, rx, ry, color)
+
+Fill an ellipse centered at (cx, cy) with radii (rx, ry).
+
+#### DVI::Graphics.draw_ellipse(cx, cy, rx, ry, color)
+
+Draw an ellipse outline centered at (cx, cy) with radii (rx, ry).
+
+#### DVI::Graphics.fill_triangle(x0, y0, x1, y1, x2, y2, color)
+
+Fill a triangle with the given vertices using scanline rasterization.
+
+#### DVI::Graphics.fill_arc(cx, cy, r, start, stop, color)
+
+Fill a pie-slice arc. Angles are in radians (0 = right, PI/2 = down).
+Rendered as a triangle fan using sinf/cosf.
+
+#### DVI::Graphics.draw_arc(cx, cy, r, start, stop, color)
+
+Draw an arc outline. Angles are in radians.
+
+#### DVI::Graphics.draw_line(x0, y0, x1, y1, color)
+
+Draw a line using Bresenham's algorithm.
+
+#### DVI::Graphics.draw_thick_line(x0, y0, x1, y1, thickness, color)
+
+Draw a line with variable thickness.
+
+#### DVI::Graphics.draw_text(x, y, text, color, font = FONT_8X8, wide_font = nil)
+
+Draw a UTF-8 string at pixel position (x, y). Optional `wide_font`
+enables CJK character rendering via Unicode-to-JIS lookup.
+
+#### DVI::Graphics.text_width(text, font = FONT_8X8, wide_font = nil) -> Integer
+
+Compute the pixel width of a string without rendering.
+
+#### DVI::Graphics.font_height(font) -> Integer
+
+Return the glyph height of a font in pixels.
+
+#### DVI::Graphics.draw_image(data, x, y, w, h)
+
+Blit an RGB332 image (byte string) at the given position.
+
+#### DVI::Graphics.draw_image_masked(data, mask, x, y, w, h)
+
+Blit an RGB332 image with a 1-bit transparency mask.
+
+#### DVI::Graphics.set_blend_mode(mode)
+
+Set the pixel compositing mode. Constants: `BLEND_REPLACE` (default),
+`BLEND_ADD`, `BLEND_SUBTRACT`, `BLEND_MULTIPLY`, `BLEND_SCREEN`,
+`BLEND_ALPHA`.
+
+#### DVI::Graphics.set_alpha(value)
+
+Set the global alpha value (0-255) for `BLEND_ALPHA` mode.
 
 ## C API
 
@@ -230,9 +347,38 @@ Block until the next VBlank. See
 uint8_t *dvi_get_framebuffer(void);
 ```
 
-Return a pointer to the RGB332 framebuffer in main SRAM.
-Size depends on `DVI_GRAPHICS_SCALE`: 300 KB at scale 1 (640x480),
-75 KB at scale 2 (320x240).
+Return a pointer to the drawing framebuffer. When double buffering is
+enabled, returns the back buffer (PSRAM at 640x480, SRAM at 320x240).
+Size depends on the runtime graphics scale: 307 KB at 640x480, 76.8 KB
+at 320x240.
+
+### dvi_graphics_get_width / dvi_graphics_get_height
+
+```c
+int dvi_graphics_get_width(void);
+int dvi_graphics_get_height(void);
+```
+
+Return the current graphics resolution (640x480 or 320x240).
+
+### dvi_set_graphics_scale
+
+```c
+void dvi_set_graphics_scale(int scale);
+```
+
+Set the runtime graphics scale (1 = 640x480, 2 = 320x240). The drawing
+resolution updates immediately. HSTX reconfiguration is applied at the
+next VBlank.
+
+### dvi_graphics_commit
+
+```c
+void dvi_graphics_commit(void);
+```
+
+Wait for VBlank, then copy the back buffer to the front buffer. Skips
+the copy if the framebuffer has not been modified since the last commit.
 
 ### dvi_text_set_font
 
