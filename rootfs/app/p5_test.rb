@@ -401,7 +401,44 @@ p5.text_color(0xFF)
 p5.text("Back to 640x480 (#{p5.width}x#{p5.height})", 10, 10)
 show_step(p5, "640x480 restored", 21, keyboard)
 
-# Step 22: combined scene
+# Step 22: text_align + text_width
+p5.background(0x00)
+p5.text_font(G::FONT_SPLEEN_12X24)
+p5.text_color(0xE0)
+p5.stroke(p5.color(80, 80, 80))
+p5.no_fill
+cx = p5.width / 2
+# Center line
+p5.line(cx, 0, cx, p5.height)
+
+p5.text_align(:left)
+p5.text_color(0xFF)
+p5.text("LEFT aligned", cx, 60)
+
+p5.text_align(:center)
+p5.text_color(0x1C)
+p5.text("CENTER aligned", cx, 120)
+
+p5.text_align(:right)
+p5.text_color(0x03)
+p5.text("RIGHT aligned", cx, 180)
+
+p5.text_align(:center, :center)
+p5.text_color(0xE0)
+p5.text("V-CENTER", cx, 280)
+
+p5.text_align(:center, :bottom)
+p5.text_color(0xFC)
+p5.text("V-BOTTOM", cx, 360)
+
+p5.text_align(:left)
+p5.text_font(G::FONT_MPLUS_12, G::FONT_MPLUS_J12)
+p5.text_color(0xFF)
+w = p5.text_width("text_width = ")
+p5.text("text_width = #{w}px", 10, 420)
+show_step(p5, "text_align + text_width", 22, keyboard)
+
+# Step 23: combined scene
 p5.background(p5.color(0, 0, 64))
 p5.fill(p5.color(200, 100, 0))
 p5.stroke(0xFF)
@@ -424,7 +461,7 @@ p5.text("fill+stroke", 50, 140)
 p5.text("stroke only", 350, 140)
 p5.text("fill only", 50, 340)
 p5.text("fill+stroke", 350, 340)
-show_step(p5, "combined scene", 22, keyboard)
+show_step(p5, "combined scene", 23, keyboard)
 
 # Restore text mode
 DVI.set_mode(DVI::TEXT_MODE)

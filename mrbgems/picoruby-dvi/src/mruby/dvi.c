@@ -339,6 +339,39 @@ mrb_dvi_draw_text(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.font_height(font)
+ */
+static mrb_value
+mrb_dvi_font_height(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int font_id;
+  mrb_get_args(mrb, "i", &font_id);
+  return mrb_fixnum_value(dvi_graphics_font_height(font_id));
+}
+
+/*
+ * DVI::Graphics.text_width(text [, font [, wide_font]])
+ */
+static mrb_value
+mrb_dvi_text_width(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int font_id = DVI_GRAPHICS_FONT_8X8;
+  mrb_int wide_font_id = -1;
+  const char *text;
+  mrb_get_args(mrb, "z|ii", &text, &font_id, &wide_font_id);
+  const dvi_font_t *font = dvi_graphics_get_font(font_id);
+  if (!font)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown font");
+  const dvi_font_t *wide_font = NULL;
+  if (wide_font_id >= 0) {
+    wide_font = dvi_graphics_get_font(wide_font_id);
+    if (!wide_font)
+      mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown wide font");
+  }
+  return mrb_fixnum_value(dvi_graphics_text_width(text, font, wide_font));
+}
+
+/*
  * DVI::Graphics.draw_line(x0, y0, x1, y1, color)
  */
 static mrb_value
@@ -660,6 +693,10 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_draw_thick_line, MRB_ARGS_REQ(6));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_text),
                              mrb_dvi_draw_text, MRB_ARGS_ARG(4, 2));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(text_width),
+                             mrb_dvi_text_width, MRB_ARGS_ARG(1, 2));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(font_height),
+                             mrb_dvi_font_height, MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_line),
                              mrb_dvi_draw_line, MRB_ARGS_REQ(5));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image),

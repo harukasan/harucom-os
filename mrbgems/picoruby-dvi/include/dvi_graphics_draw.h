@@ -99,6 +99,13 @@ void dvi_graphics_draw_arc(uint8_t *framebuffer, int width, int height,
                            int cx, int cy, int r,
                            float start_angle, float stop_angle, uint8_t color);
 
+// Get the glyph height of a font in pixels. Returns 0 for unknown font IDs.
+int dvi_graphics_font_height(int font_id);
+
+// Compute the pixel width of a UTF-8 string without rendering.
+int dvi_graphics_text_width(const char *text, const dvi_font_t *font,
+                            const dvi_font_t *wide_font);
+
 // Draw a line with a given thickness.
 void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height,
                                   int x0, int y0, int x1, int y1,

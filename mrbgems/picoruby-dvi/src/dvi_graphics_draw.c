@@ -2,9 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define DVI_FONT_REGISTRY_IMPLEMENTATION
 #include "dvi_graphics_draw.h"
-#include "uni2jis_table.h"
 
 // Global blend state.
 // Drawing functions dispatch to REPLACE-only or blend-aware paths based on
@@ -72,6 +70,7 @@ static inline uint8_t blend_pixel(uint8_t dst, uint8_t src)
 }
 
 // Write a pixel with blending.
+// Also exported via dvi_graphics_internal.h for use by dvi_graphics_text.c.
 static inline void write_pixel(uint8_t *framebuffer, int offset, uint8_t color)
 {
     if (blend_mode == DVI_BLEND_REPLACE)
@@ -80,147 +79,12 @@ static inline void write_pixel(uint8_t *framebuffer, int offset, uint8_t color)
         framebuffer[offset] = blend_pixel(framebuffer[offset], color);
 }
 
-const dvi_font_t *dvi_graphics_get_font(int font_id)
+void dvi_graphics_write_pixel(uint8_t *framebuffer, int offset, uint8_t color)
 {
-    if (font_id < 0 || font_id >= (int)DVI_GRAPHICS_FONT_COUNT)
-        return NULL;
-    return graphics_fonts[font_id];
+    write_pixel(framebuffer, offset, color);
 }
 
-// Decode one UTF-8 codepoint from *p, advance *p past consumed bytes.
-// Returns the codepoint, or -1 on invalid sequence.
-static int32_t utf8_decode(const char **p)
-{
-    const uint8_t *s = (const uint8_t *)*p;
-    int32_t cp;
-    int len;
-
-    if (s[0] < 0x80) {
-        cp = s[0]; len = 1;
-    } else if ((s[0] & 0xE0) == 0xC0) {
-        cp = s[0] & 0x1F; len = 2;
-    } else if ((s[0] & 0xF0) == 0xE0) {
-        cp = s[0] & 0x0F; len = 3;
-    } else if ((s[0] & 0xF8) == 0xF0) {
-        cp = s[0] & 0x07; len = 4;
-    } else {
-        *p += 1;
-        return -1;
-    }
-    for (int i = 1; i < len; i++) {
-        if ((s[i] & 0xC0) != 0x80) {
-            *p += 1;
-            return -1;
-        }
-        cp = (cp << 6) | (s[i] & 0x3F);
-    }
-    *p += len;
-    return cp;
-}
-
-// Unicode to JIS X 0208 lookup.
-// Returns linear JIS index, or -1 if not found.
-static int unicode_to_jis_index(int32_t cp)
-{
-    uint16_t jis = uni2jis_lookup(cp);
-    if (jis == 0)
-        return -1;
-    int ku = (jis >> 8) - 0x20;
-    int ten = (jis & 0xFF) - 0x20;
-    return (ku - 1) * 94 + (ten - 1);
-}
-
-// Compute the byte offset for glyph at index idx.
-static inline int glyph_offset(const dvi_font_t *font, int idx)
-{
-    if (font->glyph_stride)
-        return idx * font->glyph_stride;
-    int bytes_per_row = (font->glyph_width + 7) / 8;
-    return idx * bytes_per_row * font->glyph_height;
-}
-
-// Render one glyph at (char_x, y) and return its advance width.
-static int draw_glyph(uint8_t *framebuffer, int fb_width, int fb_height,
-                       int char_x, int y, int idx,
-                       uint8_t color, const dvi_font_t *font)
-{
-    int gw = font->glyph_width;
-    int gh = font->glyph_height;
-    int bytes_per_row = (gw + 7) / 8;
-    const uint8_t *glyph = &font->bitmap[glyph_offset(font, idx)];
-
-    for (int row = 0; row < gh; row++) {
-        int py = y + row;
-        if (py < 0)
-            continue;
-        if (py >= fb_height)
-            break;
-
-        for (int col = 0; col < gw; col++) {
-            int byte_idx = col / 8;
-            int bit_idx = 7 - (col % 8);
-            if (!(glyph[row * bytes_per_row + byte_idx] & (1 << bit_idx)))
-                continue;
-            int px = char_x + col;
-            if (px < 0)
-                continue;
-            if (px >= fb_width)
-                break;
-            write_pixel(framebuffer, py * fb_width + px, color);
-        }
-    }
-
-    return (font->widths) ? font->widths[idx] : gw;
-}
-
-void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
-                            int x, int y, const char *text,
-                            uint8_t color, const dvi_font_t *font,
-                            const dvi_font_t *wide_font)
-{
-    int gw = font->glyph_width;
-    int first = font->first_char;
-    int num = font->num_chars;
-    int char_x = x;
-
-    const char *p = text;
-    while (*p) {
-        int32_t cp = utf8_decode(&p);
-        if (cp < 0)
-            continue;
-
-        if (char_x >= width)
-            break;
-
-        // Try primary font
-        int idx = cp - first;
-        if (idx >= 0 && idx < num) {
-            int advance = (font->widths) ? font->widths[idx] : gw;
-            if (char_x + advance > 0)
-                draw_glyph(framebuffer, width, height, char_x, y,
-                           idx, color, font);
-            char_x += advance;
-            continue;
-        }
-
-        // Try wide font via Unicode-to-JIS lookup
-        if (wide_font) {
-            int jis_idx = unicode_to_jis_index(cp);
-            if (jis_idx >= 0 && jis_idx < wide_font->num_chars) {
-                int wgw = wide_font->glyph_width;
-                int advance = (wide_font->widths) ? wide_font->widths[jis_idx] : wgw;
-                if (char_x + advance > 0)
-                    draw_glyph(framebuffer, width, height, char_x, y,
-                               jis_idx, color, wide_font);
-                char_x += advance;
-                continue;
-            }
-        }
-
-        // Unknown character: advance by primary font width
-        char_x += gw;
-    }
-}
+// Text rendering functions are in dvi_graphics_text.c.
 
 // Clip span coordinates. Returns 0 if span is invisible.
 static inline int clip_span(int width, int height, int *x0, int *x1, int y)

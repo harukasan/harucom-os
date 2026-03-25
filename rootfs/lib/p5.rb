@@ -11,6 +11,9 @@ class P5
     @font = G::FONT_8X8
     @wide_font = nil
     @text_color = 0xFF
+    @text_align_h = :left
+    @text_align_v = :top
+    @text_leading = 0
     @matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
     @matrix_stack = []
   end
@@ -80,6 +83,27 @@ class P5
 
   def text_color(color)
     @text_color = color
+  end
+
+  # Text alignment: horizontal (:left, :center, :right),
+  # vertical (:top, :center, :bottom)
+  def text_align(horizontal, vertical = :top)
+    @text_align_h = horizontal
+    @text_align_v = vertical
+  end
+
+  # Extra line spacing in pixels (added to font glyph height)
+  def text_leading(pixels)
+    @text_leading = pixels
+  end
+
+  # Compute the pixel width of a string with the current font
+  def text_width(str)
+    if @wide_font
+      G.text_width(str, @font, @wide_font)
+    else
+      G.text_width(str, @font)
+    end
   end
 
   # Coordinate transforms
@@ -252,10 +276,26 @@ class P5
     end
   end
 
-  # Text (translate only, rotation not supported)
+  # Text (translate only, rotation not supported).
+  # Supports text_align (horizontal/vertical) and text_leading (line spacing).
 
   def text(str, x, y)
     tx, ty = transform(x, y)
+
+    # Apply horizontal alignment
+    if @text_align_h == :center
+      tx -= text_width(str) / 2
+    elsif @text_align_h == :right
+      tx -= text_width(str)
+    end
+
+    # Apply vertical alignment (uses font glyph height)
+    if @text_align_v == :center
+      ty -= font_height / 2
+    elsif @text_align_v == :bottom
+      ty -= font_height
+    end
+
     if @wide_font
       G.draw_text(tx, ty, str, @text_color, @font, @wide_font)
     else
@@ -292,6 +332,10 @@ class P5
   end
 
   private
+
+  def font_height
+    G.font_height(@font)
+  end
 
   def transform(x, y)
     m = @matrix
