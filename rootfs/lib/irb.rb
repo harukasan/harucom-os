@@ -28,6 +28,8 @@ class IRB
       script = @editor.readmultiline(PROMPT, PROMPT_CONT) do |input|
         if input.chomp.end_with?("\\")
           false
+        elsif find_app(input.split[0])
+          true
         else
           @sandbox.compile("begin; _ = (#{input}\n); rescue => _; end; _")
         end
@@ -70,24 +72,29 @@ class IRB
   end
 
   def run_app(path, args)
-    Object.const_set(:ARGV, args) unless Object.const_defined?(:ARGV)
+    Object.const_set(:ARGV, []) unless Object.const_defined?(:ARGV)
     ARGV.clear
     args.each { |a| ARGV << a }
     name = path.split("/")[-1].sub(".rb", "")
     sandbox = Sandbox.new(name)
     sandbox.load_file(path)
     if error = sandbox.error
-      puts "#{error.message} (#{error.class})"
+      puts "#{path}: #{error.message} (#{error.class})"
+      if error.respond_to?(:backtrace) && (bt = error.backtrace)
+        bt.each { |line| puts "  #{line}" }
+      end
     end
-    sandbox.terminate
+  ensure
+    DVI.set_mode(DVI::TEXT_MODE)
+    sandbox.terminate if sandbox
   end
 
-  def wait_sandbox
+  def wait_sandbox(sandbox = @sandbox)
     sleep_ms 5
-    while @sandbox.state != :DORMANT && @sandbox.state != :SUSPENDED
+    while sandbox.state != :DORMANT && sandbox.state != :SUSPENDED
       c = @keyboard.read_char
       if c == Keyboard::CTRL_C
-        @sandbox.stop
+        sandbox.stop
         puts "^C"
         @console.commit
         return

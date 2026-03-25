@@ -14,7 +14,14 @@
 #include "pio_usb.h"
 #include "tusb.h"
 
+#include "hardware/watchdog.h"
+
 #include "usb_host.h"
+
+/* HID keycodes and modifier bits for Ctrl-Alt-Delete reboot */
+#define HID_KEY_DELETE_FORWARD 0x4C
+#define HID_MOD_CTRL_MASK  0x11  /* Left Ctrl (0x01) | Right Ctrl (0x10) */
+#define HID_MOD_ALT_MASK   0x44  /* Left Alt (0x04) | Right Alt (0x40) */
 
 /* Board pin definitions (from harucom_board.h) */
 #ifndef HARUCOM_USBH_DP_PIN
@@ -136,6 +143,16 @@ tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
     keyboard_modifier_state = kbd_report->modifier;
     memcpy(keyboard_keycodes_state, kbd_report->keycode,
            sizeof(keyboard_keycodes_state));
+
+    /* Ctrl-Alt-Delete: immediate system reboot */
+    if ((kbd_report->modifier & HID_MOD_CTRL_MASK) &&
+        (kbd_report->modifier & HID_MOD_ALT_MASK)) {
+      for (int i = 0; i < 6; i++) {
+        if (kbd_report->keycode[i] == HID_KEY_DELETE_FORWARD) {
+          watchdog_reboot(0, 0, 0);
+        }
+      }
+    }
   }
 
   /* Request next report */
