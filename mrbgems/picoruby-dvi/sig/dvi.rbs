@@ -60,6 +60,7 @@ class DVI
     def self.fill: (Integer color) -> void
     def self.fill_rect: (Integer x, Integer y, Integer w, Integer h, Integer color) -> void
     def self.draw_text: (Integer x, Integer y, String text, Integer color, ?Integer font, ?Integer wide_font) -> void
+    def self.draw_rect: (Integer x, Integer y, Integer w, Integer h, Integer color) -> void
     def self.draw_line: (Integer x0, Integer y0, Integer x1, Integer y1, Integer color) -> void
     def self.draw_image: (String data, Integer x, Integer y, Integer w, Integer h) -> void
     def self.draw_image_masked: (String data, String mask, Integer x, Integer y, Integer w, Integer h) -> void

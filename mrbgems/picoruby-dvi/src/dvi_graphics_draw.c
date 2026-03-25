@@ -175,6 +175,48 @@ void dvi_graphics_draw_line(uint8_t *framebuffer, int width, int height,
     }
 }
 
+void dvi_graphics_draw_rect(uint8_t *framebuffer, int width, int height,
+                            int x, int y, int w, int h, uint8_t color)
+{
+    if (w <= 0 || h <= 0)
+        return;
+
+    int x0 = x, y0 = y;
+    int x1 = x + w - 1, y1 = y + h - 1;
+
+    // Top edge
+    if (y0 >= 0 && y0 < height) {
+        int left = x0 < 0 ? 0 : x0;
+        int right = x1 >= width ? width - 1 : x1;
+        if (left <= right)
+            memset(&framebuffer[y0 * width + left], color, right - left + 1);
+    }
+
+    // Bottom edge
+    if (h > 1 && y1 >= 0 && y1 < height) {
+        int left = x0 < 0 ? 0 : x0;
+        int right = x1 >= width ? width - 1 : x1;
+        if (left <= right)
+            memset(&framebuffer[y1 * width + left], color, right - left + 1);
+    }
+
+    // Left edge
+    if (x0 >= 0 && x0 < width) {
+        int top = (y0 + 1) < 0 ? 0 : y0 + 1;
+        int bottom = (y1 - 1) >= height ? height - 1 : y1 - 1;
+        for (int iy = top; iy <= bottom; iy++)
+            framebuffer[iy * width + x0] = color;
+    }
+
+    // Right edge
+    if (w > 1 && x1 >= 0 && x1 < width) {
+        int top = (y0 + 1) < 0 ? 0 : y0 + 1;
+        int bottom = (y1 - 1) >= height ? height - 1 : y1 - 1;
+        for (int iy = top; iy <= bottom; iy++)
+            framebuffer[iy * width + x1] = color;
+    }
+}
+
 void dvi_graphics_draw_image(uint8_t *framebuffer, int width, int height,
                              const uint8_t *data, int x, int y,
                              int image_width, int image_height)

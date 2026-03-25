@@ -122,6 +122,20 @@ mrb_dvi_fill_rect(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.draw_rect(x, y, w, h, color)
+ */
+static mrb_value
+mrb_dvi_draw_rect(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int x, y, w, h, color;
+  mrb_get_args(mrb, "iiiii", &x, &y, &w, &h, &color);
+  dvi_graphics_draw_rect(dvi_get_framebuffer(),
+                         DVI_GRAPHICS_WIDTH, DVI_GRAPHICS_HEIGHT,
+                         x, y, w, h, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
  * DVI::Graphics.draw_text(x, y, text, color [, font [, wide_font]])
  */
 static mrb_value
@@ -425,6 +439,8 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_fill, MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_rect),
                              mrb_dvi_fill_rect, MRB_ARGS_REQ(5));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_rect),
+                             mrb_dvi_draw_rect, MRB_ARGS_REQ(5));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_text),
                              mrb_dvi_draw_text, MRB_ARGS_ARG(4, 2));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_line),

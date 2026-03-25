@@ -39,4 +39,9 @@ void dvi_graphics_draw_image_masked(uint8_t *framebuffer, int width, int height,
                                     int x, int y,
                                     int image_width, int image_height);
 
+// Draw an axis-aligned rectangle outline at (x, y) with size (w, h).
+// Clips to framebuffer bounds.
+void dvi_graphics_draw_rect(uint8_t *framebuffer, int width, int height,
+                            int x, int y, int w, int h, uint8_t color);
+
 #endif // DVI_GRAPHICS_DRAW_H
