@@ -41,8 +41,9 @@ class DVI
   end
 
   class Graphics
-    WIDTH: Integer
-    HEIGHT: Integer
+    def self.width: () -> Integer
+    def self.height: () -> Integer
+    def self.set_resolution: (Integer width, Integer height) -> void
     FONT_8X8: Integer
     FONT_MPLUS_12: Integer
     FONT_FIXED_4X6: Integer
@@ -55,11 +56,32 @@ class DVI
     FONT_MPLUS_J12: Integer
     FONT_DENKICHIP_J: Integer
 
+    BLEND_REPLACE: Integer
+    BLEND_ADD: Integer
+    BLEND_SUBTRACT: Integer
+    BLEND_MULTIPLY: Integer
+    BLEND_SCREEN: Integer
+    BLEND_ALPHA: Integer
+
+    def self.commit: () -> void
+    def self.set_blend_mode: (Integer mode) -> void
+    def self.set_alpha: (Integer alpha) -> void
     def self.set_pixel: (Integer x, Integer y, Integer color) -> void
     def self.get_pixel: (Integer x, Integer y) -> Integer
     def self.fill: (Integer color) -> void
     def self.fill_rect: (Integer x, Integer y, Integer w, Integer h, Integer color) -> void
     def self.draw_text: (Integer x, Integer y, String text, Integer color, ?Integer font, ?Integer wide_font) -> void
+    def self.draw_rect: (Integer x, Integer y, Integer w, Integer h, Integer color) -> void
+    def self.fill_circle: (Integer cx, Integer cy, Integer r, Integer color) -> void
+    def self.draw_circle: (Integer cx, Integer cy, Integer r, Integer color) -> void
+    def self.fill_arc: (Integer cx, Integer cy, Integer r, Float start_angle, Float stop_angle, Integer color) -> void
+    def self.draw_arc: (Integer cx, Integer cy, Integer r, Float start_angle, Float stop_angle, Integer color) -> void
+    def self.fill_triangle: (Integer x0, Integer y0, Integer x1, Integer y1, Integer x2, Integer y2, Integer color) -> void
+    def self.fill_ellipse: (Integer cx, Integer cy, Integer rx, Integer ry, Integer color) -> void
+    def self.draw_ellipse: (Integer cx, Integer cy, Integer rx, Integer ry, Integer color) -> void
+    def self.draw_thick_line: (Integer x0, Integer y0, Integer x1, Integer y1, Integer thickness, Integer color) -> void
+    def self.font_height: (Integer font) -> Integer
+    def self.text_width: (String text, ?Integer font, ?Integer wide_font) -> Integer
     def self.draw_line: (Integer x0, Integer y0, Integer x1, Integer y1, Integer color) -> void
     def self.draw_image: (String data, Integer x, Integer y, Integer w, Integer h) -> void
     def self.draw_image_masked: (String data, String mask, Integer x, Integer y, Integer w, Integer h) -> void

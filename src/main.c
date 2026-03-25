@@ -241,9 +241,16 @@ static void harucom_main(void) {
         printf("PSRAM init failed\n");
         return;
     }
-    printf("PSRAM heap: %u bytes at %p\n", (unsigned)heap_size, heap_pool);
-    heap_pool_g = heap_pool;
-    heap_size_g = heap_size;
+    printf("PSRAM: %u bytes at %p\n", (unsigned)heap_size, heap_pool);
+
+    /* Reserve the first 307,200 bytes of PSRAM for 640x480 graphics back buffer.
+     * At 320x240, the SRAM framebuf is used for double buffering instead. */
+    size_t fb_size = DVI_GRAPHICS_MAX_WIDTH * DVI_GRAPHICS_MAX_HEIGHT;
+    dvi_graphics_set_back_buffer((uint8_t *)heap_pool);
+    heap_pool_g = (void *)((uintptr_t)heap_pool + fb_size);
+    heap_size_g = heap_size - fb_size;
+    printf("Graphics back buffer: %u bytes at %p\n", (unsigned)fb_size, heap_pool);
+    printf("mruby heap: %u bytes at %p\n", (unsigned)heap_size_g, heap_pool_g);
 
     /* Set up text mode fonts before launching DVI on core 1.
      * Font data must be configured before dvi_start_mode() because the
