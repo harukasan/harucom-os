@@ -13,7 +13,7 @@ def wait_key(kb)
   loop do
     c = kb.read_char
     return c if c
-    DVI.wait_vsync
+    DVI::Graphics.commit
   end
 end
 
@@ -106,6 +106,9 @@ show_step(p5, "line + point", 5, keyboard)
 
 # Step 6: color helper + gradient
 p5.background(0x00)
+p5.text_color(0xFF)
+p5.text("Generating gradient... please wait", 10, 10)
+p5.commit
 gh = H * 2 / 3
 gw = W * 2 / 3
 ox = (W - gw) / 2

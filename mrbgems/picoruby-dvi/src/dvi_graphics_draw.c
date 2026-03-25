@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define DVI_FONT_REGISTRY_IMPLEMENTATION
 #include "dvi_graphics_draw.h"
@@ -610,108 +611,70 @@ void dvi_graphics_draw_ellipse(uint8_t *framebuffer, int width, int height,
     }
 }
 
-// Check if a point (px, py) relative to center is within the arc's angle range.
-// Angles are in 1/1024 of a full turn. Handles wrapping (e.g. start=900, stop=100).
-static inline int in_arc_range(int px, int py, int start, int stop)
+// Compute segment count for arc based on radius and angle span.
+static int arc_segments(int r, float span)
 {
-    // Convert (px, py) to angle in 0..1023 using atan2 approximation.
-    // We use octant-based lookup: map (px, py) to angle in 1024 units.
-    // atan2 approximation for integer coordinates.
-    int angle;
-    if (px == 0 && py == 0)
-        return 1;
-
-    // Use the relation: angle = atan2(py, px) mapped to 0..1023
-    // 0 = right (+x), 256 = down (+y), 512 = left (-x), 768 = up (-y)
-    int ax = abs(px), ay = abs(py);
-    // Quadrant angle (0..256) approximation: 256 * ay / (ax + ay)
-    int quadrant_angle;
-    if (ax + ay == 0)
-        return 1;
-    quadrant_angle = (256 * ay + (ax + ay) / 2) / (ax + ay);
-
-    if (px >= 0 && py >= 0)
-        angle = quadrant_angle;           // Q1: 0..256
-    else if (px < 0 && py >= 0)
-        angle = 512 - quadrant_angle;     // Q2: 256..512
-    else if (px < 0 && py < 0)
-        angle = 512 + quadrant_angle;     // Q3: 512..768
-    else
-        angle = 1024 - quadrant_angle;    // Q4: 768..1024 -> wrap to 0
-
-    angle &= 1023;
-
-    if (start <= stop)
-        return angle >= start && angle <= stop;
-    else
-        return angle >= start || angle <= stop;
+    float abs_span = span < 0 ? -span : span;
+    int segs = (int)(abs_span * r / 8.0f);
+    if (segs < 4) segs = 4;
+    if (segs > 64) segs = 64;
+    return segs;
 }
 
 void dvi_graphics_fill_arc(uint8_t *framebuffer, int width, int height,
                            int cx, int cy, int r,
-                           int start_angle, int stop_angle, uint8_t color)
+                           float start_angle, float stop_angle, uint8_t color)
 {
-    if (r < 0)
+    if (r <= 0)
         return;
 
-    start_angle &= 1023;
-    stop_angle &= 1023;
+    float span = stop_angle - start_angle;
+    if (span == 0.0f)
+        return;
 
-    int blending = (blend_mode != DVI_BLEND_REPLACE);
+    int segments = arc_segments(r, span);
+    float da = span / segments;
+    float a = start_angle;
 
-    // Row-by-row fill, testing each pixel against the arc angle range
-    int r2 = r * r;
-    int ix = r;
-    for (int iy = 0; iy <= r; iy++) {
-        int threshold = r2 - iy * iy;
-        while (ix * ix > threshold)
-            ix--;
-
-        // For each row, scan the span and only draw pixels in the arc range
-        for (int px = -ix; px <= ix; px++) {
-            // Check both +iy and -iy rows
-            if (in_arc_range(px, iy, start_angle, stop_angle))
-                DRAW_PIXEL(framebuffer, width, height, cx + px, cy + iy, color);
-            if (iy > 0 && in_arc_range(px, -iy, start_angle, stop_angle))
-                DRAW_PIXEL(framebuffer, width, height, cx + px, cy - iy, color);
-        }
+    for (int i = 0; i < segments; i++) {
+        int x0 = cx + (int)(r * cosf(a) + 0.5f);
+        int y0 = cy + (int)(r * sinf(a) + 0.5f);
+        float a1 = a + da;
+        int x1 = cx + (int)(r * cosf(a1) + 0.5f);
+        int y1 = cy + (int)(r * sinf(a1) + 0.5f);
+        dvi_graphics_fill_triangle(framebuffer, width, height,
+                                   cx, cy, x0, y0, x1, y1, color);
+        a = a1;
     }
 }
 
 void dvi_graphics_draw_arc(uint8_t *framebuffer, int width, int height,
                            int cx, int cy, int r,
-                           int start_angle, int stop_angle, uint8_t color)
+                           float start_angle, float stop_angle, uint8_t color)
 {
-    if (r < 0)
+    if (r <= 0)
         return;
 
-    start_angle &= 1023;
-    stop_angle &= 1023;
+    float span = stop_angle - start_angle;
+    if (span == 0.0f)
+        return;
 
     int blending = (blend_mode != DVI_BLEND_REPLACE);
+    int segments = arc_segments(r, span);
+    float da = span / segments;
+    float a = start_angle;
+    int px = cx + (int)(r * cosf(a) + 0.5f);
+    int py = cy + (int)(r * sinf(a) + 0.5f);
 
-    // Midpoint circle algorithm, drawing only pixels in the arc range
-    int x = 0, y = r;
-    int d = 1 - r;
-
-    while (x <= y) {
-        // 8 octant points
-        if (in_arc_range( x,  y, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx + x, cy + y, color);
-        if (in_arc_range(-x,  y, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx - x, cy + y, color);
-        if (in_arc_range( x, -y, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx + x, cy - y, color);
-        if (in_arc_range(-x, -y, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx - x, cy - y, color);
-        if (in_arc_range( y,  x, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx + y, cy + x, color);
-        if (in_arc_range(-y,  x, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx - y, cy + x, color);
-        if (in_arc_range( y, -x, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx + y, cy - x, color);
-        if (in_arc_range(-y, -x, start_angle, stop_angle)) DRAW_PIXEL(framebuffer, width, height, cx - y, cy - x, color);
-
-        if (d < 0) {
-            d += 2 * x + 3;
-        } else {
-            d += 2 * (x - y) + 5;
-            y--;
-        }
-        x++;
+    for (int i = 0; i < segments; i++) {
+        a += da;
+        int nx = cx + (int)(r * cosf(a) + 0.5f);
+        int ny = cy + (int)(r * sinf(a) + 0.5f);
+        DRAW_PIXEL(framebuffer, width, height, px, py, color);
+        // Use draw_line directly for outline segments
+        dvi_graphics_draw_line(framebuffer, width, height, px, py, nx, ny, color);
+        px = nx;
+        py = ny;
     }
 }
 

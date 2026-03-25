@@ -186,6 +186,8 @@ static volatile bool dvi_blanking = false;
 // Pixel mode data
 
 static uint8_t framebuf[DVI_GRAPHICS_WIDTH * DVI_GRAPHICS_HEIGHT];
+static uint8_t *back_framebuf = NULL;
+static bool graphics_dirty = false;
 
 // ----------------------------------------------------------------------------
 // Text mode data
@@ -1195,7 +1197,22 @@ void dvi_set_blanking(bool enable) {
   dvi_blanking = enable;
 }
 
-uint8_t *dvi_get_framebuffer(void) { return framebuf; }
+uint8_t *dvi_get_framebuffer(void) {
+  graphics_dirty = true;
+  return back_framebuf ? back_framebuf : framebuf;
+}
+
+void dvi_graphics_set_back_buffer(uint8_t *back_buffer) {
+  back_framebuf = back_buffer;
+}
+
+void dvi_graphics_commit(void) {
+  dvi_wait_vsync();
+  if (back_framebuf && graphics_dirty) {
+    memcpy(framebuf, back_framebuf, DVI_GRAPHICS_WIDTH * DVI_GRAPHICS_HEIGHT);
+    graphics_dirty = false;
+  }
+}
 
 uint32_t dvi_get_frame_count(void) { return frame_count; }
 

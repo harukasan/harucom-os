@@ -12,7 +12,7 @@ def wait_key(kb)
   loop do
     c = kb.read_char
     return c if c
-    DVI.wait_vsync
+    DVI::Graphics.commit
   end
 end
 

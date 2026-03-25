@@ -30,7 +30,7 @@ class P5
   end
 
   def commit
-    DVI.wait_vsync
+    G.commit
   end
 
   # State setters
@@ -203,15 +203,11 @@ class P5
   end
 
   # Arc (pie slice). Angles in radians (0 = right, PI/2 = down).
-  # C layer uses 1/1024 turn units; Ruby converts from radians.
-  ANGLE_SCALE = 1024.0 / (2.0 * Math::PI)
-
+  # C layer renders as a triangle fan from center using hardware sinf/cosf.
   def arc(cx, cy, r, start_angle, stop_angle)
     tcx, tcy = transform(cx, cy)
-    sa = (start_angle * ANGLE_SCALE).round & 1023
-    ea = (stop_angle * ANGLE_SCALE).round & 1023
-    G.fill_arc(tcx, tcy, r, sa, ea, @fill_color) if @fill_enabled
-    G.draw_arc(tcx, tcy, r, sa, ea, @stroke_color) if @stroke_enabled
+    G.fill_arc(tcx, tcy, r, start_angle, stop_angle, @fill_color) if @fill_enabled
+    G.draw_arc(tcx, tcy, r, start_angle, stop_angle, @stroke_color) if @stroke_enabled
   end
 
   # Cubic bezier curve from (x1,y1) to (x4,y4) with control points (x2,y2) and (x3,y3).

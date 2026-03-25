@@ -53,6 +53,15 @@ uint8_t *dvi_get_framebuffer(void);
 uint32_t dvi_get_frame_count(void);
 void dvi_wait_vsync(void);
 
+// Graphics double buffering.
+// Set a PSRAM back buffer for tear-free rendering. Drawing functions write
+// to the back buffer; dvi_graphics_commit() copies it to the SRAM front
+// buffer at VBlank. Pass NULL to disable double buffering.
+void dvi_graphics_set_back_buffer(uint8_t *back_buffer);
+// Wait for VBlank, then copy back buffer to front buffer (PSRAM -> SRAM).
+// If no back buffer is set, behaves like dvi_wait_vsync().
+void dvi_graphics_commit(void);
+
 // Text mode API
 dvi_text_cell_t *dvi_get_text_vram(void);
 int dvi_text_get_cols(void);

@@ -62,6 +62,7 @@ class DVI
     BLEND_SCREEN: Integer
     BLEND_ALPHA: Integer
 
+    def self.commit: () -> void
     def self.set_blend_mode: (Integer mode) -> void
     def self.set_alpha: (Integer alpha) -> void
     def self.set_pixel: (Integer x, Integer y, Integer color) -> void
@@ -72,8 +73,8 @@ class DVI
     def self.draw_rect: (Integer x, Integer y, Integer w, Integer h, Integer color) -> void
     def self.fill_circle: (Integer cx, Integer cy, Integer r, Integer color) -> void
     def self.draw_circle: (Integer cx, Integer cy, Integer r, Integer color) -> void
-    def self.fill_arc: (Integer cx, Integer cy, Integer r, Integer start_angle, Integer stop_angle, Integer color) -> void
-    def self.draw_arc: (Integer cx, Integer cy, Integer r, Integer start_angle, Integer stop_angle, Integer color) -> void
+    def self.fill_arc: (Integer cx, Integer cy, Integer r, Float start_angle, Float stop_angle, Integer color) -> void
+    def self.draw_arc: (Integer cx, Integer cy, Integer r, Float start_angle, Float stop_angle, Integer color) -> void
     def self.fill_triangle: (Integer x0, Integer y0, Integer x1, Integer y1, Integer x2, Integer y2, Integer color) -> void
     def self.fill_ellipse: (Integer cx, Integer cy, Integer rx, Integer ry, Integer color) -> void
     def self.draw_ellipse: (Integer cx, Integer cy, Integer rx, Integer ry, Integer color) -> void
