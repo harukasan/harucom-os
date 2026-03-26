@@ -21,7 +21,16 @@ class IRB
 
   def start
     @console.clear
-    puts "Harucom OS IRB"
+    puts <<~PROMPT
+
+      Harucom OS #{HARUCOM_VERSION} (#{HARUCOM_BUILD_DATE})
+      (c) 2026 Shunsuke Michii
+
+      Powered by PicoRuby #{PICORUBY_VERSION} on #{RUBY_PLATFORM}
+
+      くわしい使い方は https://harucom.github.io/ をごらんください
+
+    PROMPT
     @console.commit
 
     loop do

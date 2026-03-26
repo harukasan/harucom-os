@@ -174,6 +174,11 @@ static void run_mruby(void) {
     }
     global_mrb = mrb;
 
+    mrb_define_global_const(mrb, "HARUCOM_VERSION",
+                            mrb_str_new_cstr(mrb, HARUCOM_VERSION));
+    mrb_define_global_const(mrb, "HARUCOM_BUILD_DATE",
+                            mrb_str_new_cstr(mrb, HARUCOM_BUILD_DATE));
+
     mrc_ccontext *cc = mrc_ccontext_new(mrb);
     const uint8_t *src = (const uint8_t *)ruby_bootstrap;
     mrc_irep *irep = mrc_load_string_cxt(cc, &src, strlen(ruby_bootstrap));
