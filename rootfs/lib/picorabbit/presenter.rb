@@ -1,10 +1,11 @@
 module PicoRabbit
   class Presenter
-    def initialize(slides:, renderer:, keyboard:)
+    def initialize(slides:, renderer:, keyboard:, timer: nil)
       @slides = slides
       @renderer = renderer
       @keyboard = keyboard
       @current = 0
+      @timer = timer
     end
 
     def start
@@ -15,6 +16,8 @@ module PicoRabbit
           case key
           when Keyboard::ESCAPE, Keyboard::CTRL_Q
             break
+          when Keyboard::UP
+            @timer.jump if @timer
           when Keyboard::RIGHT, Keyboard::PAGEDOWN, Keyboard::ENTER, " "
             next_slide
           when Keyboard::LEFT, Keyboard::PAGEUP, Keyboard::BSPACE
@@ -25,6 +28,7 @@ module PicoRabbit
             go_to(@slides.length - 1)
           end
         end
+        render_current if @timer
         DVI::Graphics.commit
       end
     end
