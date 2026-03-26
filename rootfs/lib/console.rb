@@ -4,6 +4,7 @@
 # Compatible with $stdout (responds to puts, print, write, flush).
 # All output is mirrored to UART via the original STDOUT.
 # Supports scrollback buffer for viewing past output with PageUp/PageDown.
+# Supports ANSI SGR escape sequences for color and bold.
 
 class Console
   COLS = DVI::Text::COLS
@@ -11,15 +12,58 @@ class Console
   DEFAULT_ATTR = 0xF0 # white on black
   SCROLLBACK_MAX = 200
 
+  # ANSI SGR escape sequence constants.
+  #
+  #   puts "#{Console::RED}Error:#{Console::RESET} something went wrong"
+  #   puts "#{Console::BOLD}#{Console::YELLOW}Warning:#{Console::RESET} check"
+  #
+  RESET   = "\e[0m"
+  BOLD    = "\e[1m"
+
+  BLACK   = "\e[30m"
+  RED     = "\e[31m"
+  GREEN   = "\e[32m"
+  YELLOW  = "\e[33m"
+  BLUE    = "\e[34m"
+  MAGENTA = "\e[35m"
+  CYAN    = "\e[36m"
+  WHITE   = "\e[37m"
+
+  BRIGHT_BLACK   = "\e[90m"
+  BRIGHT_RED     = "\e[91m"
+  BRIGHT_GREEN   = "\e[92m"
+  BRIGHT_YELLOW  = "\e[93m"
+  BRIGHT_BLUE    = "\e[94m"
+  BRIGHT_MAGENTA = "\e[95m"
+  BRIGHT_CYAN    = "\e[96m"
+  BRIGHT_WHITE   = "\e[97m"
+
+  BG_BLACK   = "\e[40m"
+  BG_RED     = "\e[41m"
+  BG_GREEN   = "\e[42m"
+  BG_YELLOW  = "\e[43m"
+  BG_BLUE    = "\e[44m"
+  BG_MAGENTA = "\e[45m"
+  BG_CYAN    = "\e[46m"
+  BG_WHITE   = "\e[47m"
+
+  # ANSI standard color to palette index mapping.
+  # Indices 0-7 match the standard VGA palette order.
+  ANSI_COLOR_TABLE = [0, 4, 2, 6, 1, 5, 3, 7].freeze
+
   def initialize(attr: DEFAULT_ATTR)
     @col = 0
     @row = 0
+    @default_attr = attr
     @attr = attr
+    @bold = false
     @cursor_visible = false
     @uart = STDOUT
     @scrollback = []
     @scroll_offset = 0
     @viewport_snapshot = nil
+    @esc_state = :normal
+    @esc_buf = ""
     clear
   end
 
@@ -81,6 +125,32 @@ class Console
   # Low-level output
 
   def put_char(ch)
+    case @esc_state
+    when :escape
+      if ch == "["
+        @esc_state = :csi
+        @esc_buf = ""
+      else
+        @esc_state = :normal
+      end
+      return
+    when :csi
+      if ch == "m"
+        apply_sgr(@esc_buf)
+        @esc_state = :normal
+      elsif ch >= "0" && ch <= "9" || ch == ";"
+        @esc_buf << ch
+      else
+        # Unknown CSI sequence, discard
+        @esc_state = :normal
+      end
+      return
+    end
+
+    if ch == "\e"
+      @esc_state = :escape
+      return
+    end
     if ch == "\n"
       newline
       return
@@ -94,7 +164,7 @@ class Console
     width = Editor.char_display_width(ch)
     newline if @col + width > COLS
 
-    DVI::Text.put_string(@col, @row, ch, @attr)
+    DVI::Text.put_string(@col, @row, ch, effective_attr)
     @col += width
   end
 
@@ -181,7 +251,59 @@ class Console
     DVI::Text.commit
   end
 
+  # Effective attribute with bold applied.
+  # Bold shifts foreground to bright range (index + 8) if in 0-7.
+  def effective_attr
+    if @bold
+      fg = (@attr >> 4) & 0x0F
+      fg |= 0x08 if fg < 8
+      (fg << 4) | (@attr & 0x0F)
+    else
+      @attr
+    end
+  end
+
   private
+
+  # Apply SGR (Select Graphic Rendition) parameters to @attr.
+  # Supports: 0 (reset), 1 (bold), 22 (normal intensity),
+  # 30-37/90-97 (foreground), 39 (default foreground),
+  # 40-47/100-107 (background), 49 (default background).
+  def apply_sgr(buf)
+    params = if buf.empty?
+      [0]
+    else
+      buf.split(";").map { |s| s.to_i }
+    end
+    params.each do |p|
+      case p
+      when 0
+        @attr = @default_attr
+        @bold = false
+      when 1
+        @bold = true
+      when 22
+        @bold = false
+      when 30..37
+        fg = ANSI_COLOR_TABLE[p - 30]
+        @attr = (fg << 4) | (@attr & 0x0F)
+      when 39
+        @attr = (@default_attr & 0xF0) | (@attr & 0x0F)
+        @bold = false
+      when 40..47
+        bg = ANSI_COLOR_TABLE[p - 40]
+        @attr = (@attr & 0xF0) | bg
+      when 49
+        @attr = (@attr & 0xF0) | (@default_attr & 0x0F)
+      when 90..97
+        fg = ANSI_COLOR_TABLE[p - 90] | 0x08
+        @attr = (fg << 4) | (@attr & 0x0F)
+      when 100..107
+        bg = ANSI_COLOR_TABLE[p - 100] | 0x08
+        @attr = (@attr & 0xF0) | bg
+      end
+    end
+  end
 
   def save_viewport
     @viewport_snapshot = []
