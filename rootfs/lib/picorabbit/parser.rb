@@ -1,4 +1,17 @@
 module PicoRabbit
+  class ParseResult
+    attr_reader :slides, :metadata
+
+    def initialize(slides, metadata)
+      @slides = slides
+      @metadata = metadata
+    end
+
+    def theme
+      @metadata["theme"]
+    end
+  end
+
   class Parser
     def self.parse_file(path)
       content = File.open(path, "r") { |f| f.read }
@@ -11,8 +24,25 @@ module PicoRabbit
       current_elements = []
       in_code_block = false
       code_lines = []
+      metadata = {}
 
       lines = split_lines(content)
+
+      # Parse YAML frontmatter (--- delimited block at the start)
+      if lines.length > 0 && lines[0].strip == "---"
+        lines.shift
+        while lines.length > 0
+          line = lines.shift
+          break if line.strip == "---"
+          idx = line.index(":")
+          if idx
+            key = line[0, idx].strip
+            val = line[idx + 1, line.length - idx - 1].strip
+            metadata[key] = val
+          end
+        end
+      end
+
       lines.each do |line|
         # Code block fence
         if line.strip.start_with?("```")
@@ -72,7 +102,7 @@ module PicoRabbit
         slides << Slide.new(current_title, current_elements)
       end
 
-      slides
+      ParseResult.new(slides, metadata)
     end
 
     private
