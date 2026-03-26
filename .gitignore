@@ -1,5 +1,7 @@
 .cache
 build/
 lib/picoruby/build/
+.bundle/
+vendor/
 
 !.vscode/*
