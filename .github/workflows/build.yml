@@ -32,14 +32,14 @@ jobs:
 
     - name: Install Ruby gems
       run: |
-        bundle config set --local path .bundle
+        bundle config set --local path ${{github.workspace}}/.bundle
         bundle install
 
     - name: Configure CMake
-      run: bundle exec cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
-      run: bundle exec cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel
 
     - name: Upload artifacts
       if: github.ref == 'refs/heads/main'
