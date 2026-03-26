@@ -33,7 +33,7 @@ end
 p5 = P5.new
 DVI::Graphics.set_resolution(640, 480)
 
-renderer = PicoRabbit::Renderer.new(p5, theme_class.new, timer: timer)
+renderer = PicoRabbit::Renderer.new(p5, theme_class.new, timer: timer, metadata: result.metadata)
 
 PicoRabbit::Presenter.new(
   slides: result.slides,
