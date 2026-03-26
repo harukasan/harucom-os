@@ -23,7 +23,7 @@ class IRB
     @console.clear
     puts <<~PROMPT
 
-      Harucom OS #{HARUCOM_VERSION} (#{HARUCOM_BUILD_DATE})
+      #{Console::BRIGHT_CYAN}#{Console::BOLD}Harucom#{Console::WHITE} OS#{Console::RESET} #{HARUCOM_VERSION} (#{HARUCOM_BUILD_DATE})
       (c) 2026 Shunsuke Michii
 
       Powered by PicoRuby #{PICORUBY_VERSION} on #{RUBY_PLATFORM}
