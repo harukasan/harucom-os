@@ -166,6 +166,15 @@ class Keyboard
     @repeat_last_frame = 0
     @repeat_active = false
     @queue = []
+    @ctrl_c_flag = false
+  end
+
+  # Check and clear the Ctrl-C flag.
+  # Set by poll() when Ctrl-C is queued; does not consume the key from queue.
+  def ctrl_c_pressed?
+    flag = @ctrl_c_flag
+    @ctrl_c_flag = false
+    flag
   end
 
   # Poll USB keyboard for new input.
@@ -209,6 +218,7 @@ class Keyboard
 
     if result
       @queue.push(result)
+      @ctrl_c_flag = true if result == CTRL_C
     end
   end
 

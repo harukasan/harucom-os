@@ -61,7 +61,7 @@ class IRB
       @console.commit
     end
   ensure
-    @sandbox.terminate
+    @sandbox.terminate if @sandbox
   end
 
   private
@@ -77,7 +77,8 @@ class IRB
     args.each { |a| ARGV << a }
     name = path.split("/")[-1].sub(".rb", "")
     sandbox = Sandbox.new(name)
-    sandbox.load_file(path)
+    sandbox.load_file(path, join: false)
+    wait_app(sandbox)
     if error = sandbox.error
       puts "#{path}: #{error.message} (#{error.class})"
       if error.respond_to?(:backtrace) && (bt = error.backtrace)
@@ -94,6 +95,22 @@ class IRB
     while sandbox.state != :DORMANT && sandbox.state != :SUSPENDED
       c = @keyboard.read_char
       if c == Keyboard::CTRL_C
+        sandbox.stop
+        puts "^C"
+        @console.commit
+        return
+      end
+      sleep_ms 5
+    end
+  end
+
+  # Wait for an app sandbox to finish.
+  # Uses Keyboard#ctrl_c_pressed? flag instead of reading from the queue,
+  # so the app can still receive all key events including Ctrl-C.
+  def wait_app(sandbox)
+    sleep_ms 5
+    while sandbox.state != :DORMANT && sandbox.state != :SUSPENDED
+      if @keyboard.ctrl_c_pressed?
         sandbox.stop
         puts "^C"
         @console.commit
