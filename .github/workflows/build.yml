@@ -31,7 +31,7 @@ jobs:
         sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi libfreetype-dev
 
     - name: Install Ruby gems
-      run: bundle install
+      run: gem install freetype
 
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
