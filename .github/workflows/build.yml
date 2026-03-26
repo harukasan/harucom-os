@@ -31,26 +31,7 @@ jobs:
         ruby-version: '4.0.1'
 
     - name: Install Ruby gems
-      run: |
-        bundle config set --local path ${{github.workspace}}/.bundle
-        bundle install
-
-    - name: Debug gem environment
-      run: |
-        echo "=== .bundle/config ==="
-        cat .bundle/config
-        echo "=== bundle info freetype ==="
-        bundle info freetype || true
-        echo "=== gem environment ==="
-        gem environment
-        echo "=== which ruby / bundle / rake ==="
-        which ruby bundle rake
-        echo "=== ls .bundle/ ==="
-        ls -la .bundle/ || true
-        ls .bundle/ruby/ || true
-        ls .bundle/ruby/4.0.0/gems/ || true
-        echo "=== BUNDLE_GEMFILE test from lib/picoruby ==="
-        cd lib/picoruby && BUNDLE_GEMFILE=${{github.workspace}}/Gemfile bundle exec ruby -e "puts 'bundler OK'; puts Gem.path.inspect"
+      run: gem install freetype
 
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
