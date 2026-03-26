@@ -25,10 +25,13 @@ jobs:
       with:
         ruby-version: '4.0.1'
 
-    - name: Install ARM toolchain
+    - name: Install ARM toolchain and dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+        sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi libfreetype-dev
+
+    - name: Install Ruby gems
+      run: bundle install
 
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
