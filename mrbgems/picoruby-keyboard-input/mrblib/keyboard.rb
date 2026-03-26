@@ -9,9 +9,9 @@ class Keyboard
   MOD_RIGHTALT   = 0x40
   MOD_RIGHTGUI   = 0x80
 
-  # Key repeat timing (frame count at 60fps)
-  REPEAT_INITIAL_FRAMES  = 24  # ~400ms
-  REPEAT_INTERVAL_FRAMES = 3   # ~50ms
+  # Key repeat timing (milliseconds)
+  REPEAT_INITIAL_MS = 400
+  REPEAT_INTERVAL_MS = 50
 
   # HID keycode -> name (Symbol) mapping for special keys
   KEYCODE_TO_NAME = {
@@ -162,8 +162,8 @@ class Keyboard
   def initialize
     @previous_keycodes = []
     @repeat_keycode = nil
-    @repeat_start_frame = 0
-    @repeat_last_frame = 0
+    @repeat_start_ms = 0
+    @repeat_last_ms = 0
     @repeat_active = false
     @queue = []
     @ctrl_c_flag = false
@@ -182,7 +182,7 @@ class Keyboard
   def poll
     current_keycodes = USB::Host.keyboard_keycodes
     modifier = USB::Host.keyboard_modifier
-    now = DVI.frame_count
+    now = Machine.board_millis
 
     # Detect newly pressed keys
     new_keys = current_keycodes - @previous_keycodes
@@ -193,18 +193,18 @@ class Keyboard
       result = resolve_key(new_key, modifier)
       # Start repeat tracking
       @repeat_keycode = new_key
-      @repeat_start_frame = now
-      @repeat_last_frame = now
+      @repeat_start_ms = now
+      @repeat_last_ms = now
       @repeat_active = false
     elsif @repeat_keycode
       if current_keycodes.include?(@repeat_keycode)
-        elapsed = now - @repeat_start_frame
-        if !@repeat_active && elapsed >= REPEAT_INITIAL_FRAMES
+        elapsed = now - @repeat_start_ms
+        if !@repeat_active && elapsed >= REPEAT_INITIAL_MS
           @repeat_active = true
-          @repeat_last_frame = now
+          @repeat_last_ms = now
           result = resolve_key(@repeat_keycode, modifier)
-        elsif @repeat_active && (now - @repeat_last_frame) >= REPEAT_INTERVAL_FRAMES
-          @repeat_last_frame = now
+        elsif @repeat_active && (now - @repeat_last_ms) >= REPEAT_INTERVAL_MS
+          @repeat_last_ms = now
           result = resolve_key(@repeat_keycode, modifier)
         end
       else
