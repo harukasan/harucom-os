@@ -8,7 +8,6 @@ on:
 
 env:
   BUILD_TYPE: Release
-  BUNDLE_PATH: ${{github.workspace}}/.bundle
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -32,13 +31,15 @@ jobs:
         ruby-version: '4.0.1'
 
     - name: Install Ruby gems
-      run: bundle install
+      run: |
+        bundle config set --local path .bundle
+        bundle install
 
     - name: Configure CMake
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+      run: bundle exec cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel
+      run: bundle exec cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel
 
     - name: Upload artifacts
       if: github.ref == 'refs/heads/main'

@@ -118,8 +118,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
 
   # DenkiChip ASCII (TTF via FreeType)
   project_root = File.expand_path('../..', dir)
-  bundle_path = ENV['BUNDLE_PATH'] || "#{project_root}/.bundle"
-  bundle_exec = "BUNDLE_GEMFILE=#{project_root}/Gemfile BUNDLE_PATH=#{bundle_path} bundle exec ruby"
+  bundle_exec = "BUNDLE_GEMFILE=#{project_root}/Gemfile bundle exec ruby"
 
   denkichip_ttf = "#{denkichip_dir}/fonts/ttf/x8y12pxDenkiChip.ttf"
   denkichip_dst = "#{include_dir}/font_denkichip.h"
