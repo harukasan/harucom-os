@@ -118,18 +118,18 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
 
   # DenkiChip ASCII (TTF via FreeType)
   project_root = File.expand_path('../..', dir)
-  bundle_exec = "BUNDLE_GEMFILE=#{project_root}/Gemfile bundle exec ruby"
+  ruby_cmd = "ruby"
 
   denkichip_ttf = "#{denkichip_dir}/fonts/ttf/x8y12pxDenkiChip.ttf"
   denkichip_dst = "#{include_dir}/font_denkichip.h"
   file denkichip_dst => [denkichip_ttf, ttf2c, include_dir] do
-    sh "#{bundle_exec} #{ttf2c} #{denkichip_ttf} -s 12 -n denkichip -o #{denkichip_dst}"
+    sh "#{ruby_cmd} #{ttf2c} #{denkichip_ttf} -s 12 -n denkichip -o #{denkichip_dst}"
   end
 
   # DenkiChip JIS (TTF via FreeType, JIS indexed)
   denkichip_jis_dst = "#{include_dir}/font_denkichip_j.h"
   file denkichip_jis_dst => [denkichip_ttf, ttf2c, include_dir] do
-    sh "#{bundle_exec} #{ttf2c} #{denkichip_ttf} -s 12 --jis -n denkichip_j -o #{denkichip_jis_dst}"
+    sh "#{ruby_cmd} #{ttf2c} #{denkichip_ttf} -s 12 --jis -n denkichip_j -o #{denkichip_jis_dst}"
   end
 
   # JIS X 0208 interleaved regular+bold
