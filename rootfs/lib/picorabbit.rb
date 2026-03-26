@@ -1,0 +1,6 @@
+require "picorabbit/slide"
+require "picorabbit/parser"
+require "picorabbit/theme"
+require "picorabbit/renderer"
+require "picorabbit/presenter"
+require "picorabbit/themes/default"
