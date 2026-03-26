@@ -6,6 +6,7 @@
  * FatFs volume at boot, before the mruby VM starts.
  */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -41,6 +42,51 @@ ensure_directories(const char *path)
     }
 }
 
+static FRESULT
+format_and_mount(FATFS *fatfs)
+{
+    printf("rootfs: formatting...\n");
+    f_mount(NULL, "flash:", 0);
+    static uint8_t work[FF_MAX_SS];
+    const MKFS_PARM opt = { FM_FAT, 1, 0, 0, 0 };
+    FRESULT res = f_mkfs("flash:", &opt, work, sizeof(work));
+    if (res != FR_OK) {
+        printf("rootfs: f_mkfs failed (%d)\n", res);
+        return res;
+    }
+    return f_mount(fatfs, "flash:", 1);
+}
+
+/* Write all scripts to flash. Returns true if all writes succeeded. */
+static bool
+write_scripts(void)
+{
+    bool ok = true;
+    for (int i = 0; i < ruby_scripts_count; i++) {
+        const ruby_script_entry_t *entry = &ruby_scripts[i];
+
+        ensure_directories(entry->path);
+
+        FIL fp;
+        UINT bw;
+        FRESULT res = f_open(&fp, entry->path, FA_CREATE_ALWAYS | FA_WRITE);
+        if (res != FR_OK) {
+            printf("rootfs: f_open(%s) failed (%d)\n", entry->path, res);
+            ok = false;
+            continue;
+        }
+        res = f_write(&fp, entry->data, entry->size, &bw);
+        if (res != FR_OK || bw != entry->size) {
+            printf("rootfs: f_write(%s) failed (%d, wrote %u/%u)\n",
+                   entry->path, res, bw, entry->size);
+            ok = false;
+        }
+        f_close(&fp);
+        printf("rootfs: %s (%u bytes)\n", entry->path, entry->size);
+    }
+    return ok;
+}
+
 void
 init_rootfs(void)
 {
@@ -50,41 +96,22 @@ init_rootfs(void)
     /* Mount the flash volume */
     res = f_mount(&fatfs, "flash:", 1);
     if (res == FR_NO_FILESYSTEM) {
-        printf("rootfs: no filesystem, formatting...\n");
-        static uint8_t work[FF_MAX_SS];
-        const MKFS_PARM opt = { FM_FAT, 1, 0, 0, 0 };
-        res = f_mkfs("flash:", &opt, work, sizeof(work));
-        if (res != FR_OK) {
-            printf("rootfs: f_mkfs failed (%d)\n", res);
-            return;
-        }
-        res = f_mount(&fatfs, "flash:", 1);
+        res = format_and_mount(&fatfs);
     }
     if (res != FR_OK) {
         printf("rootfs: f_mount failed (%d)\n", res);
         return;
     }
 
-    /* Write each script to flash */
-    for (int i = 0; i < ruby_scripts_count; i++) {
-        const ruby_script_entry_t *entry = &ruby_scripts[i];
-
-        ensure_directories(entry->path);
-
-        FIL fp;
-        UINT bw;
-        res = f_open(&fp, entry->path, FA_CREATE_ALWAYS | FA_WRITE);
+    /* Write all scripts; reformat and retry once on failure */
+    if (!write_scripts()) {
+        printf("rootfs: write errors detected, reformatting...\n");
+        res = format_and_mount(&fatfs);
         if (res != FR_OK) {
-            printf("rootfs: f_open(%s) failed (%d)\n", entry->path, res);
-            continue;
+            printf("rootfs: reformat failed (%d)\n", res);
+            return;
         }
-        res = f_write(&fp, entry->data, entry->size, &bw);
-        if (res != FR_OK || bw != entry->size) {
-            printf("rootfs: f_write(%s) failed (%d, wrote %u/%u)\n",
-                   entry->path, res, bw, entry->size);
-        }
-        f_close(&fp);
-        printf("rootfs: %s (%u bytes)\n", entry->path, entry->size);
+        write_scripts();
     }
 
     /* Unmount (Ruby bootstrap will re-mount via VFS) */

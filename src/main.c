@@ -257,6 +257,11 @@ static void harucom_main(void) {
     printf("Graphics back buffer: %u bytes at %p\n", (unsigned)fb_size, heap_pool);
     printf("mruby heap: %u bytes at %p\n", (unsigned)heap_size_g, heap_pool_g);
 
+    /* Initialize root filesystem before launching DVI on core 1.
+     * Flash programming requires exclusive XIP access, which conflicts
+     * with DVI scanline rendering on core 1. */
+    init_rootfs();
+
     /* Set up text mode fonts before launching DVI on core 1.
      * Font data must be configured before dvi_start_mode() because the
      * scanline renderer needs the font to be set. */
@@ -287,9 +292,6 @@ static void harucom_main(void) {
 
     /* Initialize USB host (PIO-USB on RHPORT 1) */
     usb_host_init();
-
-    /* Initialize root filesystem (format if needed, write scripts) */
-    init_rootfs();
 
     /* Run mruby on core 0 (has default alarm pool, stdio, timers) */
     run_mruby();
