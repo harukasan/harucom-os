@@ -32,7 +32,7 @@ jobs:
 
     - name: Install Ruby gems
       run: |
-        bundle config set --local path vendor/bundle
+        bundle config set --local path .bundle
         bundle install
 
     - name: Configure CMake
