@@ -23,6 +23,7 @@ module PicoRabbit
       current_title = nil
       current_elements = []
       in_code_block = false
+      code_block_type = :code_block
       code_lines = []
       metadata = {}
 
@@ -54,10 +55,13 @@ module PicoRabbit
         # Code block fence
         if line.strip.start_with?("```")
           if in_code_block
-            current_elements << Element.new(:code_block, code_lines)
+            current_elements << Element.new(code_block_type, code_lines)
             code_lines = []
+            code_block_type = :code_block
             in_code_block = false
           else
+            lang = line.strip[3, line.strip.length - 3]
+            code_block_type = lang == "p5" ? :p5_code : :code_block
             in_code_block = true
           end
           next
@@ -161,7 +165,7 @@ module PicoRabbit
 
       # Close any unclosed code block
       if in_code_block && code_lines.length > 0
-        current_elements << Element.new(:code_block, code_lines)
+        current_elements << Element.new(code_block_type, code_lines)
       end
 
       # Save last slide

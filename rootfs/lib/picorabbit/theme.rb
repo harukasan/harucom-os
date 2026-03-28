@@ -127,6 +127,8 @@ module PicoRabbit
         y + bmp.height + leading
       when :code_block
         render_code_block(p5, element.text, x, y)
+      when :p5_code
+        render_p5_code(p5, element.text, x, y)
       when :blank
         y + body_font_height / 2
       else
@@ -240,6 +242,25 @@ module PicoRabbit
         ty += line_height
       end
       y + block_height + leading
+    end
+
+    def render_p5_code(p5, lines, x, y)
+      unless @p5_sandbox
+        @p5_sandbox = Sandbox.new("p5_draw")
+        @p5_sandbox.compile("nil")
+        @p5_sandbox.execute
+        @p5_sandbox.wait(timeout: nil)
+        @p5_sandbox.suspend
+      end
+      $__picorabbit_p5 = p5
+      $__picorabbit_x = x
+      $__picorabbit_y = y
+      code = "p5 = $__picorabbit_p5\nx = $__picorabbit_x\ny = $__picorabbit_y\n" + lines.join("\n")
+      @p5_sandbox.compile(code)
+      @p5_sandbox.execute
+      @p5_sandbox.wait
+      @p5_sandbox.suspend
+      y
     end
 
     def render_footer(p5, slide_index, total_slides)
