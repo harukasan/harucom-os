@@ -204,6 +204,19 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## Inter
+
+- Repository: https://github.com/rsms/inter
+- License: SIL Open Font License 1.1
+
+```
+Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+```
+
 ## x8y12pxDenkiChip
 
 - Repository: https://github.com/hicchicc/x8y12pxDenkiChip

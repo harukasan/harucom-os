@@ -93,7 +93,60 @@ static int char_advance(int32_t cp, const dvi_font_t *font,
     return font->glyph_width;
 }
 
-// Render one glyph at (char_x, y) and return its advance width.
+// Blend foreground color onto background using 4-bit alpha (0 = transparent, 15 = opaque).
+// Operates on RGB332 colors independently of the global blend mode.
+static inline uint8_t blend_aa_pixel(uint8_t bg, uint8_t fg, uint8_t alpha4)
+{
+    int a = alpha4 * 17;  // map 0-15 to 0-255
+    int inv_a = 255 - a;
+    int sr = (fg >> 5) & 7, sg = (fg >> 2) & 7, sb = fg & 3;
+    int dr = (bg >> 5) & 7, dg = (bg >> 2) & 7, db = bg & 3;
+    int rr = (sr * a + dr * inv_a) / 255;
+    int rg = (sg * a + dg * inv_a) / 255;
+    int rb = (sb * a + db * inv_a) / 255;
+    return (uint8_t)((rr << 5) | (rg << 2) | rb);
+}
+
+// Render one 4bpp anti-aliased glyph at (char_x, y) and return its advance width.
+static int draw_glyph_4bpp(uint8_t *framebuffer, int fb_width, int fb_height,
+                            int char_x, int y, int idx,
+                            uint8_t color, const dvi_font_t *font)
+{
+    int gw = font->glyph_width;
+    int gh = font->glyph_height;
+    int bytes_per_row = (gw + 1) / 2;
+    const uint8_t *glyph = &font->bitmap[glyph_offset(font, idx)];
+
+    for (int row = 0; row < gh; row++) {
+        int py = y + row;
+        if (py < 0)
+            continue;
+        if (py >= fb_height)
+            break;
+
+        const uint8_t *row_data = &glyph[row * bytes_per_row];
+        for (int col = 0; col < gw; col++) {
+            uint8_t byte_val = row_data[col / 2];
+            uint8_t v = (col & 1) ? (byte_val & 0x0F) : (byte_val >> 4);
+            if (v == 0)
+                continue;
+            int px = char_x + col;
+            if (px < 0)
+                continue;
+            if (px >= fb_width)
+                break;
+            int offset = py * fb_width + px;
+            if (v == 15)
+                framebuffer[offset] = color;
+            else
+                framebuffer[offset] = blend_aa_pixel(framebuffer[offset], color, v);
+        }
+    }
+
+    return (font->widths) ? font->widths[idx] : gw;
+}
+
+// Render one 1bpp glyph at (char_x, y) and return its advance width.
 static int draw_glyph(uint8_t *framebuffer, int fb_width, int fb_height,
                        int char_x, int y, int idx,
                        uint8_t color, const dvi_font_t *font)
@@ -150,9 +203,14 @@ void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
         int idx = cp - first;
         if (idx >= 0 && idx < num) {
             int advance = (font->widths) ? font->widths[idx] : gw;
-            if (char_x + advance > 0)
-                draw_glyph(framebuffer, width, height, char_x, y,
-                           idx, color, font);
+            if (char_x + advance > 0) {
+                if (font->bpp == 4)
+                    draw_glyph_4bpp(framebuffer, width, height, char_x, y,
+                                    idx, color, font);
+                else
+                    draw_glyph(framebuffer, width, height, char_x, y,
+                               idx, color, font);
+            }
             char_x += advance;
             continue;
         }
@@ -163,9 +221,14 @@ void dvi_graphics_draw_text(uint8_t *framebuffer, int width, int height,
             if (jis_idx >= 0 && jis_idx < wide_font->num_chars) {
                 int wgw = wide_font->glyph_width;
                 int advance = (wide_font->widths) ? wide_font->widths[jis_idx] : wgw;
-                if (char_x + advance > 0)
-                    draw_glyph(framebuffer, width, height, char_x, y,
-                               jis_idx, color, wide_font);
+                if (char_x + advance > 0) {
+                    if (wide_font->bpp == 4)
+                        draw_glyph_4bpp(framebuffer, width, height, char_x, y,
+                                        jis_idx, color, wide_font);
+                    else
+                        draw_glyph(framebuffer, width, height, char_x, y,
+                                   jis_idx, color, wide_font);
+                }
                 char_x += advance;
                 continue;
             }
