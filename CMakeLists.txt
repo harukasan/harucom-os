@@ -149,6 +149,7 @@ add_executable(harucom_os
     src/env.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-rng/ports/rp2040/rng.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-adc/ports/rp2040/adc.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/ports/rp2040/io-console.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
@@ -205,6 +206,7 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/lib/ff14b/source
     ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/src/hal
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems
+    ${PICORUBY_ROOT}/mrbgems/picoruby-adc/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems/picoruby-dvi/include
 )
@@ -219,6 +221,7 @@ target_link_libraries(harucom_os
     pico_unique_id
     pico_aon_timer
     hardware_timer
+    hardware_adc
     hardware_gpio
     hardware_flash
     hardware_sync
