@@ -285,12 +285,12 @@ module PicoRabbit
 
     # Font accessors (override in subclasses)
 
-    def title_font; G::FONT_HELVETICA_BOLD_24; end
+    def title_font; G::FONT_INTER_BOLD_24; end
     def title_font_height; G.font_height(title_font); end
-    def body_font; G::FONT_HELVETICA_18; end
+    def body_font; G::FONT_INTER_18; end
     def body_font_height; G.font_height(body_font); end
     def body_font_ascent; 22; end
-    def bold_font; G::FONT_HELVETICA_BOLD_18; end
+    def bold_font; G::FONT_INTER_BOLD_18; end
     def inline_code_font; G::FONT_SPLEEN_8X16; end
     def inline_code_font_ascent; 12; end
     def code_font; G::FONT_SPLEEN_8X16; end
