@@ -125,6 +125,7 @@ static void __not_in_flash_func(core1_dvi_entry)(void) {
     }
 }
 
+#ifdef DVI_DIAGNOSTICS
 /* Periodic DVI diagnostic output (called from timer IRQ on core 0) */
 static uint32_t prev_fifo_empty = 0;
 static bool dvi_diagnostic_callback(struct repeating_timer *t) {
@@ -159,6 +160,7 @@ static bool dvi_diagnostic_callback(struct repeating_timer *t) {
     printf("\n");
     return true;
 }
+#endif
 
 
 /*
@@ -286,9 +288,11 @@ static void harucom_main(void) {
            dvi_irq_max_cycles, dvi_render_max_cycles,
            dvi_irq_interval_min, dvi_irq_interval_max);
 
+#ifdef DVI_DIAGNOSTICS
     /* Start periodic DVI diagnostics (every 1 second) */
     static struct repeating_timer diag_timer;
     add_repeating_timer_ms(1000, dvi_diagnostic_callback, NULL, &diag_timer);
+#endif
 
     /* Initialize USB host (PIO-USB on RHPORT 1) */
     usb_host_init();
