@@ -4,7 +4,7 @@
 // Outputs 640x480 @ 60Hz DVI.
 //
 // Supports two modes:
-//   GRAPHICS: 320x240 RGB332 framebuffer, 2x scaled to 640x480
+//   GRAPHICS: 640x480 native or 320x240 RGB332 framebuffer (2x scaled)
 //   TEXT:  text VRAM rendered at native 640x480
 //
 // Based on dvi_out_hstx_encoder from pico-examples:
@@ -132,12 +132,12 @@ static volatile int next_mode = -1; // -1 = no pending switch
 // In main SRAM to avoid SCRATCH_Y contention with CPU ctrl word accesses.
 // CMD DMA reads these in brief bursts (4 words per group, DREQ_FORCE).
 // Batch layout for N=4 active lines: N x 8 words (sync+pixel) + 4 (stop) = 36.
-// Single-line (blanking) uses only the first 12 words.
+// Single-line (blanking) uses only the first 8 words.
 #define DMA_BATCH_BUF_WORDS (BATCH_SIZE * 8 + 4)
 static uint32_t dma_scanline_buf[2][DMA_BATCH_BUF_WORDS]
     __attribute__((aligned(16)));
 
-// DMA control words (read by CPU in prepare_scanline_dma)
+// DMA control words (read by CPU in prepare_batch_dma)
 static uint32_t ctrl_sync;
 static uint32_t ctrl_pixel; // DMA_SIZE_8 for pixel mode (byte replication = 2x)
 static uint32_t ctrl_text_pixel; // DMA_SIZE_32 for text mode (4 packed pixels)
@@ -177,9 +177,9 @@ volatile uint32_t dvi_fifo_min_level =
 static int cur_line = 0;
 static int cur_desc_idx = 0;
 
-// Blanking flag: when true, all active lines output black (blank_cmd only).
-// Set by Core 0 before flash operations to prevent Core 1 from accessing
-// flash-resident .rodata during rendering.
+// Blanking flag: when true, all text mode active lines output black (via
+// blank_line_buf). Set by Core 0 before flash operations to prevent Core 1 from
+// accessing flash-resident .rodata during rendering.
 static volatile bool dvi_blanking = false;
 
 // ----------------------------------------------------------------------------
@@ -253,8 +253,8 @@ static uint8_t *volatile render_row_has_wide = row_has_wide_a;
 // Wide-left cell stores low 8 bits, wide-right stores high 8 bits of the
 // 12-bit glyph row. ldrh at wide-left reads the full 16-bit value.
 #define GLYPH_BITMAP_STRIDE DVI_TEXT_MAX_COLS
-#define GLYPH_BITMAP_SIZE \
-    (DVI_TEXT_MAX_ROWS * TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE)
+#define GLYPH_BITMAP_SIZE                                                      \
+  (DVI_TEXT_MAX_ROWS * TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE)
 
 // Ring buffer scroll offset (double-buffered).
 // Logical row N maps to physical row (N + scroll_offset) % text_rows.
@@ -326,8 +326,7 @@ static void render_wide_glyph_at(int col, int phys_row, uint16_t linear_jis,
     return;
   int bytes_per_glyph = font->glyph_height * 2;
   int stride = bytes_per_glyph * 2;
-  const uint8_t *src =
-      font->bitmap + (linear_jis - font->first_char) * stride;
+  const uint8_t *src = font->bitmap + (linear_jis - font->first_char) * stride;
   if (bold)
     src += bytes_per_glyph;
   for (int y = 0; y < font->glyph_height; y++) {
@@ -452,11 +451,11 @@ static void __scratch_x("")
 
         "16:\n\t" // done
 
-        : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4),
-          [xor] "+r"(xor4), [prev] "+r"(prev_attr), [t1] "=&r"(t1),
-          [t2] "=&r"(t2), [t3] "=&r"(t3), [t4] "=&r"(t4)
-        : [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row),
-          [pal] "r"(pal32)
+        : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4), [xor] "+r"(xor4),
+          [prev] "+r"(prev_attr), [t1] "=&r"(t1), [t2] "=&r"(t2),
+          [t3] "=&r"(t3), [t4] "=&r"(t4)
+        :
+        [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row), [pal] "r"(pal32)
         : "cc", "memory");
 
   } else {
@@ -546,11 +545,11 @@ static void __scratch_x("")
 
         "6:\n\t" // done
 
-        : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4),
-          [xor] "+r"(xor4), [prev] "+r"(prev_attr), [gptr] "+r"(glyph_ptr),
-          [t1] "=&r"(t1), [t2] "=&r"(t2), [t3] "=&r"(t3), [t4] "=&r"(t4)
-        : [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row),
-          [pal] "r"(pal32)
+        : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4), [xor] "+r"(xor4),
+          [prev] "+r"(prev_attr), [gptr] "+r"(glyph_ptr), [t1] "=&r"(t1),
+          [t2] "=&r"(t2), [t3] "=&r"(t3), [t4] "=&r"(t4)
+        :
+        [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row), [pal] "r"(pal32)
         : "cc", "memory");
   }
 
@@ -935,7 +934,7 @@ void dvi_start_mode(dvi_mode_t mode) {
   dma_channel_configure(DMACH_CMD, &c, &dma_hw->ch[DMACH_DATA].al3_ctrl,
                         dma_scanline_buf[0], 4, false);
 
-  // DATA channel IRQ: fires once per scanline at NULL stop marker.
+  // DATA channel IRQ: fires once per batch at NULL stop marker.
   dma_hw->ints1 = 1u << DMACH_DATA;
   dma_hw->inte1 = 1u << DMACH_DATA;
   irq_set_exclusive_handler(DMA_IRQ_1, dma_irq_handler);
@@ -986,7 +985,8 @@ void dvi_graphics_commit(void) {
   int gw = DVI_GRAPHICS_MAX_WIDTH / graphics_scale;
   int gh = DVI_GRAPHICS_MAX_HEIGHT / graphics_scale;
   if (graphics_scale == 2) {
-    memcpy(screenbuf.framebuffer, screenbuf.framebuffer + (DVI_GRAPHICS_HALF_SIZE), gw * gh);
+    memcpy(screenbuf.framebuffer,
+           screenbuf.framebuffer + (DVI_GRAPHICS_HALF_SIZE), gw * gh);
   } else if (back_framebuf) {
     memcpy(screenbuf.framebuffer, back_framebuf, gw * gh);
   }
@@ -1271,7 +1271,8 @@ static void clear_physical_line(int phys, uint8_t attr) {
   }
   write_row_has_wide[phys] = 0;
   // Clear glyph bitmap for this physical row
-  memset(screenbuf.glyph_bitmap + phys * TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE,
+  memset(screenbuf.glyph_bitmap +
+             phys * TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE,
          0, TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE);
 }
 
