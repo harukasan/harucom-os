@@ -28,6 +28,8 @@ typedef struct {
     uint16_t glyph_stride;  // bytes between consecutive glyphs
                             // (0 = auto: ((glyph_width+7)/8) * glyph_height)
     uint8_t bpp;            // bits per pixel: 0 or 1 = 1bpp, 4 = 4bpp anti-aliased
+    int8_t bitmap_left;     // min bitmap_left offset (0 or negative),
+                            // shifts glyph rendering to cover negative bearing
 } dvi_font_t;
 
 #endif

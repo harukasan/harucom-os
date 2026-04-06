@@ -130,7 +130,7 @@ static int draw_glyph_4bpp(uint8_t *framebuffer, int fb_width, int fb_height,
             uint8_t v = (col & 1) ? (byte_val & 0x0F) : (byte_val >> 4);
             if (v == 0)
                 continue;
-            int px = char_x + col;
+            int px = char_x + font->bitmap_left + col;
             if (px < 0)
                 continue;
             if (px >= fb_width)

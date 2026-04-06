@@ -98,10 +98,11 @@ def render_glyph(font, codepoint, target_height, glyph_width, ascender: nil)
   {rows: rows, width: w, advance: advance}
 end
 
-# Render a 4bpp anti-aliased glyph and return {pixels:, width:, advance:}
+# Render a 4bpp anti-aliased glyph and return {pixels:, width:, advance:, bitmap_left:}
 # pixels is a 2D array [row][col] of 4-bit alpha values (0-15).
 # ascender is the baseline position in pixels from the top of the glyph cell.
-def render_glyph_aa(font, codepoint, target_height, glyph_width, ascender: nil)
+# left_offset shifts all glyphs right by -left_offset to accommodate negative bearing.
+def render_glyph_aa(font, codepoint, target_height, glyph_width, ascender: nil, left_offset: 0)
   g = load_rendered_glyph(font, codepoint, mono: false)
   bm = g[:bitmap]
   w = bm[:width]
@@ -121,7 +122,7 @@ def render_glyph_aa(font, codepoint, target_height, glyph_width, ascender: nil)
     next if dst_y < 0 || dst_y >= target_height
 
     w.times do |src_x|
-      dst_x = bitmap_left + src_x
+      dst_x = bitmap_left - left_offset + src_x
       next if dst_x < 0 || dst_x >= glyph_width
 
       # FreeType grayscale: 8bpp, one byte per pixel
@@ -131,26 +132,30 @@ def render_glyph_aa(font, codepoint, target_height, glyph_width, ascender: nil)
     end
   end
 
-  {pixels: pixels, width: w, advance: advance}
+  {pixels: pixels, width: w, advance: advance, bitmap_left: bitmap_left}
 end
 
 # Determine max glyph dimensions for the character set.
-# Returns [max_width, glyph_height, ascender_pixels].
-# glyph_height includes ascender + descender from font metrics.
-# ascender_pixels is the baseline position from the top.
+# Returns [glyph_width, glyph_height, ascender_pixels, min_left].
+# glyph_width covers the full extent from min(bitmap_left) to max(bitmap_left + bitmap_width).
+# min_left is the minimum bitmap_left across all glyphs (0 or negative).
 def scan_dimensions(font, codepoints, pixel_size, mono: true)
-  max_width = 0
+  min_left = 0
+  max_right = 0
   codepoints.each do |cp|
     g = load_rendered_glyph(font, cp, mono: mono)
     bm = g[:bitmap]
-    w = bm[:width] + g[:bitmap_left]
-    max_width = w if w > max_width
+    left = g[:bitmap_left]
+    right = left + bm[:width]
+    min_left = left if left < min_left
+    max_right = right if right > max_right
   end
   metrics = font.face[:size][:metrics]
   ascender = (metrics[:ascender] + 63) >> 6   # round up
   descender = (-metrics[:descender] + 63) >> 6 # round up (descender is negative)
   glyph_height = ascender + descender
-  [max_width, glyph_height, ascender]
+  glyph_width = max_right - min_left
+  [glyph_width, glyph_height, ascender, min_left]
 end
 
 def pack_rows(rows, glyph_width)
@@ -225,6 +230,7 @@ static const dvi_font_t font_<%= font_name %> = {
 <% if font_bpp && font_bpp > 1 -%>
     .glyph_stride = <%= glyph_stride %>,
     .bpp          = <%= font_bpp %>,
+    .bitmap_left  = <%= bitmap_left_value %>,
 <% end -%>
 };
 
@@ -233,6 +239,7 @@ TEMPLATE
 
 font_bpp = options[:aa] ? 4 : nil
 glyph_stride = nil
+bitmap_left_value = 0
 
 if options[:jis]
   # JIS mode: generate JIS-indexed font from Unicode TTF
@@ -240,7 +247,8 @@ if options[:jis]
   num_chars = 94 * 94
 
   jis_codepoints = uni2jis.keys
-  glyph_width, glyph_height, ascender = scan_dimensions(font, jis_codepoints, options[:size], mono: !options[:aa])
+  glyph_width, glyph_height, ascender, min_left = scan_dimensions(font, jis_codepoints, options[:size], mono: !options[:aa])
+  bitmap_left_value = min_left if options[:aa]
   bytes_per_row = options[:aa] ? (glyph_width + 1) / 2 : (glyph_width + 7) / 8
   bytes_per_glyph = bytes_per_row * glyph_height
   glyph_stride = bytes_per_glyph if options[:aa]
@@ -252,13 +260,15 @@ if options[:jis]
   advances = {}
   jis2uni.each do |idx, cp|
     if options[:aa]
-      r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender)
+      r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender, left_offset: min_left)
       rendered[idx] = r
+      # Clamp advance to cover full bitmap extent
+      advances[idx] = [r[:advance], r[:bitmap_left] + r[:width] - min_left].max
     else
       r = render_glyph(font, cp, glyph_height, glyph_width, ascender: ascender)
       rendered[idx] = r
+      advances[idx] = r[:advance]
     end
-    advances[idx] = r[:advance]
   end
 
   is_proportional = advances.values.uniq.length > 1
@@ -291,20 +301,23 @@ else
   codepoints = (first_char..last_char).to_a
   num_chars = last_char - first_char + 1
 
-  glyph_width, glyph_height, ascender = scan_dimensions(font, codepoints, options[:size], mono: !options[:aa])
+  glyph_width, glyph_height, ascender, min_left = scan_dimensions(font, codepoints, options[:size], mono: !options[:aa])
+  bitmap_left_value = min_left if options[:aa]
   bytes_per_row = options[:aa] ? (glyph_width + 1) / 2 : (glyph_width + 7) / 8
   glyph_stride = bytes_per_row * glyph_height if options[:aa]
 
   advances = []
   glyphs = codepoints.map do |cp|
     if options[:aa]
-      r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender)
+      r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender, left_offset: min_left)
       bytes = pack_pixels_4bpp(r[:pixels], glyph_width)
+      # Clamp advance to cover full bitmap extent
+      advances << [r[:advance], r[:bitmap_left] + r[:width] - min_left].max
     else
       r = render_glyph(font, cp, glyph_height, glyph_width, ascender: ascender)
       bytes = pack_rows(r[:rows], glyph_width)
+      advances << r[:advance]
     end
-    advances << r[:advance]
     comment = cp >= 0x20 && cp <= 0x7E ? "0x%02x '%s'" % [cp, cp.chr] : "0x%02x" % cp
     {bytes: bytes, comment: comment}
   end
