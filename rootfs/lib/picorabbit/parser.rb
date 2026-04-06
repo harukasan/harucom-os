@@ -46,7 +46,7 @@ module PicoRabbit
 
       # Generate title slide from frontmatter
       if metadata["title"]
-        s = Slide.new(metadata["title"], [])
+        s = Slide.new(metadata["title"].gsub("<br>", "\n"), [])
         s.title_slide = true
         slides << s
       end
@@ -78,7 +78,7 @@ module PicoRabbit
           if current_title
             slides << Slide.new(current_title, current_elements)
           end
-          current_title = line[2, line.length - 2].strip
+          current_title = line[2, line.length - 2].strip.gsub("<br>", "\n")
           current_elements = []
           next
         end

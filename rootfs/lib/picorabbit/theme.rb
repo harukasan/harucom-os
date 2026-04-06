@@ -29,24 +29,31 @@ module PicoRabbit
     end
 
     def render_title_slide(p5, slide, metadata)
-      # Title centered vertically
+      # Title centered vertically (supports multi-line via \n)
       p5.text_font(title_font)
       p5.text_color(title_color)
       p5.text_align(:center)
-      p5.text(slide.title, 320, 180)
+      title_lines = slide.title.split("\n")
+      ty = 180
+      title_lines.each do |line|
+        p5.text(line, 320, ty)
+        ty += title_font_height + leading
+      end
 
       # Subtitle
+      bottom_y = ty - leading + 12
       if metadata["subtitle"]
         p5.text_font(body_font)
         p5.text_color(text_color)
-        p5.text(metadata["subtitle"], 320, 180 + title_font_height + 12)
+        p5.text(metadata["subtitle"], 320, bottom_y)
+        bottom_y += body_font_height + 8
       end
 
       # Author
       if metadata["author"]
         p5.text_font(body_font)
         p5.text_color(separator_color)
-        p5.text(metadata["author"], 320, 180 + title_font_height + 12 + body_font_height + 8)
+        p5.text(metadata["author"], 320, bottom_y)
       end
 
       p5.text_align(:left)
@@ -63,9 +70,14 @@ module PicoRabbit
       p5.text_font(title_font)
       p5.text_color(title_color)
       p5.text_align(:left)
-      p5.text(title, margin_x, title_y)
+      title_lines = title.split("\n")
+      ty = title_y
+      title_lines.each do |line|
+        p5.text(line, margin_x, ty)
+        ty += title_font_height + leading
+      end
       # Separator line
-      sep_y = title_y + title_font_height + 4
+      sep_y = ty - leading + 4
       p5.stroke(separator_color)
       p5.line(margin_x, sep_y, 640 - margin_x, sep_y)
       p5.no_stroke
