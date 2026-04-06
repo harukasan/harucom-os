@@ -118,13 +118,20 @@ loop do
 
   # Update channels only when held notes change
   if note_keycodes != prev_note_keycodes
+    # Scale volume by number of simultaneous notes to avoid clipping
+    count = note_keycodes.length
+    volume = if count <= 1 then 15
+             elsif count == 2 then 12
+             else 10
+             end
+
     # Assign held notes to channels 0-2
     3.times do |ch|
       kc = note_keycodes[ch]
       if kc
         semitone = NOTE_KEYCODES[kc]
         freq = note_frequency(semitone, octave)
-        audio.tone(ch, freq, waveform: waveform, volume: 15)
+        audio.tone(ch, freq, waveform: waveform, volume: volume)
       else
         audio.stop(ch)
       end
