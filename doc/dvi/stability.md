@@ -11,9 +11,9 @@ The QMI bus is shared between flash (CS0) and PSRAM (CS1). The 16 KB XIP
 cache covers both chip selects. When the mruby VM alternates between flash
 code and PSRAM data, the XIP cache thrashes, generating heavy QMI traffic.
 
-The wide glyph cache keeps all render-time font reads in SRAM, so the
-render path has no flash access. Text mode is stable regardless of mruby
-VM activity.
+The narrow row cache and per-position glyph bitmap keep all render-time
+font reads in SRAM, so the render path has no flash access. Text mode is
+stable regardless of mruby VM activity.
 
 ## DMA Bus Priority
 
@@ -41,8 +41,8 @@ Measured per-line render cycles at 250 MHz:
 
 | Workload | Cycles |
 |----------|--------|
-| Narrow-only (uniform attr) | ~1,837 |
-| Mixed-attr spike | ~2,321 |
+| Narrow-only | ~2,050 |
+| Mixed (narrow + wide) | ~2,200 |
 
 The following techniques keep the per-line render time low:
 
@@ -55,21 +55,16 @@ The following techniques keep the per-line render time low:
    (separate bus port) avoids Main SRAM contention with DMA.
    256 entries x 8 bytes = 2 KB.
 
-3. **Uniform-attribute fast path**: tracks per-row attribute uniformity via
-   `row_uniform_attr[]`. When all cells share the same attr, pre-computes
-   bg4/xor4 once and skips all per-cell ubfx+cmp+bne attr checks.
-
-4. **DMA trigger reordering**: the IRQ handler triggers the next
+3. **DMA trigger reordering**: the IRQ handler triggers the next
    pre-prepared descriptor buffer immediately after acknowledgment, before
    diagnostics.
 
-5. **SRAM wide glyph cache**: all full-width font reads come from SRAM,
-   avoiding flash XIP access entirely. See
-   [text-mode-rendering.md](text-mode-rendering.md) for cache details.
+4. **Per-position glyph bitmap**: all full-width font reads come from SRAM
+   (glyph data rendered at write time), avoiding flash XIP access entirely.
+   See [text-mode-rendering.md](text-mode-rendering.md) for details.
 
-6. **Set-time pre-computation**: bold slot offset stored in `cell.ch` at
-   write time, eliminating tst/it/addne (3 instructions per wide cell) from
-   the render loop.
+5. **Set-time pre-computation**: bold narrow offset stored in `cell.ch` at
+   write time (bit 8), eliminating a runtime branch from the render loop.
 
 7. **Load-latency interleaving**: next nibble address computed during the
    2-cycle ldr bubble in the wide sub-path.

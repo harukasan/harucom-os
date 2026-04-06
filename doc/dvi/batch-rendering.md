@@ -106,7 +106,7 @@ Mode switching (`next_mode`) is checked at VSync pulse start (line 490).
 
 | Workload | Per-line (rl) | Batch total (bt) | Headroom (of 32,000) |
 |----------|---------------|------------------|----------------------|
-| Narrow-only (uniform attr) | ~1,837 | ~7,548 | ~24,452 |
-| Mixed-attr spike | ~2,321 | ~9,501 | ~22,499 |
+| Narrow-only | ~2,050 | ~8,200 | ~23,800 |
+| Mixed (narrow + wide) | ~2,200 | ~8,800 | ~23,200 |
 
 SCRATCH_X usage: 3,668 / 4,096 bytes (89.6%).

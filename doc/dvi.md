@@ -404,8 +404,8 @@ row cache (indices 256-511).
 void dvi_text_set_wide_font(const dvi_font_t *font);
 ```
 
-Set the full-width (CJK) font. Glyphs are cached on demand into the wide
-row cache by `dvi_text_put_wide_char()`.
+Set the full-width (CJK) font. Glyphs are rendered into the per-position
+glyph bitmap by `dvi_text_put_wide_char()` at write time.
 
 ### dvi_text_set_palette
 
@@ -439,8 +439,7 @@ void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr);
 ```
 
 Place a full-width character (linear JIS index) at the given position.
-Occupies two columns. Populates the wide glyph cache from flash if the
-glyph is not already cached.
+Occupies two columns. Renders the glyph bitmap from flash font data.
 
 ### dvi_text_clear
 
@@ -615,7 +614,7 @@ vertical 2x by line doubling in the DMA IRQ handler.
 per-scanline at native 640x480 resolution. DMA uses DMA_SIZE_32 with
 `ENC_N_SHIFTS=4` for 4 unique pixels per FIFO word. See
 [dvi/text-mode-rendering.md](dvi/text-mode-rendering.md) for VRAM layout,
-font caching, wide glyph cache, and scanline renderer details.
+font caching, per-position glyph bitmap, and scanline renderer details.
 
 ### Core Assignment
 
@@ -674,7 +673,7 @@ layout, line buffer design, and measured performance.
 | Region | Size | Contents |
 |---|---|---|
 | Flash (XIP) | ~920 KB | Firmware, font data (~400 KB), mruby library |
-| Main SRAM | ~208 KB | text_vram x2 (31.4 KB), narrow_row_cache (6.6 KB), wide_row_cache (26 KB), line_buf (5.2 KB), framebuf (75 KB), stacks, BSS |
+| Main SRAM | ~177 KB | text_vram x2 (31.4 KB), narrow_row_cache (6.6 KB), line_buf (5.2 KB), screenbuf (300 KB, framebuffer / glyph_bitmap union), stacks, BSS |
 | SCRATCH_X | ~3.6 KB | IRQ handler + render code |
 | SCRATCH_Y | 4 KB | font_byte_mask (2 KB) + pico-sdk default stack (2 KB, unused after BSS stack switch) |
 | PSRAM (QMI CS1) | 8 MB | mruby heap |

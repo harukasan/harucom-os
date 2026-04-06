@@ -27,7 +27,8 @@ Current mitigations:
 - Core 1 is BASEPRI-isolated (only DMA_IRQ_1 at priority 0x00 passes)
 - Line buffers and DMA descriptors are in SCRATCH_Y (separate bus port)
 - IRQ handler code is in SCRATCH_X (separate bus port)
-- Wide glyph cache eliminates Core 1 flash access during rendering
+- Per-position glyph bitmap and narrow row cache eliminate Core 1 flash
+  access during rendering
 
 ## Plan 1: BUSCTRL PROC1 priority
 

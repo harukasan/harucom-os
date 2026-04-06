@@ -6,7 +6,7 @@ text VRAM cells into 640 RGB332 pixels via inline ARM Thumb-2 assembly.
 
 ## Text VRAM
 
-106 columns x 37 rows of 4-byte cells:
+106 columns x 37 rows of 4-byte cells, double-buffered:
 
 ```c
 typedef struct {
@@ -16,8 +16,24 @@ typedef struct {
 } dvi_text_cell_t;
 ```
 
+For narrow characters, `ch` holds the ASCII code (0-255), with bit 8 set
+for bold (mapping into the 256-511 bold region of the narrow cache).
+For wide characters, `ch` holds the linear JIS index directly (used by
+`write_line` for glyph re-rendering from scrollback).
+
 16-color palette maps 4-bit indices to RGB332 values (VGA-compatible
 defaults).
+
+## Ring Buffer Scroll
+
+VRAM rows are accessed via a ring buffer offset rather than memmove.
+`scroll_offset` maps logical row N to physical row
+`(N + scroll_offset) % text_rows`. Scroll up/down adjusts the offset and
+clears only the vacated row, making scroll O(1) regardless of screen size.
+
+The scroll offset is double-buffered alongside the VRAM pointers: Core 0
+writes `write_scroll_offset`, and Core 1 reads `render_scroll_offset`
+(swapped at VBlank).
 
 ## Font: 12px M+
 
@@ -25,26 +41,36 @@ defaults).
   (6656 bytes). Regular glyphs at index 0-255, bold at 256-511. Zero flash
   access during rendering.
 - Full-width: 12px wide, 13px tall. Source data is interleaved regular+bold
-  in flash XIP (52-byte stride per glyph pair). Rendered from an SRAM wide
-  glyph cache to avoid QMI bus contention (see below).
+  in flash XIP (52-byte stride per glyph pair). Rendered into a per-position
+  glyph bitmap at character-write time (see below).
 
-## Wide Glyph Cache
+## Per-Position Glyph Bitmap
 
 Full-width font bitmaps cannot be read from flash XIP during rendering
-because the QMI bus is shared with PSRAM. The wide glyph cache copies
-needed glyph rows into SRAM on Core 0 at character-write time, so Core 1
-never touches flash.
+because the QMI bus is shared with PSRAM. Instead of a slot-based cache,
+each screen position stores its own glyph bitmap data.
 
-- 512 cache slots, row-major layout: `wide_row_cache[glyph_y * stride + slot]`
-- Regular glyphs at slots 0-511, bold at 512-1023 (26 KB total)
-- 1024-entry hash table maps linear JIS index to cache slot (open addressing,
-  linear probing)
-- Populated by `dvi_text_put_wide_char()` on Core 0
-- On overflow, the cache scans VRAM and re-maps slots in-place
+The glyph bitmap is overlaid on the graphics framebuffer via a union
+(`screenbuf`), since the framebuffer is unused in text mode.
 
-Bold characters store `slot + WIDE_CACHE_SLOTS` in `cell.ch` at write time
-so the render loop indexes directly into the bold region without a runtime
-branch.
+Layout: `screenbuf.glyph_bitmap[(phys_row * 13 + glyph_y) * 106 + col]`
+
+- Narrow cells: the bitmap position is unused (narrow glyphs are read from
+  the narrow row cache instead)
+- Wide-left cell: low 8 bits of the 12-bit glyph row
+- Wide-right cell: high 8 bits (4 bits meaningful)
+- `ldrh` at the wide-left position reads the full 16-bit glyph row
+  (little-endian)
+
+Size: 37 rows x 13 scanlines x 106 columns = 50,986 bytes.
+
+The bitmap is single-buffered (shared between both VRAM buffers). This is
+safe because glyph bitmap bytes do not affect the renderer's control flow.
+The worst case is a partial glyph update (some scanlines showing the old
+glyph, some the new) visible for 1 frame.
+
+Populated by `render_wide_glyph_at()`, called from `dvi_text_put_wide_char()`
+and `dvi_text_write_line()` on Core 0.
 
 ## Scanline Renderer
 
@@ -59,24 +85,28 @@ pixel = bg4 ^ (xor4 & font_byte_mask[byte][0..1])
 `font_byte_mask[256][2]` (2 KB) resides in SCRATCH_Y (SRAM9, separate bus
 port from Main SRAM) to eliminate DMA bus contention during rendering.
 
-Four render paths selected by `row_has_wide[]` and `row_uniform_attr[]`:
+Two render paths selected by `row_has_wide[]`:
 
-| Path | Dispatch condition | Per-cell cost | Typical cycles |
-|---|---|---|---|
-| Uniform-attr narrow-only | no wide, uniform attr | ~12 cycles (2-cell pair) | ~1,763 |
-| Mixed-attr narrow-only | no wide, mixed attrs | ~21 cycles (2-cell pair) | ~2,050 |
-| Uniform-attr mixed | has wide, uniform attr | ~20 narrow / ~25 wide | ~2,080 |
-| Non-uniform-attr mixed | has wide, mixed attrs | ~23 narrow / ~28 wide | ~2,200 |
+| Path | Dispatch condition | Per-cell cost |
+|---|---|---|
+| Narrow-only | no wide chars in row | ~21 cycles (2-cell pair via ldrd) |
+| Mixed | row has wide chars | ~23 narrow / ~28 wide (single-cell dispatch) |
 
-Cycle counts are per-line render time.
+Both paths perform per-cell attr checks. The narrow-only path processes
+2 cells per iteration via `ldrd` pair loading.
+
+In the mixed path, `glyph_ptr` advances sequentially through the
+per-position glyph bitmap (+1 for narrow, +2 for wide), staying
+synchronized with the cell position. Wide glyphs are loaded with
+`ldrh [glyph_ptr]` instead of the previous slot-indexed cache access.
 
 Key render-loop optimizations:
 
 - **Load-latency interleaving**: next nibble address computed during the
   2-cycle ldr bubble to hide pipeline stalls in the wide sub-path.
-- **Set-time pre-computation**: bold slot offset and per-row uniform-attr
-  flags are computed on Core 0 at character-write time, not at render time
-  on Core 1.
+- **Set-time pre-computation**: bold narrow offset is stored in `cell.ch`
+  at character-write time (bit 8 set), not computed at render time on
+  Core 1.
 
 The render function and IRQ handler are placed in SCRATCH_X to avoid
 flash instruction fetch during rendering.

@@ -185,11 +185,13 @@ static volatile bool dvi_blanking = false;
 // ----------------------------------------------------------------------------
 // Pixel mode data
 
-// Framebuffer always allocated at max size (640x480).
-// At scale=2 (320x240), only the first 76800 bytes are used as front buffer,
-// and framebuf+76800 serves as the SRAM back buffer (fast double buffering).
-// At scale=1 (640x480), the PSRAM back_framebuf is used instead.
-static uint8_t framebuf[DVI_GRAPHICS_MAX_WIDTH * DVI_GRAPHICS_MAX_HEIGHT];
+// Screen buffer: shared memory between graphics and text modes.
+// Graphics mode uses screenbuf.framebuffer (640x480 RGB332).
+// Text mode reuses the same memory as per-position glyph bitmap.
+static union {
+  uint8_t framebuffer[DVI_GRAPHICS_MAX_WIDTH * DVI_GRAPHICS_MAX_HEIGHT];
+  uint8_t glyph_bitmap[DVI_TEXT_MAX_ROWS * 13 * DVI_TEXT_MAX_COLS];
+} screenbuf;
 static uint8_t *back_framebuf = NULL;
 static bool graphics_dirty = false;
 
@@ -228,7 +230,6 @@ static int line_buf_next = 0;
 
 static const dvi_font_t *text_font;
 static const dvi_font_t *text_wide_font;
-static const dvi_font_t *text_bold_font;
 static uint8_t text_palette[16];
 
 // 12px renderer constants
@@ -247,30 +248,18 @@ static uint8_t row_has_wide_b[DVI_TEXT_MAX_ROWS];
 static uint8_t *write_row_has_wide = row_has_wide_a;
 static uint8_t *volatile render_row_has_wide = row_has_wide_a;
 
-// Wide glyph row cache in SRAM (eliminates flash XIP access during rendering).
-// Row-major layout: wide_row_cache[glyph_y * WIDE_CACHE_STRIDE + slot].
-// Regular at slots 0..WIDE_CACHE_SLOTS-1, bold at
-// WIDE_CACHE_SLOTS..2*WIDE_CACHE_SLOTS-1.
-#define WIDE_CACHE_SLOTS 512
-#define WIDE_CACHE_STRIDE (WIDE_CACHE_SLOTS * 2)
-static uint16_t wide_row_cache[TEXT_GLYPH_HEIGHT_12WIDE * WIDE_CACHE_STRIDE];
+// Per-position glyph bitmap constants.
+// Layout: [(physical_row * GLYPH_HEIGHT + glyph_y) * STRIDE + col]
+// Wide-left cell stores low 8 bits, wide-right stores high 8 bits of the
+// 12-bit glyph row. ldrh at wide-left reads the full 16-bit value.
+#define GLYPH_BITMAP_STRIDE DVI_TEXT_MAX_COLS
+#define GLYPH_BITMAP_SIZE \
+    (DVI_TEXT_MAX_ROWS * TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE)
 
-// Hash table: linear JIS index -> cache slot. Open addressing, power-of-2 size.
-#define WIDE_HASH_SIZE 1024
-#define WIDE_HASH_EMPTY 0xFFFF
-static uint16_t wide_hash_key[WIDE_HASH_SIZE];
-static uint16_t wide_hash_slot[WIDE_HASH_SIZE];
-static uint16_t wide_cache_next_slot;
-
-// Reverse mapping: cache slot -> linear JIS index (for cache rebuild).
-static uint16_t wide_cache_jis[WIDE_CACHE_SLOTS];
-
-// Per-row uniform attribute: the common attr byte, or 0xFF if mixed
-// (double-buffered).
-static uint8_t row_uniform_attr_a[DVI_TEXT_MAX_ROWS];
-static uint8_t row_uniform_attr_b[DVI_TEXT_MAX_ROWS];
-static uint8_t *write_row_uniform_attr = row_uniform_attr_a;
-static uint8_t *volatile render_row_uniform_attr = row_uniform_attr_a;
+// Ring buffer scroll offset (double-buffered).
+// Logical row N maps to physical row (N + scroll_offset) % text_rows.
+static int write_scroll_offset = 0;
+static volatile int render_scroll_offset = 0;
 
 // Pending buffer swap request from Core 0, processed at VBlank by Core 1.
 static volatile bool swap_pending = false;
@@ -323,101 +312,30 @@ static void init_font_byte_mask(void) {
   }
 }
 
-// Reset the wide glyph cache (hash table + slot allocator).
-static void wide_cache_reset(void) {
-  for (int i = 0; i < WIDE_HASH_SIZE; i++)
-    wide_hash_key[i] = WIDE_HASH_EMPTY;
-  wide_cache_next_slot = 0;
+// Map logical row to physical row in the ring buffer.
+static inline int physical_row(int logical_row, int offset) {
+  int r = logical_row + offset;
+  return r >= text_rows ? r - text_rows : r;
 }
 
-// Look up a linear JIS index in the wide cache. Returns the cache slot,
-// or WIDE_HASH_EMPTY if not found.
-static uint16_t wide_cache_lookup(uint16_t linear_jis) {
-  uint16_t idx = linear_jis & (WIDE_HASH_SIZE - 1);
-  for (int i = 0; i < WIDE_HASH_SIZE; i++) {
-    if (wide_hash_key[idx] == linear_jis)
-      return wide_hash_slot[idx];
-    if (wide_hash_key[idx] == WIDE_HASH_EMPTY)
-      return WIDE_HASH_EMPTY;
-    idx = (idx + 1) & (WIDE_HASH_SIZE - 1);
-  }
-  return WIDE_HASH_EMPTY;
-}
-
-// Copy a single glyph's bitmap from flash to the SRAM row cache at the given
-// slot.
-static void wide_cache_load_glyph(uint16_t slot, uint16_t linear_jis) {
-  if (!text_wide_font)
+// Render a wide glyph's bitmap from flash font into the per-position
+// glyph bitmap at the given physical row and column.
+static void render_wide_glyph_at(int col, int phys_row, uint16_t linear_jis,
+                                 const dvi_font_t *font, bool bold) {
+  if (!font)
     return;
-  int bytes_per_glyph = text_wide_font->glyph_height * 2;
+  int bytes_per_glyph = font->glyph_height * 2;
   int stride = bytes_per_glyph * 2;
-  const uint8_t *src = text_wide_font->bitmap +
-                       (linear_jis - text_wide_font->first_char) * stride;
-  for (int y = 0; y < TEXT_GLYPH_HEIGHT_12WIDE; y++) {
-    int cache_row = y * WIDE_CACHE_STRIDE;
-    const uint16_t *reg = (const uint16_t *)&src[y * 2];
-    const uint16_t *bold = (const uint16_t *)&src[bytes_per_glyph + y * 2];
-    // Direct 16-bit copy preserves byte order for ldrh (little-endian)
-    wide_row_cache[cache_row + slot] = *reg;
-    wide_row_cache[cache_row + WIDE_CACHE_SLOTS + slot] = *bold;
+  const uint8_t *src =
+      font->bitmap + (linear_jis - font->first_char) * stride;
+  if (bold)
+    src += bytes_per_glyph;
+  for (int y = 0; y < font->glyph_height; y++) {
+    int base =
+        (phys_row * TEXT_GLYPH_HEIGHT_12WIDE + y) * GLYPH_BITMAP_STRIDE + col;
+    screenbuf.glyph_bitmap[base] = src[y * 2];
+    screenbuf.glyph_bitmap[base + 1] = src[y * 2 + 1];
   }
-}
-
-// Insert a glyph into the wide cache. Copies all 13 scanline rows (regular +
-// bold) from the flash font bitmap into the SRAM row cache. Returns the
-// allocated cache slot, or WIDE_HASH_EMPTY on failure.
-static uint16_t wide_cache_insert(uint16_t linear_jis) {
-  if (wide_cache_next_slot >= WIDE_CACHE_SLOTS) {
-    // Cache full: rebuild by scanning VRAM.
-    // Save reverse map (slot -> JIS) before reset.
-    uint16_t old_jis[WIDE_CACHE_SLOTS];
-    uint16_t old_count = wide_cache_next_slot;
-    memcpy(old_jis, wide_cache_jis, old_count * sizeof(uint16_t));
-    wide_cache_reset();
-
-    // Scan VRAM, collect unique JIS indices from old slots
-    int total = text_rows * text_cols;
-    for (int i = 0; i < total; i++) {
-      dvi_text_cell_t *c = &write_vram[i];
-      if (!(c->flags & DVI_CELL_FLAG_WIDE_L))
-        continue;
-      uint16_t old_slot = c->ch;
-      if (old_slot >= old_count)
-        continue;
-      uint16_t jis = old_jis[old_slot];
-      uint16_t new_slot = wide_cache_lookup(jis);
-      if (new_slot == WIDE_HASH_EMPTY) {
-        // Not yet re-inserted: allocate new slot and copy glyph
-        new_slot = wide_cache_next_slot++;
-        uint16_t idx = jis & (WIDE_HASH_SIZE - 1);
-        while (wide_hash_key[idx] != WIDE_HASH_EMPTY)
-          idx = (idx + 1) & (WIDE_HASH_SIZE - 1);
-        wide_hash_key[idx] = jis;
-        wide_hash_slot[idx] = new_slot;
-        wide_cache_jis[new_slot] = jis;
-        wide_cache_load_glyph(new_slot, jis);
-      }
-      c->ch = new_slot;
-    }
-
-    // Now try to insert the requested glyph
-    if (wide_cache_next_slot >= WIDE_CACHE_SLOTS)
-      return WIDE_HASH_EMPTY; // still full after rebuild
-  }
-
-  uint16_t slot = wide_cache_next_slot++;
-
-  // Insert into hash table
-  uint16_t idx = linear_jis & (WIDE_HASH_SIZE - 1);
-  while (wide_hash_key[idx] != WIDE_HASH_EMPTY)
-    idx = (idx + 1) & (WIDE_HASH_SIZE - 1);
-  wide_hash_key[idx] = linear_jis;
-  wide_hash_slot[idx] = slot;
-  wide_cache_jis[slot] = linear_jis;
-
-  wide_cache_load_glyph(slot, linear_jis);
-
-  return slot;
 }
 
 // ----------------------------------------------------------------------------
@@ -430,17 +348,22 @@ static uint16_t wide_cache_insert(uint16_t linear_jis) {
 // Rendering formula (branchless pixel selection via font_byte_mask LUT):
 //   pixel = bg4 ^ (xor4 & font_byte_mask[byte][0..1])
 //
-// Two fast paths:
-//   Narrow-only: ldrd pair processing (2 cells/iter, ~16 insns/char)
-//   Mixed:       single-cell dispatch (~20 insns/narrow, ~25 insns/wide)
+// Two paths:
+//   Narrow-only: ldrd pair processing with per-cell attr checks
+//   Mixed:       single-cell dispatch, glyph_ptr for wide characters
 
 static void __scratch_x("")
     render_text_scanline_12wide(int scanline, uint8_t *out) {
   int text_row = scanline / TEXT_GLYPH_HEIGHT_12WIDE;
   int glyph_y = scanline % TEXT_GLYPH_HEIGHT_12WIDE;
 
+  // Ring buffer: map logical text_row to physical row.
+  int phys_row = text_row + render_scroll_offset;
+  if (phys_row >= text_rows)
+    phys_row -= text_rows;
+
   const uint32_t *cell =
-      (const uint32_t *)&render_vram[text_row * TEXT_12WIDE_COLS];
+      (const uint32_t *)&render_vram[phys_row * TEXT_12WIDE_COLS];
   const uint32_t *end = cell + TEXT_12WIDE_COLS;
   uint8_t *out_end = out + MODE_H_ACTIVE_PIXELS;
 
@@ -455,315 +378,180 @@ static void __scratch_x("")
   uint32_t bg4 = 0, xor4 = 0;
   uint32_t t1, t2;
 
-  if (!render_row_has_wide[text_row]) {
-    uint8_t uattr = render_row_uniform_attr[text_row];
-    if (uattr != 0xFF) {
-      // UNIFORM-ATTR + EXPANDED NIBBLE FAST PATH
-      // All cells share the same attr: pre-compute bg/xor once, skip
-      // per-cell attr checks. Nibble mask lookups go to SCRATCH_Y
-      // (font_byte_mask) instead of Main SRAM (nibble_mask), eliminating
-      // DMA bus contention during active pixel overlap.
-      // Per pair: ~27 cycles (vs ~43 in the attr-checking path).
-      bg4 = text_palette32[uattr & 0x0F];
-      xor4 = bg4 ^ text_palette32[uattr >> 4];
-      const uint32_t *exp = (const uint32_t *)font_byte_mask;
-      uint32_t t3, t4;
-      __asm__ volatile(
+  if (!render_row_has_wide[phys_row]) {
+    // NARROW-ONLY PATH WITH ATTR CHECKS
+    // Processes 2 cells per iteration via ldrd. Uses font_byte_mask in
+    // SCRATCH_Y for reduced Main SRAM contention.
+    const uint32_t *exp = (const uint32_t *)font_byte_mask;
+    uint32_t t3, t4;
+    __asm__ volatile(
 
-          "20:\n\t"
-          "ldrd   %[t1], %[t3], [%[cell]]\n\t"
-          "adds   %[cell], #8\n\t"
+        // Loop top: load 2 cells via ldrd
+        "10:\n\t"
+        "ldrd   %[t1], %[t3], [%[cell]]\n\t"
+        "adds   %[cell], #8\n\t"
+        "ubfx   %[t2], %[t1], #16, #8\n\t"
+        "cmp    %[t2], %[prev]\n\t"
+        "bne    13f\n\t"
 
-          // First character (12 cycles)
-          "uxth   %[t2], %[t1]\n\t"
-          "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
-          "adds   %[out], #12\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-          "ldrd   %[t1], %[t4], [%[t2]]\n\t"
-          "and.w  %[t1], %[t1], %[xor]\n\t"
-          "eor.w  %[t1], %[t1], %[bg]\n\t"
-          "str    %[t1], [%[out], #-12]\n\t"
-          "and.w  %[t4], %[t4], %[xor]\n\t"
-          "eor.w  %[t4], %[t4], %[bg]\n\t"
-          "str    %[t4], [%[out], #-8]\n\t"
+        // First character (narrow 6px)
+        "12:\n\t"
+        "uxth   %[t2], %[t1]\n\t"
+        "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+        "adds   %[out], #6\n\t"
+        "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+        "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+        "and.w  %[t1], %[t1], %[xor]\n\t"
+        "eor.w  %[t1], %[t1], %[bg]\n\t"
+        "str    %[t1], [%[out], #-6]\n\t"
+        "and.w  %[t4], %[t4], %[xor]\n\t"
+        "eor.w  %[t4], %[t4], %[bg]\n\t"
+        "str    %[t4], [%[out], #-2]\n\t"
 
-          // Second character (12 cycles, cmp fills ldrb bubble)
-          "uxth   %[t2], %[t3]\n\t"
-          "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
-          "cmp    %[end], %[cell]\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-          "ldrd   %[t1], %[t4], [%[t2]]\n\t"
-          "and.w  %[t1], %[t1], %[xor]\n\t"
-          "eor.w  %[t1], %[t1], %[bg]\n\t"
-          "str    %[t1], [%[out], #-6]\n\t"
-          "and.w  %[t4], %[t4], %[xor]\n\t"
-          "eor.w  %[t4], %[t4], %[bg]\n\t"
-          "str    %[t4], [%[out], #-2]\n\t"
-          "bhi    20b\n\t"
+        // Second character attr check
+        "ubfx   %[t2], %[t3], #16, #8\n\t"
+        "cmp    %[t2], %[prev]\n\t"
+        "bne    14f\n\t"
 
-          : [cell] "+r"(cell), [out] "+r"(out), [t1] "=&r"(t1), [t2] "=&r"(t2),
-            [t3] "=&r"(t3), [t4] "=&r"(t4)
-          : [end] "r"(end), [nrow] "r"(narrow_row), [exp] "r"(exp),
-            [bg] "r"(bg4), [xor] "r"(xor4)
-          : "cc", "memory");
+        // Second character (narrow 6px)
+        "15:\n\t"
+        "uxth   %[t2], %[t3]\n\t"
+        "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+        "adds   %[out], #6\n\t"
+        "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+        "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+        "and.w  %[t1], %[t1], %[xor]\n\t"
+        "eor.w  %[t1], %[t1], %[bg]\n\t"
+        "str    %[t1], [%[out], #-6]\n\t"
+        "and.w  %[t4], %[t4], %[xor]\n\t"
+        "cmp    %[end], %[cell]\n\t"
+        "eor.w  %[t4], %[t4], %[bg]\n\t"
+        "str    %[t4], [%[out], #-2]\n\t"
+        "bhi    10b\n\t"
+        "b      16f\n\t"
 
-    } else {
-      // NARROW-ONLY PATH WITH ATTR CHECKS (expanded nibble)
-      // Handles rows with mixed attributes. Uses font_byte_mask in
-      // SCRATCH_Y for reduced Main SRAM contention.
-      const uint32_t *exp = (const uint32_t *)font_byte_mask;
-      uint32_t t3, t4;
-      __asm__ volatile(
+        // Attr change handler for first cell (cold path)
+        "13:\n\t"
+        "mov    %[prev], %[t2]\n\t"
+        "and    %[t2], %[t2], #0x0F\n\t"
+        "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
+        "lsrs   %[t2], %[prev], #4\n\t"
+        "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
+        "eor    %[xor], %[bg], %[t2]\n\t"
+        "b      12b\n\t"
 
-          // Loop top: load 2 cells via ldrd
-          "10:\n\t"
-          "ldrd   %[t1], %[t3], [%[cell]]\n\t"
-          "adds   %[cell], #8\n\t"
-          "ubfx   %[t2], %[t1], #16, #8\n\t"
-          "cmp    %[t2], %[prev]\n\t"
-          "bne    13f\n\t"
+        // Attr change handler for second cell (cold path)
+        "14:\n\t"
+        "mov    %[prev], %[t2]\n\t"
+        "and    %[t2], %[t2], #0x0F\n\t"
+        "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
+        "lsrs   %[t2], %[prev], #4\n\t"
+        "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
+        "eor    %[xor], %[bg], %[t2]\n\t"
+        "b      15b\n\t"
 
-          // First character (narrow 6px)
-          "12:\n\t"
-          "uxth   %[t2], %[t1]\n\t"
-          "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
-          "adds   %[out], #6\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-          "ldrd   %[t1], %[t4], [%[t2]]\n\t"
-          "and.w  %[t1], %[t1], %[xor]\n\t"
-          "eor.w  %[t1], %[t1], %[bg]\n\t"
-          "str    %[t1], [%[out], #-6]\n\t"
-          "and.w  %[t4], %[t4], %[xor]\n\t"
-          "eor.w  %[t4], %[t4], %[bg]\n\t"
-          "str    %[t4], [%[out], #-2]\n\t"
+        "16:\n\t" // done
 
-          // Second character attr check
-          "ubfx   %[t2], %[t3], #16, #8\n\t"
-          "cmp    %[t2], %[prev]\n\t"
-          "bne    14f\n\t"
-
-          // Second character (narrow 6px)
-          "15:\n\t"
-          "uxth   %[t2], %[t3]\n\t"
-          "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
-          "adds   %[out], #6\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-          "ldrd   %[t1], %[t4], [%[t2]]\n\t"
-          "and.w  %[t1], %[t1], %[xor]\n\t"
-          "eor.w  %[t1], %[t1], %[bg]\n\t"
-          "str    %[t1], [%[out], #-6]\n\t"
-          "and.w  %[t4], %[t4], %[xor]\n\t"
-          "cmp    %[end], %[cell]\n\t"
-          "eor.w  %[t4], %[t4], %[bg]\n\t"
-          "str    %[t4], [%[out], #-2]\n\t"
-          "bhi    10b\n\t"
-          "b      16f\n\t"
-
-          // Attr change handler for first cell (cold path)
-          "13:\n\t"
-          "mov    %[prev], %[t2]\n\t"
-          "and    %[t2], %[t2], #0x0F\n\t"
-          "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
-          "lsrs   %[t2], %[prev], #4\n\t"
-          "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
-          "eor    %[xor], %[bg], %[t2]\n\t"
-          "b      12b\n\t"
-
-          // Attr change handler for second cell (cold path)
-          "14:\n\t"
-          "mov    %[prev], %[t2]\n\t"
-          "and    %[t2], %[t2], #0x0F\n\t"
-          "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
-          "lsrs   %[t2], %[prev], #4\n\t"
-          "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
-          "eor    %[xor], %[bg], %[t2]\n\t"
-          "b      15b\n\t"
-
-          "16:\n\t" // done
-
-          : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4),
-            [xor] "+r"(xor4), [prev] "+r"(prev_attr), [t1] "=&r"(t1),
-            [t2] "=&r"(t2), [t3] "=&r"(t3), [t4] "=&r"(t4)
-          : [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row),
-            [pal] "r"(pal32)
-          : "cc", "memory");
-    }
+        : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4),
+          [xor] "+r"(xor4), [prev] "+r"(prev_attr), [t1] "=&r"(t1),
+          [t2] "=&r"(t2), [t3] "=&r"(t3), [t4] "=&r"(t4)
+        : [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row),
+          [pal] "r"(pal32)
+        : "cc", "memory");
 
   } else {
-    // MIXED PATH (narrow 6px + wide 12px)
-    // Wide glyphs read from SRAM row cache (slot-indexed, no flash access).
-    // Narrow uses font_byte_mask (SCRATCH_Y) to reduce Main SRAM contention.
-    const uint16_t *wcache = wide_row_cache + glyph_y * WIDE_CACHE_STRIDE;
+    // MIXED PATH (narrow 6px + wide 12px) WITH ATTR CHECKS
+    // Wide glyphs read from per-position glyph bitmap (sequential access).
+    // Narrow uses narrow_row_cache. glyph_ptr advances by 1 for narrow,
+    // 2 for wide to stay synchronized with cell position.
+    const uint8_t *glyph_ptr =
+        screenbuf.glyph_bitmap +
+        (phys_row * TEXT_GLYPH_HEIGHT_12WIDE + glyph_y) * GLYPH_BITMAP_STRIDE;
     const uint32_t *exp = (const uint32_t *)font_byte_mask;
 
-    uint8_t uattr = render_row_uniform_attr[text_row];
-    if (uattr != 0xFF) {
-      // UNIFORM-ATTR MIXED PATH: all cells share the same attr.
-      // Pre-compute bg4/xor4 once, skip per-cell attr extraction.
-      // Saves ~3 cycles/cell (ubfx + cmp + bne eliminated).
-      // Bold offset pre-computed at set time (no tst/it/addne).
-      // Combined savings: ~6 cycles/cell x 53 = ~318 cycles.
-      bg4 = text_palette32[uattr & 0x0F];
-      xor4 = bg4 ^ text_palette32[uattr >> 4];
+    uint32_t t3, t4;
+    __asm__ volatile(
 
-      uint32_t t3, t4;
-      __asm__ volatile(
+        // Loop top: load 1 cell
+        "1:\n\t"
+        "ldr    %[t1], [%[cell]]\n\t"
+        "adds   %[cell], #4\n\t"
+        "ubfx   %[t2], %[t1], #16, #8\n\t"
+        "cmp    %[t2], %[prev]\n\t"
+        "bne    3f\n\t"
 
-          // Loop top: load 1 cell (no attr check needed)
-          "1:\n\t"
-          "ldr    %[t1], [%[cell]]\n\t"
-          "adds   %[cell], #4\n\t"
+        // Dispatch: narrow vs wide
+        "2:\n\t"
+        "tst    %[t1], #0x03000000\n\t"
+        "bne    4f\n\t"
 
-          // Dispatch: narrow vs wide
-          "tst    %[t1], #0x03000000\n\t"
-          "bne    4f\n\t"
+        // Narrow (6px) sub-path
+        "uxth   %[t2], %[t1]\n\t"
+        "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
+        "adds   %[gptr], #1\n\t"
+        "adds   %[out], #6\n\t"
+        "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+        "ldrd   %[t1], %[t4], [%[t2]]\n\t"
+        "and.w  %[t1], %[t1], %[xor]\n\t"
+        "eor.w  %[t1], %[t1], %[bg]\n\t"
+        "str    %[t1], [%[out], #-6]\n\t"
+        "and.w  %[t4], %[t4], %[xor]\n\t"
+        "cmp    %[end], %[cell]\n\t"
+        "eor.w  %[t4], %[t4], %[bg]\n\t"
+        "str    %[t4], [%[out], #-2]\n\t"
+        "bhi    1b\n\t"
+        "b      6f\n\t"
 
-          // Narrow (6px) sub-path using font_byte_mask (SCRATCH_Y)
-          "uxth   %[t2], %[t1]\n\t"
-          "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
-          "adds   %[out], #6\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-          "ldrd   %[t1], %[t4], [%[t2]]\n\t"
-          "and.w  %[t1], %[t1], %[xor]\n\t"
-          "eor.w  %[t1], %[t1], %[bg]\n\t"
-          "str    %[t1], [%[out], #-6]\n\t"
-          "and.w  %[t4], %[t4], %[xor]\n\t"
-          "cmp    %[end], %[cell]\n\t"
-          "eor.w  %[t4], %[t4], %[bg]\n\t"
-          "str    %[t4], [%[out], #-2]\n\t"
-          "bhi    1b\n\t"
-          "b      6f\n\t"
+        // Wide (12px) sub-path
+        // Load 16-bit glyph row from per-position bitmap.
+        "4:\n\t"
+        "ldrh   %[t1], [%[gptr]]\n\t"
+        "adds   %[gptr], #2\n\t"
+        "adds   %[cell], #4\n\t"
+        "adds   %[out], #12\n\t"
+        // Pixels 0-3
+        "uxtb   %[t2], %[t1]\n\t"
+        "add    %[t2], %[exp], %[t2], lsl #3\n\t"
+        "ldr    %[t3], [%[t2]]\n\t"
+        "and    %[t2], %[t1], #0x0F\n\t"
+        "add    %[t2], %[exp], %[t2], lsl #7\n\t"
+        "and.w  %[t3], %[t3], %[xor]\n\t"
+        "eor.w  %[t3], %[t3], %[bg]\n\t"
+        "str    %[t3], [%[out], #-12]\n\t"
+        // Pixels 4-7
+        "ldr    %[t2], [%[t2]]\n\t"
+        "lsrs   %[t3], %[t1], #8\n\t"
+        "add    %[t3], %[exp], %[t3], lsl #3\n\t"
+        "and.w  %[t2], %[t2], %[xor]\n\t"
+        "eor.w  %[t2], %[t2], %[bg]\n\t"
+        "str    %[t2], [%[out], #-8]\n\t"
+        // Pixels 8-11
+        "ldr    %[t3], [%[t3]]\n\t"
+        "cmp    %[end], %[cell]\n\t"
+        "and.w  %[t3], %[t3], %[xor]\n\t"
+        "eor.w  %[t3], %[t3], %[bg]\n\t"
+        "str    %[t3], [%[out], #-4]\n\t"
+        "bhi    1b\n\t"
+        "b      6f\n\t"
 
-          // Wide (12px) sub-path
-          // Bold offset pre-computed at set time (no runtime check).
-          // Load latency hiding: next nibble address computed during
-          // the 2-cycle ldr bubble to avoid pipeline stalls.
-          "4:\n\t"
-          "uxth   %[t2], %[t1]\n\t"
-          "ldrh   %[t1], [%[wcache], %[t2], lsl #1]\n\t"
-          "adds   %[cell], #4\n\t"
-          "adds   %[out], #12\n\t"
-          // Pixels 0-3
-          "uxtb   %[t2], %[t1]\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-          "ldr    %[t3], [%[t2]]\n\t"
-          "and    %[t2], %[t1], #0x0F\n\t" // next nibble (fills ldr bubble)
-          "add    %[t2], %[exp], %[t2], lsl #7\n\t"
-          "and.w  %[t3], %[t3], %[xor]\n\t"
-          "eor.w  %[t3], %[t3], %[bg]\n\t"
-          "str    %[t3], [%[out], #-12]\n\t"
-          // Pixels 4-7
-          "ldr    %[t2], [%[t2]]\n\t"
-          "lsrs   %[t3], %[t1], #8\n\t" // next nibble (fills ldr bubble)
-          "add    %[t3], %[exp], %[t3], lsl #3\n\t"
-          "and.w  %[t2], %[t2], %[xor]\n\t"
-          "eor.w  %[t2], %[t2], %[bg]\n\t"
-          "str    %[t2], [%[out], #-8]\n\t"
-          // Pixels 8-11
-          "ldr    %[t3], [%[t3]]\n\t"
-          "cmp    %[end], %[cell]\n\t" // fills ldr bubble
-          "and.w  %[t3], %[t3], %[xor]\n\t"
-          "eor.w  %[t3], %[t3], %[bg]\n\t"
-          "str    %[t3], [%[out], #-4]\n\t"
-          "bhi    1b\n\t"
+        // Attr change handler (cold path)
+        "3:\n\t"
+        "mov    %[prev], %[t2]\n\t"
+        "and    %[t2], %[t2], #0x0F\n\t"
+        "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
+        "lsrs   %[t2], %[prev], #4\n\t"
+        "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
+        "eor    %[xor], %[bg], %[t2]\n\t"
+        "b      2b\n\t"
 
-          "6:\n\t" // done
+        "6:\n\t" // done
 
-          : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4),
-            [xor] "+r"(xor4), [t1] "=&r"(t1), [t2] "=&r"(t2), [t3] "=&r"(t3),
-            [t4] "=&r"(t4)
-          : [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row),
-            [wcache] "r"(wcache)
-          : "cc", "memory");
-
-    } else {
-      // NON-UNIFORM ATTR MIXED PATH: per-cell attr checks.
-      // Bold offset still pre-computed at set time.
-      uint32_t t3, t4;
-      __asm__ volatile(
-
-          // Loop top: load 1 cell
-          "1:\n\t"
-          "ldr    %[t1], [%[cell]]\n\t"
-          "adds   %[cell], #4\n\t"
-          "ubfx   %[t2], %[t1], #16, #8\n\t"
-          "cmp    %[t2], %[prev]\n\t"
-          "bne    3f\n\t"
-
-          // Dispatch: narrow vs wide
-          "2:\n\t"
-          "tst    %[t1], #0x03000000\n\t"
-          "bne    4f\n\t"
-
-          // Narrow (6px) sub-path using font_byte_mask (SCRATCH_Y)
-          "uxth   %[t2], %[t1]\n\t"
-          "ldrb   %[t2], [%[nrow], %[t2]]\n\t"
-          "adds   %[out], #6\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-          "ldrd   %[t1], %[t4], [%[t2]]\n\t"
-          "and.w  %[t1], %[t1], %[xor]\n\t"
-          "eor.w  %[t1], %[t1], %[bg]\n\t"
-          "str    %[t1], [%[out], #-6]\n\t"
-          "and.w  %[t4], %[t4], %[xor]\n\t"
-          "cmp    %[end], %[cell]\n\t"
-          "eor.w  %[t4], %[t4], %[bg]\n\t"
-          "str    %[t4], [%[out], #-2]\n\t"
-          "bhi    1b\n\t"
-          "b      6f\n\t"
-
-          // Wide (12px) sub-path
-          // Bold offset pre-computed at set time (no runtime check).
-          // Load latency hiding: next nibble address computed during
-          // the 2-cycle ldr bubble to avoid pipeline stalls.
-          "4:\n\t"
-          "uxth   %[t2], %[t1]\n\t"
-          "ldrh   %[t1], [%[wcache], %[t2], lsl #1]\n\t"
-          "adds   %[cell], #4\n\t"
-          "adds   %[out], #12\n\t"
-          // Pixels 0-3
-          "uxtb   %[t2], %[t1]\n\t"
-          "add    %[t2], %[exp], %[t2], lsl #3\n\t"
-          "ldr    %[t3], [%[t2]]\n\t"
-          "and    %[t2], %[t1], #0x0F\n\t" // next nibble (fills ldr bubble)
-          "add    %[t2], %[exp], %[t2], lsl #7\n\t"
-          "and.w  %[t3], %[t3], %[xor]\n\t"
-          "eor.w  %[t3], %[t3], %[bg]\n\t"
-          "str    %[t3], [%[out], #-12]\n\t"
-          // Pixels 4-7
-          "ldr    %[t2], [%[t2]]\n\t"
-          "lsrs   %[t3], %[t1], #8\n\t" // next nibble (fills ldr bubble)
-          "add    %[t3], %[exp], %[t3], lsl #3\n\t"
-          "and.w  %[t2], %[t2], %[xor]\n\t"
-          "eor.w  %[t2], %[t2], %[bg]\n\t"
-          "str    %[t2], [%[out], #-8]\n\t"
-          // Pixels 8-11
-          "ldr    %[t3], [%[t3]]\n\t"
-          "cmp    %[end], %[cell]\n\t" // fills ldr bubble
-          "and.w  %[t3], %[t3], %[xor]\n\t"
-          "eor.w  %[t3], %[t3], %[bg]\n\t"
-          "str    %[t3], [%[out], #-4]\n\t"
-          "bhi    1b\n\t"
-          "b      6f\n\t"
-
-          // Attr change handler (cold path)
-          "3:\n\t"
-          "mov    %[prev], %[t2]\n\t"
-          "and    %[t2], %[t2], #0x0F\n\t"
-          "ldr    %[bg], [%[pal], %[t2], lsl #2]\n\t"
-          "lsrs   %[t2], %[prev], #4\n\t"
-          "ldr    %[t2], [%[pal], %[t2], lsl #2]\n\t"
-          "eor    %[xor], %[bg], %[t2]\n\t"
-          "b      2b\n\t"
-
-          "6:\n\t" // done
-
-          : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4),
-            [xor] "+r"(xor4), [prev] "+r"(prev_attr), [t1] "=&r"(t1),
-            [t2] "=&r"(t2), [t3] "=&r"(t3), [t4] "=&r"(t4)
-          : [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row),
-            [wcache] "r"(wcache), [pal] "r"(pal32)
-          : "cc", "memory");
-    }
+        : [cell] "+r"(cell), [out] "+r"(out), [bg] "+r"(bg4),
+          [xor] "+r"(xor4), [prev] "+r"(prev_attr), [gptr] "+r"(glyph_ptr),
+          [t1] "=&r"(t1), [t2] "=&r"(t2), [t3] "=&r"(t3), [t4] "=&r"(t4)
+        : [end] "r"(end), [exp] "r"(exp), [nrow] "r"(narrow_row),
+          [pal] "r"(pal32)
+        : "cc", "memory");
   }
 
   // Fill remaining pixels with black (inline to avoid flash memset).
@@ -911,9 +699,9 @@ static void __force_inline __scratch_x("")
         buf[grp + 4] = (scale == 1) ? ctrl_text_pixel : ctrl_pixel;
         buf[grp + 5] = fifo;
         buf[grp + 6] = (scale == 1) ? (gw / sizeof(uint32_t)) : gw;
-        buf[grp + 7] = (uintptr_t)&framebuf[fb_line * gw];
+        buf[grp + 7] = (uintptr_t)&screenbuf.framebuffer[fb_line * gw];
       } else {
-        buf[grp + 7] = (uintptr_t)&framebuf[fb_line * gw];
+        buf[grp + 7] = (uintptr_t)&screenbuf.framebuffer[fb_line * gw];
       }
     }
     if (full_build) {
@@ -974,7 +762,7 @@ void __scratch_x("") dma_irq_handler(void) {
     if (swap_pending) {
       render_vram = write_vram;
       render_row_has_wide = write_row_has_wide;
-      render_row_uniform_attr = write_row_uniform_attr;
+      render_scroll_offset = write_scroll_offset;
       swap_pending = false;
     }
     __asm volatile("sev"); // wake Core 0 WFE
@@ -1112,7 +900,6 @@ void dvi_start_mode(dvi_mode_t mode) {
   ctrl_stop = channel_config_get_ctrl_value(&c);
 
   init_font_byte_mask();
-  wide_cache_reset();
 
   // Initialize text mode state (both VRAM buffers)
   memcpy(text_palette, default_palette, sizeof(default_palette));
@@ -1121,14 +908,13 @@ void dvi_start_mode(dvi_mode_t mode) {
   memset(text_vram_b, 0, sizeof(text_vram_b));
   memset(row_has_wide_a, 0, sizeof(row_has_wide_a));
   memset(row_has_wide_b, 0, sizeof(row_has_wide_b));
-  memset(row_uniform_attr_a, 0, sizeof(row_uniform_attr_a));
-  memset(row_uniform_attr_b, 0, sizeof(row_uniform_attr_b));
   write_vram = text_vram_a;
   render_vram = text_vram_a;
   write_row_has_wide = row_has_wide_a;
   render_row_has_wide = row_has_wide_a;
-  write_row_uniform_attr = row_uniform_attr_a;
-  render_row_uniform_attr = row_uniform_attr_a;
+  write_scroll_offset = 0;
+  render_scroll_offset = 0;
+  memset(screenbuf.glyph_bitmap, 0, GLYPH_BITMAP_SIZE);
   swap_pending = false;
   memset(line_buf, 0, sizeof(line_buf));
   line_buf_next = 0;
@@ -1184,9 +970,9 @@ void dvi_set_graphics_scale(int scale) {
 uint8_t *dvi_get_framebuffer(void) {
   graphics_dirty = true;
   if (graphics_scale == 2)
-    return framebuf +
+    return screenbuf.framebuffer +
            (DVI_GRAPHICS_HALF_SIZE); // SRAM back buffer (second half)
-  return back_framebuf ? back_framebuf : framebuf;
+  return back_framebuf ? back_framebuf : screenbuf.framebuffer;
 }
 
 void dvi_graphics_set_back_buffer(uint8_t *back_buffer) {
@@ -1200,9 +986,9 @@ void dvi_graphics_commit(void) {
   int gw = DVI_GRAPHICS_MAX_WIDTH / graphics_scale;
   int gh = DVI_GRAPHICS_MAX_HEIGHT / graphics_scale;
   if (graphics_scale == 2) {
-    memcpy(framebuf, framebuf + (DVI_GRAPHICS_HALF_SIZE), gw * gh);
+    memcpy(screenbuf.framebuffer, screenbuf.framebuffer + (DVI_GRAPHICS_HALF_SIZE), gw * gh);
   } else if (back_framebuf) {
-    memcpy(framebuf, back_framebuf, gw * gh);
+    memcpy(screenbuf.framebuffer, back_framebuf, gw * gh);
   }
   graphics_dirty = false;
 }
@@ -1270,7 +1056,6 @@ void dvi_text_set_font(const dvi_font_t *font) {
 void dvi_text_set_wide_font(const dvi_font_t *font) { text_wide_font = font; }
 
 void dvi_text_set_bold_font(const dvi_font_t *font) {
-  text_bold_font = font;
   if (font && font->glyph_height <= TEXT_GLYPH_HEIGHT_12WIDE) {
     const uint8_t *src = font->bitmap;
     int first = font->first_char;
@@ -1296,69 +1081,53 @@ void dvi_text_set_palette(const uint8_t palette[16]) {
 void dvi_text_put_char(int col, int row, char ch, uint8_t attr) {
   if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
     return;
-  dvi_text_cell_t *c = &write_vram[row * text_cols + col];
+  int phys = physical_row(row, write_scroll_offset);
+  dvi_text_cell_t *c = &write_vram[phys * text_cols + col];
   c->ch = (uint8_t)ch;
   c->attr = attr;
   c->flags = 0;
-  if (write_row_uniform_attr[row] != 0xFF &&
-      write_row_uniform_attr[row] != attr)
-    write_row_uniform_attr[row] = 0xFF;
 }
 
 void dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr) {
   if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
     return;
-  dvi_text_cell_t *c = &write_vram[row * text_cols + col];
+  int phys = physical_row(row, write_scroll_offset);
+  dvi_text_cell_t *c = &write_vram[phys * text_cols + col];
   c->ch = (uint8_t)ch | 0x100; // bit 8 = bold indicator for 512-stride cache
   c->attr = attr;
   c->flags = DVI_CELL_FLAG_BOLD;
-  if (write_row_uniform_attr[row] != 0xFF &&
-      write_row_uniform_attr[row] != attr)
-    write_row_uniform_attr[row] = 0xFF;
 }
 
 void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
   if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows)
     return;
-  // Resolve cache slot (populate from flash if first use)
-  uint16_t slot = wide_cache_lookup(ch);
-  if (slot == WIDE_HASH_EMPTY)
-    slot = wide_cache_insert(ch);
-  dvi_text_cell_t *left = &write_vram[row * text_cols + col];
-  dvi_text_cell_t *right = &write_vram[row * text_cols + col + 1];
-  left->ch = slot; // cache slot, not JIS index
+  int phys = physical_row(row, write_scroll_offset);
+  dvi_text_cell_t *left = &write_vram[phys * text_cols + col];
+  dvi_text_cell_t *right = &write_vram[phys * text_cols + col + 1];
+  left->ch = ch; // linear JIS index (used by write_line for re-rendering)
   left->attr = attr;
   left->flags = DVI_CELL_FLAG_WIDE_L;
   right->ch = 0;
   right->attr = attr;
   right->flags = DVI_CELL_FLAG_WIDE_R;
-  write_row_has_wide[row] = 1;
-  if (write_row_uniform_attr[row] != 0xFF &&
-      write_row_uniform_attr[row] != attr)
-    write_row_uniform_attr[row] = 0xFF;
+  write_row_has_wide[phys] = 1;
+  render_wide_glyph_at(col, phys, ch, text_wide_font, false);
 }
 
 void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
   if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows)
     return;
-  // Resolve cache slot (populate from flash if first use)
-  uint16_t slot = wide_cache_lookup(ch);
-  if (slot == WIDE_HASH_EMPTY)
-    slot = wide_cache_insert(ch);
-  dvi_text_cell_t *left = &write_vram[row * text_cols + col];
-  dvi_text_cell_t *right = &write_vram[row * text_cols + col + 1];
-  // Store bold-adjusted slot: render uses it directly without runtime bold
-  // check.
-  left->ch = slot + WIDE_CACHE_SLOTS;
+  int phys = physical_row(row, write_scroll_offset);
+  dvi_text_cell_t *left = &write_vram[phys * text_cols + col];
+  dvi_text_cell_t *right = &write_vram[phys * text_cols + col + 1];
+  left->ch = ch; // linear JIS index
   left->attr = attr;
   left->flags = DVI_CELL_FLAG_WIDE_L | DVI_CELL_FLAG_BOLD;
   right->ch = 0;
   right->attr = attr;
   right->flags = DVI_CELL_FLAG_WIDE_R | DVI_CELL_FLAG_BOLD;
-  write_row_has_wide[row] = 1;
-  if (write_row_uniform_attr[row] != 0xFF &&
-      write_row_uniform_attr[row] != attr)
-    write_row_uniform_attr[row] = 0xFF;
+  write_row_has_wide[phys] = 1;
+  render_wide_glyph_at(col, phys, ch, text_wide_font, true);
 }
 
 // Decode one UTF-8 character from str, store codepoint in *cp.
@@ -1488,21 +1257,29 @@ void dvi_text_clear(uint8_t attr) {
     write_vram[i].flags = 0;
   }
   memset(write_row_has_wide, 0, text_rows);
-  memset(write_row_uniform_attr, attr, text_rows);
-  wide_cache_reset();
+  memset(screenbuf.glyph_bitmap, 0, GLYPH_BITMAP_SIZE);
+  write_scroll_offset = 0;
 }
 
-void dvi_text_clear_line(int row, uint8_t attr) {
-  if (row < 0 || row >= text_rows)
-    return;
-  dvi_text_cell_t *line = &write_vram[row * text_cols];
+// Clear a physical row (used internally by scroll).
+static void clear_physical_line(int phys, uint8_t attr) {
+  dvi_text_cell_t *line = &write_vram[phys * text_cols];
   for (int i = 0; i < text_cols; i++) {
     line[i].ch = ' ';
     line[i].attr = attr;
     line[i].flags = 0;
   }
-  write_row_has_wide[row] = 0;
-  write_row_uniform_attr[row] = attr;
+  write_row_has_wide[phys] = 0;
+  // Clear glyph bitmap for this physical row
+  memset(screenbuf.glyph_bitmap + phys * TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE,
+         0, TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE);
+}
+
+void dvi_text_clear_line(int row, uint8_t attr) {
+  if (row < 0 || row >= text_rows)
+    return;
+  int phys = physical_row(row, write_scroll_offset);
+  clear_physical_line(phys, attr);
 }
 
 void dvi_text_set_palette_entry(int index, uint8_t color) {
@@ -1531,17 +1308,15 @@ void dvi_text_commit(void) {
   if (write_vram == text_vram_a) {
     write_vram = text_vram_b;
     write_row_has_wide = row_has_wide_b;
-    write_row_uniform_attr = row_uniform_attr_b;
   } else {
     write_vram = text_vram_a;
     write_row_has_wide = row_has_wide_a;
-    write_row_uniform_attr = row_uniform_attr_a;
   }
   // Copy front buffer state to new back buffer
+  write_scroll_offset = render_scroll_offset;
   memcpy(write_vram, render_vram,
          text_rows * text_cols * sizeof(dvi_text_cell_t));
   memcpy(write_row_has_wide, render_row_has_wide, text_rows);
-  memcpy(write_row_uniform_attr, render_row_uniform_attr, text_rows);
 }
 
 // ----------------------------------------------------------------------------
@@ -1554,15 +1329,14 @@ void dvi_text_scroll_up(int lines, uint8_t fill_attr) {
     dvi_text_clear(fill_attr);
     return;
   }
-  int cols = text_cols;
-  int remaining = text_rows - lines;
-  memmove(&write_vram[0], &write_vram[lines * cols],
-          remaining * cols * sizeof(dvi_text_cell_t));
-  memmove(&write_row_has_wide[0], &write_row_has_wide[lines], remaining);
-  memmove(&write_row_uniform_attr[0], &write_row_uniform_attr[lines],
-          remaining);
-  for (int r = remaining; r < text_rows; r++)
-    dvi_text_clear_line(r, fill_attr);
+  // Ring buffer: advance offset and clear the vacated rows.
+  for (int i = 0; i < lines; i++) {
+    int phys = physical_row(0, write_scroll_offset);
+    clear_physical_line(phys, fill_attr);
+    write_scroll_offset++;
+    if (write_scroll_offset >= text_rows)
+      write_scroll_offset -= text_rows;
+  }
 }
 
 void dvi_text_scroll_down(int lines, uint8_t fill_attr) {
@@ -1572,15 +1346,14 @@ void dvi_text_scroll_down(int lines, uint8_t fill_attr) {
     dvi_text_clear(fill_attr);
     return;
   }
-  int cols = text_cols;
-  int remaining = text_rows - lines;
-  memmove(&write_vram[lines * cols], &write_vram[0],
-          remaining * cols * sizeof(dvi_text_cell_t));
-  memmove(&write_row_has_wide[lines], &write_row_has_wide[0], remaining);
-  memmove(&write_row_uniform_attr[lines], &write_row_uniform_attr[0],
-          remaining);
-  for (int r = 0; r < lines; r++)
-    dvi_text_clear_line(r, fill_attr);
+  // Ring buffer: retreat offset and clear the vacated rows.
+  for (int i = 0; i < lines; i++) {
+    write_scroll_offset--;
+    if (write_scroll_offset < 0)
+      write_scroll_offset += text_rows;
+    int phys = physical_row(0, write_scroll_offset);
+    clear_physical_line(phys, fill_attr);
+  }
 }
 
 void dvi_text_clear_range(int col, int row, int width, uint8_t attr) {
@@ -1594,41 +1367,51 @@ void dvi_text_clear_range(int col, int row, int width, uint8_t attr) {
     width = text_cols - col;
   if (width <= 0)
     return;
-  dvi_text_cell_t *line = &write_vram[row * text_cols + col];
+  int phys = physical_row(row, write_scroll_offset);
+  dvi_text_cell_t *line = &write_vram[phys * text_cols + col];
   for (int i = 0; i < width; i++) {
     line[i].ch = ' ';
     line[i].attr = attr;
     line[i].flags = 0;
   }
-  write_row_uniform_attr[row] = 0xFF;
 }
 
 uint8_t dvi_text_get_attr(int col, int row) {
   if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
     return 0;
-  return write_vram[row * text_cols + col].attr;
+  int phys = physical_row(row, write_scroll_offset);
+  return write_vram[phys * text_cols + col].attr;
 }
 
 void dvi_text_set_attr(int col, int row, uint8_t attr) {
   if (col < 0 || col >= text_cols || row < 0 || row >= text_rows)
     return;
-  write_vram[row * text_cols + col].attr = attr;
-  if (write_row_uniform_attr[row] != 0xFF &&
-      write_row_uniform_attr[row] != attr)
-    write_row_uniform_attr[row] = 0xFF;
+  int phys = physical_row(row, write_scroll_offset);
+  write_vram[phys * text_cols + col].attr = attr;
 }
 
 void dvi_text_read_line(int row, dvi_text_cell_t *dst) {
   if (row < 0 || row >= text_rows || !dst)
     return;
-  memcpy(dst, &write_vram[row * text_cols],
+  int phys = physical_row(row, write_scroll_offset);
+  memcpy(dst, &write_vram[phys * text_cols],
          text_cols * sizeof(dvi_text_cell_t));
 }
 
 void dvi_text_write_line(int row, const dvi_text_cell_t *src) {
   if (row < 0 || row >= text_rows || !src)
     return;
-  memcpy(&write_vram[row * text_cols], src,
+  int phys = physical_row(row, write_scroll_offset);
+  memcpy(&write_vram[phys * text_cols], src,
          text_cols * sizeof(dvi_text_cell_t));
-  write_row_uniform_attr[row] = 0xFF;
+  // Re-render wide glyphs from cell data into per-position bitmap.
+  uint8_t has_wide = 0;
+  for (int col = 0; col < text_cols; col++) {
+    if (src[col].flags & DVI_CELL_FLAG_WIDE_L) {
+      bool bold = src[col].flags & DVI_CELL_FLAG_BOLD;
+      render_wide_glyph_at(col, phys, src[col].ch, text_wide_font, bold);
+      has_wide = 1;
+    }
+  }
+  write_row_has_wide[phys] = has_wide;
 }

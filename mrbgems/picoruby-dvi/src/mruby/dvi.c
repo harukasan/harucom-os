@@ -437,6 +437,19 @@ mrb_dvi_text_put_string(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI.text_put_string_bold(col, row, str, attr)
+ */
+static mrb_value
+mrb_dvi_text_put_string_bold(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int col, row, attr;
+  const char *str;
+  mrb_get_args(mrb, "iizi", &col, &row, &str, &attr);
+  dvi_text_put_string_bold(col, row, str, (uint8_t)attr);
+  return mrb_nil_value();
+}
+
+/*
  * DVI.text_clear(attr)
  */
 static mrb_value
@@ -605,6 +618,8 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_text_put_char, MRB_ARGS_REQ(4));
   mrb_define_class_method_id(mrb, class_Text, MRB_SYM(put_string),
                              mrb_dvi_text_put_string, MRB_ARGS_REQ(4));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(put_string_bold),
+                             mrb_dvi_text_put_string_bold, MRB_ARGS_REQ(4));
   mrb_define_class_method_id(mrb, class_Text, MRB_SYM(clear),
                              mrb_dvi_text_clear, MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, class_Text, MRB_SYM(commit),
