@@ -321,5 +321,6 @@ module PicoRabbit
     def code_background_color; 0x49; end
     def code_text_color; 0xFF; end
     def footer_color; 0x49; end
+    def track_color; 0x49; end
   end
 end

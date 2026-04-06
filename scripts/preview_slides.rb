@@ -36,12 +36,27 @@ THEMES = {
     background: 0x00, title: 0xFF, text: 0xDB,
     blockquote: 0x92, separator: 0x49, inline_code: 0x1C,
     code_background: 0x24, code_text: 0x1C, footer: 0x49
+  },
+  "rubykaigi2026" => {
+    background: 0xFF, title: 0x64, text: 0x00,
+    blockquote: 0x49, separator: 0x64, inline_code: 0xE0,
+    code_background: 0x49, code_text: 0xFF, footer: 0x49
   }
+}
+
+THEME_FONTS = {
+  "default" => { heading: "Helvetica, Arial, sans-serif", body: "Helvetica, Arial, sans-serif" },
+  "dark" => { heading: "Helvetica, Arial, sans-serif", body: "Helvetica, Arial, sans-serif" },
+  "rubykaigi2026" => { heading: "'Outfit', sans-serif", body: "'Outfit', sans-serif" }
 }
 
 def theme_css_vars(theme_name)
   colors = THEMES[theme_name] || THEMES["default"]
-  colors.map { |k, v| "  --#{k.to_s.tr("_", "-")}: #{rgb332_to_css(v)};" }.join("\n")
+  fonts = THEME_FONTS[theme_name] || THEME_FONTS["default"]
+  vars = colors.map { |k, v| "  --#{k.to_s.tr("_", "-")}: #{rgb332_to_css(v)};" }
+  vars << "  --heading-font: #{fonts[:heading]};"
+  vars << "  --body-font: #{fonts[:body]};"
+  vars.join("\n")
 end
 
 # Convert inline formatting (**bold** and `code`) to HTML
@@ -61,14 +76,15 @@ def escape_html(text)
   text.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
 end
 
-def element_to_html(element, slide_index)
+def element_to_html(element, slide_index, theme_name = "default")
   case element.type
   when :text
     align = element.align ? " style=\"text-align: #{element.align}\"" : ""
     "<p class=\"body-text\"#{align}>#{inline_to_html(element.text)}</p>"
   when :bullet
     indent_style = element.level > 0 ? " style=\"margin-left: #{element.level * 20}px\"" : ""
-    "<div class=\"bullet\"#{indent_style}><span class=\"bullet-char\">-</span> #{inline_to_html(element.text)}</div>"
+    bullet_char = theme_name == "rubykaigi2026" ? "\u2605" : "-"
+    "<div class=\"bullet\"#{indent_style}><span class=\"bullet-char\">#{bullet_char}</span> #{inline_to_html(element.text)}</div>"
   when :numbered
     indent_style = element.level > 0 ? " style=\"margin-left: #{element.level * 20}px\"" : ""
     "<div class=\"numbered\"#{indent_style}>#{inline_to_html(element.text)}</div>"
@@ -98,28 +114,34 @@ def encode_p5_code(lines)
   lines.join("\n").gsub("&", "&amp;").gsub("\"", "&quot;").gsub("<", "&lt;").gsub(">", "&gt;")
 end
 
-def slide_to_html(slide, index, total, metadata)
+def slide_to_html(slide, index, total, metadata, theme_name = "default")
   parts = []
   parts << "<div class=\"slide\" data-index=\"#{index}\">"
 
   if slide.title_slide
-    parts << "  <div class=\"title-slide-content\">"
-    parts << "    <div class=\"title-slide-title\">#{escape_html(slide.title)}</div>"
-    if metadata["subtitle"]
-      parts << "    <div class=\"title-slide-subtitle\">#{escape_html(metadata["subtitle"])}</div>"
+    if theme_name == "rubykaigi2026"
+      parts << "  <div class=\"title-slide-background\"><img src=\"data/rubykaigi2026_title.png\" alt=\"\"></div>"
+      parts << "  <div class=\"title-slide-content\">"
+      parts << "    <div class=\"title-slide-title\" style=\"color: #ffffff;\">#{escape_html(slide.title)}</div>"
+      parts << "    <div class=\"title-slide-subtitle\" style=\"color: #dbdbff;\">#{escape_html(metadata["subtitle"])}</div>" if metadata["subtitle"]
+      parts << "    <div class=\"title-slide-author\" style=\"color: #dbdbff;\">#{escape_html(metadata["author"])}</div>" if metadata["author"]
+      parts << "  </div>"
+    else
+      parts << "  <div class=\"title-slide-content\">"
+      parts << "    <div class=\"title-slide-title\">#{escape_html(slide.title)}</div>"
+      parts << "    <div class=\"title-slide-subtitle\">#{escape_html(metadata["subtitle"])}</div>" if metadata["subtitle"]
+      parts << "    <div class=\"title-slide-author\">#{escape_html(metadata["author"])}</div>" if metadata["author"]
+      parts << "  </div>"
     end
-    if metadata["author"]
-      parts << "    <div class=\"title-slide-author\">#{escape_html(metadata["author"])}</div>"
-    end
-    parts << "  </div>"
   else
+    parts << "  <div class=\"accent-bar\"></div>" if theme_name == "rubykaigi2026"
     if slide.title
       parts << "  <div class=\"slide-title\">#{escape_html(slide.title)}</div>"
       parts << "  <div class=\"separator\"></div>"
     end
     parts << "  <div class=\"slide-body\">"
     slide.elements.each do |el|
-      parts << "    #{element_to_html(el, index)}"
+      parts << "    #{element_to_html(el, index, theme_name)}"
     end
     parts << "  </div>"
   end
@@ -132,7 +154,7 @@ end
 def generate_html(result)
   theme_name = result.theme || "default"
   slides_html = result.slides.each_with_index.map { |s, i|
-    slide_to_html(s, i, result.slides.length, result.metadata)
+    slide_to_html(s, i, result.slides.length, result.metadata, theme_name)
   }.join("\n\n")
 
   title = escape_html(result.metadata["title"] || "PicoRabbit Preview")
@@ -143,6 +165,7 @@ def generate_html(result)
     <head>
     <meta charset="utf-8">
     <title>#{title}</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;800&display=swap">
     <style>
     :root {
     #{theme_css_vars(theme_name)}
@@ -197,21 +220,21 @@ def generate_html(result)
       right: 0;
     }
     .title-slide-title {
-      font-family: Helvetica, Arial, sans-serif;
-      font-size: 24px;
-      font-weight: bold;
+      font-family: var(--heading-font);
+      font-size: 32px;
+      font-weight: 800;
       color: var(--title);
       text-align: center;
     }
     .title-slide-subtitle {
-      font-family: Helvetica, Arial, sans-serif;
+      font-family: var(--body-font);
       font-size: 18px;
       color: var(--text);
       margin-top: 12px;
       text-align: center;
     }
     .title-slide-author {
-      font-family: Helvetica, Arial, sans-serif;
+      font-family: var(--body-font);
       font-size: 18px;
       color: var(--separator);
       margin-top: 8px;
@@ -220,9 +243,9 @@ def generate_html(result)
 
     /* Slide title */
     .slide-title {
-      font-family: Helvetica, Arial, sans-serif;
-      font-size: 24px;
-      font-weight: bold;
+      font-family: var(--heading-font);
+      font-size: 32px;
+      font-weight: 800;
       color: var(--title);
       position: absolute;
       top: 40px;
@@ -249,7 +272,7 @@ def generate_html(result)
 
     /* Body text */
     .body-text {
-      font-family: Helvetica, Arial, sans-serif;
+      font-family: var(--body-font);
       font-size: 18px;
       color: var(--text);
       line-height: 1;
@@ -261,7 +284,7 @@ def generate_html(result)
 
     /* Bullet */
     .bullet {
-      font-family: Helvetica, Arial, sans-serif;
+      font-family: var(--body-font);
       font-size: 18px;
       color: var(--text);
       line-height: 1;
@@ -272,12 +295,13 @@ def generate_html(result)
       display: inline-block;
       width: 16px;
       margin-left: -16px;
+      color: var(--title);
     }
     .bullet strong { font-weight: bold; }
 
     /* Numbered list */
     .numbered {
-      font-family: Helvetica, Arial, sans-serif;
+      font-family: var(--body-font);
       font-size: 18px;
       color: var(--text);
       line-height: 1;
@@ -308,7 +332,7 @@ def generate_html(result)
       min-height: 22px;
     }
     .blockquote span {
-      font-family: Helvetica, Arial, sans-serif;
+      font-family: var(--body-font);
       font-size: 18px;
       color: var(--blockquote);
       line-height: 1;
@@ -360,6 +384,31 @@ def generate_html(result)
 
     /* Wait marker */
     .wait-marker { display: none; }
+
+    /* Theme: rubykaigi2026 top accent bar */
+    .accent-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 640px;
+      height: 10px;
+      background: var(--separator);
+      z-index: 1;
+    }
+
+    /* Theme: rubykaigi2026 title slide background */
+    .title-slide-background {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 640px;
+      height: 480px;
+    }
+    .title-slide-background img {
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+    }
 
     /* Footer */
     .footer {

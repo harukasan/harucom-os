@@ -262,8 +262,8 @@ if options[:jis]
     if options[:aa]
       r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender, left_offset: min_left)
       rendered[idx] = r
-      # Clamp advance to cover full bitmap extent
-      advances[idx] = [r[:advance], r[:bitmap_left] + r[:width] - min_left].max
+      # Clamp advance to cover this glyph's own bitmap extent
+      advances[idx] = [r[:advance], r[:bitmap_left] + r[:width]].max
     else
       r = render_glyph(font, cp, glyph_height, glyph_width, ascender: ascender)
       rendered[idx] = r
@@ -311,8 +311,8 @@ else
     if options[:aa]
       r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender, left_offset: min_left)
       bytes = pack_pixels_4bpp(r[:pixels], glyph_width)
-      # Clamp advance to cover full bitmap extent
-      advances << [r[:advance], r[:bitmap_left] + r[:width] - min_left].max
+      # Clamp advance to cover this glyph's own bitmap extent
+      advances << [r[:advance], r[:bitmap_left] + r[:width]].max
     else
       r = render_glyph(font, cp, glyph_height, glyph_width, ascender: ascender)
       bytes = pack_rows(r[:rows], glyph_width)

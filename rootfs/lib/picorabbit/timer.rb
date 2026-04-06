@@ -6,9 +6,10 @@ module PicoRabbit
     GRAVITY = 0.7
     JUMP_POWER = -7.6
 
-    def initialize(allotted_time, total_slides)
+    def initialize(allotted_time, total_slides, track_color: 0x49)
       @allotted_ms = allotted_time * 60 * 1000
       @total_slides = total_slides
+      @track_color = track_color
       @start_ms = Machine.board_millis
       @usagi = BMP.load("/data/usagi.bmp")
       @kame = BMP.load("/data/kame.bmp")
@@ -26,7 +27,7 @@ module PicoRabbit
       track_width = track_right - track_left - @usagi.width
 
       # Track line
-      p5.fill(0x49)
+      p5.fill(@track_color)
       p5.no_stroke
       p5.rect(track_left, TRACK_Y, track_right - track_left, TRACK_HEIGHT)
       p5.no_fill

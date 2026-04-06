@@ -22,6 +22,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
   font8x8_dir = "#{dir}/lib/fonts/font8x8"
   adobe_dir = "#{dir}/lib/fonts/adobe-75dpi"
   inter_dir = "#{dir}/lib/fonts/inter"
+  outfit_dir = "#{dir}/lib/fonts/outfit"
 
   fonts = [
     { src: "#{mplus_dir}/fonts_e/mplus_f12r.bdf",
@@ -155,6 +156,31 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     end
   end
 
+  # Outfit fonts (4bpp anti-aliased)
+  outfit_fonts = [
+    { src: "#{outfit_dir}/Outfit-Regular.ttf",
+      dst: "#{include_dir}/font_outfit_18.h",
+      args: ["-s", "18", "-n", "outfit_18", "--aa"] },
+    { src: "#{outfit_dir}/Outfit-Regular.ttf",
+      dst: "#{include_dir}/font_outfit_22.h",
+      args: ["-s", "22", "-n", "outfit_22", "--aa"] },
+    { src: "#{outfit_dir}/Outfit-ExtraBold.ttf",
+      dst: "#{include_dir}/font_outfit_extrabold_32.h",
+      args: ["-s", "32", "-n", "outfit_extrabold_32", "--aa"] },
+    { src: "#{inter_dir}/Inter-Regular.ttf",
+      dst: "#{include_dir}/font_inter_symbols_18.h",
+      args: ["-s", "18", "-n", "inter_symbols_18", "--aa", "-r", "0x2600-0x26a0"] },
+    { src: "#{inter_dir}/Inter-Regular.ttf",
+      dst: "#{include_dir}/font_inter_symbols_22.h",
+      args: ["-s", "22", "-n", "inter_symbols_22", "--aa", "-r", "0x2600-0x26a0"] },
+  ]
+
+  outfit_fonts.each do |font|
+    file font[:dst] => [font[:src], ttf2c, include_dir] do
+      sh "#{ruby_cmd} #{ttf2c} #{font[:src]} #{font[:args].join(' ')} -o #{font[:dst]}"
+    end
+  end
+
   # JIS X 0208 interleaved regular+bold
   jis_combined_dst = "#{include_dir}/font_mplus_j12_combined.h"
   jis_r_src = "#{mplus_dir}/fonts_j/mplus_j12r.bdf"
@@ -209,6 +235,11 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { header: "font_inter_bold_18.h",         var: "font_inter_bold_18",        sym: "FONT_INTER_BOLD_18" },
     { header: "font_inter_24.h",              var: "font_inter_24",             sym: "FONT_INTER_24" },
     { header: "font_inter_bold_24.h",         var: "font_inter_bold_24",        sym: "FONT_INTER_BOLD_24" },
+    { header: "font_outfit_18.h",              var: "font_outfit_18",             sym: "FONT_OUTFIT_18" },
+    { header: "font_outfit_22.h",               var: "font_outfit_22",             sym: "FONT_OUTFIT_22" },
+    { header: "font_outfit_extrabold_32.h",    var: "font_outfit_extrabold_32",   sym: "FONT_OUTFIT_EXTRABOLD_32" },
+    { header: "font_inter_symbols_18.h",      var: "font_inter_symbols_18",     sym: "FONT_INTER_SYMBOLS_18" },
+    { header: "font_inter_symbols_22.h",      var: "font_inter_symbols_22",     sym: "FONT_INTER_SYMBOLS_22" },
   ]
 
   # Generate dvi_font_registry.h from the registry above.
@@ -270,6 +301,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     Rake::Task[denkichip_dst].invoke
     Rake::Task[denkichip_jis_dst].invoke
     inter_fonts.each { |font| Rake::Task[font[:dst]].invoke }
+    outfit_fonts.each { |font| Rake::Task[font[:dst]].invoke }
     Rake::Task[jis_combined_dst].invoke
     Rake::Task[uni2jis_c].invoke
     Rake::Task[registry_dst].invoke

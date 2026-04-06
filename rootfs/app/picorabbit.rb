@@ -22,18 +22,20 @@ if result.theme
   theme_class = PicoRabbit::Themes.const_get(name)
 end
 
+theme = theme_class.new
+
 # Timer (enabled by frontmatter: allotted_time: <minutes>)
 timer = nil
 if result.metadata["allotted_time"]
   minutes = result.metadata["allotted_time"].to_i
-  timer = PicoRabbit::Timer.new(minutes, result.slides.length) if minutes > 0
+  timer = PicoRabbit::Timer.new(minutes, result.slides.length, track_color: theme.track_color) if minutes > 0
 end
 
 # Switch to graphics mode after theme is ready
 p5 = P5.new
 DVI::Graphics.set_resolution(640, 480)
 
-renderer = PicoRabbit::Renderer.new(p5, theme_class.new, timer: timer, metadata: result.metadata)
+renderer = PicoRabbit::Renderer.new(p5, theme, timer: timer, metadata: result.metadata)
 
 PicoRabbit::Presenter.new(
   slides: result.slides,

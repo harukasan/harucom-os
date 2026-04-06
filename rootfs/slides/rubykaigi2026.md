@@ -1,8 +1,8 @@
 ---
-title: Building a Standalone Ruby Programming Environment
+title: Building a Standalone<br>Ruby Programming Environment
 subtitle: April 22 2026, RubyKaigi 2026
 author: Shunsuke Michii
-theme: dark
+theme: rubykaigi2026
 allotted_time: 30
 ---
 

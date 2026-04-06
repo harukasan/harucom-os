@@ -1,12 +1,18 @@
 module PicoRabbit
   class BMP
-    attr_reader :width, :height, :data, :mask
+    attr_reader :width, :height, :data
 
-    def initialize(width, height, data, mask)
+    def initialize(width, height, data)
       @width = width
       @height = height
       @data = data
-      @mask = mask
+      @mask = nil
+    end
+
+    # Lazily generate transparency mask on first access.
+    # Images drawn with p5.image() skip mask generation entirely.
+    def mask
+      @mask ||= build_mask
     end
 
     # Load an 8-bit BMP with RGB332 palette.
@@ -24,28 +30,43 @@ module PicoRabbit
       # BMP rows are padded to 4-byte boundary
       row_bytes = (w + 3) & ~3
 
-      # Build pixel data (top-to-bottom) and 1-bit mask
-      pixels = ""
-      mask_size = (w * h + 7) / 8
-      mask_bytes = Array.new(mask_size, 0)
+      # Build pixel data: collect rows then join once to avoid repeated reallocation
+      rows = Array.new(h)
+      (h - 1).downto(0) do |bmp_y|
+        rows[h - 1 - bmp_y] = raw.byteslice(offset + bmp_y * row_bytes, w)
+      end
 
+      BMP.new(w, h, rows.join)
+    end
+
+    private
+
+    def build_mask
+      w = @width
+      h = @height
+      pixels = @data
+      mask_size = (w * h + 7) / 8
+
+      unless pixels.include?("\x00")
+        return "\xff" * mask_size
+      end
+
+      # Process row by row: skip fully opaque rows
+      mask_bytes = Array.new(mask_size, 0xFF)
       h.times do |y|
-        # BMP stores bottom row first
-        bmp_y = h - 1 - y
-        row_offset = offset + bmp_y * row_bytes
+        row_start = y * w
+        row = pixels.byteslice(row_start, w)
+        next unless row.include?("\x00")
         w.times do |x|
-          idx = raw.getbyte(row_offset + x)
-          pixels << idx.chr
-          if idx != 0
-            bit_pos = y * w + x
-            mask_bytes[bit_pos >> 3] |= (1 << (bit_pos & 7))
+          if pixels.getbyte(row_start + x) == 0
+            bit_pos = row_start + x
+            mask_bytes[bit_pos >> 3] &= ~(1 << (bit_pos & 7))
           end
         end
       end
-
-      mask_str = mask_bytes.map { |b| b.chr }.join
-
-      BMP.new(w, h, pixels, mask_str)
+      mask_str = ""
+      mask_bytes.each { |b| mask_str << b.chr }
+      mask_str
     end
   end
 end
