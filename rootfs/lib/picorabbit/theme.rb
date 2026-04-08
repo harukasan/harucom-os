@@ -257,21 +257,19 @@ module PicoRabbit
     end
 
     def render_p5_code(p5, lines, x, y)
-      unless @p5_sandbox
-        @p5_sandbox = Sandbox.new("p5_draw")
-        @p5_sandbox.compile("nil")
-        @p5_sandbox.execute
-        @p5_sandbox.wait(timeout: nil)
-        @p5_sandbox.suspend
-      end
+      sandbox = Sandbox.new("p5_draw")
+      sandbox.compile("nil")
+      sandbox.execute
+      sandbox.wait(timeout: nil)
+      sandbox.suspend
       $__picorabbit_p5 = p5
       $__picorabbit_x = x
       $__picorabbit_y = y
       code = "p5 = $__picorabbit_p5\nx = $__picorabbit_x\ny = $__picorabbit_y\n" + lines.join("\n")
-      @p5_sandbox.compile(code)
-      @p5_sandbox.execute
-      @p5_sandbox.wait
-      @p5_sandbox.suspend
+      sandbox.compile(code)
+      sandbox.execute
+      sandbox.wait
+      sandbox.terminate
       y
     end
 
