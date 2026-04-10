@@ -46,6 +46,11 @@ class InputMethod
       "xya" => "ゃ", "xyu" => "ゅ", "xyo" => "ょ",
       "xtu" => "っ", "xtsu" => "っ", "xwa" => "ゎ",
       "-" => "ー",
+      "." => "。", "," => "、",
+      "[" => "「", "]" => "」",
+      "zh" => "←", "zj" => "↓", "zk" => "↑", "zl" => "→",
+      "z/" => "・", "z." => "…", "z," => "‥", "z-" => "〜",
+      "z[" => "『", "z]" => "』",
     }
 
     # Characters that trigger 'n' -> 'ん' flush (not vowels and not 'n' or 'y')
@@ -58,6 +63,9 @@ class InputMethod
       @mode = :hiragana
       @romaji = ""       # romaji accumulation buffer
       @reading = ""      # kanji reading accumulation (hiragana)
+      @okuri_prefix = nil  # okurigana consonant prefix (e.g. "m" for NoMu)
+      @okuri_romaji = ""   # okurigana romaji accumulation
+      @okuri_kana = ""     # completed okurigana kana
     end
 
     def process(key, im)
@@ -90,6 +98,7 @@ class InputMethod
       if @mode == :kanji || @mode == :candidate
         im.commit(@reading) if @reading.bytesize > 0
         @reading = ""
+        clear_okuri
         @mode = :hiragana
       end
       im.set_preedit("")
@@ -100,7 +109,8 @@ class InputMethod
 
     def process_kana(key, im)
       # 'l' switches to ASCII mode (deactivate engine)
-      if key.match?(:l, ctrl: false, shift: false)
+      # Skip when romaji buffer is "z" to allow zl -> → conversion
+      if key.match?(:l, ctrl: false, shift: false) && @romaji != "z"
         flush_n(im)
         im.set_engine(nil)
         return :consumed
@@ -226,6 +236,27 @@ class InputMethod
 
       ch = key.to_s
 
+      # Shift+letter: start okurigana
+      if key.shift?
+        flush_n_to_reading
+        if @reading.bytesize > 0
+          @okuri_prefix = ch.downcase
+          @okuri_romaji = @okuri_prefix
+          @okuri_kana = ""
+          candidates = InputMethod.skk_lookup(@reading + @okuri_prefix)
+          if candidates
+            im.set_candidates(candidates, 0)
+            im.set_preedit("▼" + candidates[0] + "*" + @okuri_romaji)
+            @mode = :candidate
+            return :consumed
+          end
+          @okuri_prefix = nil
+          @okuri_romaji = ""
+          im.set_preedit("▽" + @reading)
+        end
+        return :consumed
+      end
+
       # Accumulate romaji for reading
       @romaji += ch.downcase
       result = try_romaji_conversion
@@ -242,6 +273,21 @@ class InputMethod
     def process_candidate(key, im)
       candidates = im.candidates
       idx = im.candidate_index
+
+      # During okurigana: accumulate romaji to complete the okurigana kana
+      if @okuri_prefix && key.printable?
+        ch = key.to_s
+        @okuri_romaji += ch.downcase
+        kana = try_okuri_conversion
+        if kana
+          @okuri_kana = kana
+          confirm_candidate(im, candidates, idx)
+          return :commit
+        end
+        # Still accumulating okurigana romaji
+        im.set_preedit("▼" + candidates[idx] + "*" + @okuri_romaji)
+        return :consumed
+      end
 
       # Space: next candidate (wrap around)
       if key.to_s == " "
@@ -261,6 +307,7 @@ class InputMethod
           im.set_preedit("▼" + candidates[idx])
         else
           @mode = :kanji
+          clear_okuri
           im.clear_candidates
           im.set_preedit("▽" + @reading)
         end
@@ -270,6 +317,7 @@ class InputMethod
       # Escape / Ctrl-G: cancel, back to kanji entry
       if key == Keyboard::ESCAPE || key.match?(:g, ctrl: true)
         @mode = :kanji
+        clear_okuri
         im.clear_candidates
         im.set_preedit("▽" + @reading)
         return :consumed
@@ -291,10 +339,44 @@ class InputMethod
     end
 
     def confirm_candidate(im, candidates, idx)
-      im.commit(candidates[idx]) if candidates && candidates[idx]
+      text = (candidates && candidates[idx]) ? candidates[idx] : ""
+      text += @okuri_kana if @okuri_kana.bytesize > 0
+      im.commit(text) if text.bytesize > 0
       @reading = ""
       @romaji = ""
+      clear_okuri
       @mode = :hiragana
+    end
+
+    def clear_okuri
+      @okuri_prefix = nil
+      @okuri_romaji = ""
+      @okuri_kana = ""
+    end
+
+    # Try to convert okurigana romaji buffer. Returns kana or nil.
+    def try_okuri_conversion
+      # Double consonant -> っ + keep second
+      if @okuri_romaji.bytesize >= 2
+        c1 = @okuri_romaji.byteslice(0, 1)
+        c2 = @okuri_romaji.byteslice(1, 1)
+        if c1 == c2 && c1 != "a" && c1 != "i" && c1 != "u" && c1 != "e" && c1 != "o" && c1 != "n"
+          @okuri_romaji = @okuri_romaji.byteslice(1, @okuri_romaji.bytesize - 1)
+          return "っ"
+        end
+      end
+
+      len = @okuri_romaji.bytesize
+      while len > 0
+        prefix = @okuri_romaji.byteslice(0, len)
+        kana = ROMAJI_TABLE[prefix]
+        if kana
+          @okuri_romaji = @okuri_romaji.byteslice(len, @okuri_romaji.bytesize - len)
+          return kana
+        end
+        len -= 1
+      end
+      nil
     end
 
     # Try to convert the romaji buffer. Returns the kana string if matched,
