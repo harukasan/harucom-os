@@ -196,7 +196,7 @@ class InputMethod
       end
 
       # Space: look up reading in dictionary
-      if key == Keyboard::SPACE
+      if key.to_s == " "
         flush_n_to_reading
         if @reading.bytesize > 0
           candidates = InputMethod.skk_lookup(@reading)
@@ -243,24 +243,23 @@ class InputMethod
       candidates = im.candidates
       idx = im.candidate_index
 
-      # Space: next candidate
-      if key == Keyboard::SPACE
-        if candidates && idx + 1 < candidates.length
-          idx += 1
+      # Space: next candidate (wrap around)
+      if key.to_s == " "
+        if candidates
+          idx = (idx + 1) % candidates.length
           im.set_candidates(candidates, idx)
           im.set_preedit("▼" + candidates[idx])
         end
         return :consumed
       end
 
-      # 'x': previous candidate
+      # 'x': previous candidate (wrap or back to kanji entry)
       if key.match?(:x, ctrl: false, shift: false)
         if idx > 0
           idx -= 1
           im.set_candidates(candidates, idx)
           im.set_preedit("▼" + candidates[idx])
         else
-          # Back to kanji entry mode
           @mode = :kanji
           im.clear_candidates
           im.set_preedit("▽" + @reading)
@@ -268,7 +267,7 @@ class InputMethod
         return :consumed
       end
 
-      # Escape / Ctrl-G: cancel
+      # Escape / Ctrl-G: cancel, back to kanji entry
       if key == Keyboard::ESCAPE || key.match?(:g, ctrl: true)
         @mode = :kanji
         im.clear_candidates
@@ -278,27 +277,24 @@ class InputMethod
 
       # Enter: confirm current candidate
       if key == Keyboard::ENTER
-        if candidates && candidates[idx]
-          im.commit(candidates[idx])
-        end
-        @reading = ""
-        @romaji = ""
-        @mode = :hiragana
+        confirm_candidate(im, candidates, idx)
         return :commit
       end
 
-      # Any other printable key: confirm candidate and process the key
-      if key.printable? && candidates && candidates[idx]
-        im.commit(candidates[idx])
-        @reading = ""
-        @romaji = ""
-        @mode = :hiragana
-        # Process this key in kana mode
-        result = process_kana(key, im)
-        return result == :commit ? :commit : :commit
+      # Any other key: confirm candidate then reprocess
+      if candidates && candidates[idx]
+        confirm_candidate(im, candidates, idx)
+        return process_kana(key, im)
       end
 
       :passthrough
+    end
+
+    def confirm_candidate(im, candidates, idx)
+      im.commit(candidates[idx]) if candidates && candidates[idx]
+      @reading = ""
+      @romaji = ""
+      @mode = :hiragana
     end
 
     # Try to convert the romaji buffer. Returns the kana string if matched,

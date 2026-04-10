@@ -47,6 +47,51 @@ const void *dict_find_section(uint32_t type, uint32_t *out_size)
     return NULL;
 }
 
+/*
+ * Encode a UTF-8 hiragana reading into compact 1-byte-per-kana form.
+ * Hiragana U+3041..U+3096 becomes 0x01..0x56. ASCII bytes pass through.
+ * Returns the encoded length, or -1 if the buffer is too small.
+ */
+static int encode_reading(const char *utf8, int utf8_len,
+                          uint8_t *out, int out_cap)
+{
+    int si = 0, di = 0;
+    const uint8_t *src = (const uint8_t *)utf8;
+    while (si < utf8_len && di < out_cap) {
+        uint8_t b = src[si];
+        if (b < 0x80) {
+            /* ASCII */
+            out[di++] = b;
+            si++;
+        } else if (b >= 0xE0 && si + 2 < utf8_len) {
+            /* 3-byte UTF-8 */
+            uint32_t cp = ((b & 0x0F) << 12) |
+                          ((src[si + 1] & 0x3F) << 6) |
+                          (src[si + 2] & 0x3F);
+            if (cp >= 0x3041 && cp <= 0x3096) {
+                out[di++] = (uint8_t)(cp - 0x3041 + 1);
+            } else {
+                /* Non-hiragana: copy raw UTF-8 */
+                if (di + 3 > out_cap) return -1;
+                out[di++] = src[si];
+                out[di++] = src[si + 1];
+                out[di++] = src[si + 2];
+            }
+            si += 3;
+        } else if (b >= 0xC0 && si + 1 < utf8_len) {
+            /* 2-byte UTF-8 */
+            if (di + 2 > out_cap) return -1;
+            out[di++] = src[si];
+            out[di++] = src[si + 1];
+            si += 2;
+        } else {
+            out[di++] = b;
+            si++;
+        }
+    }
+    return di;
+}
+
 int dict_skk_lookup(const char *reading, int reading_len,
                     const char **out_candidates, int *out_lengths,
                     int max_candidates)
@@ -61,10 +106,16 @@ int dict_skk_lookup(const char *reading, int reading_len,
     if (bucket_count == 0)
         return 0;
 
+    /* Encode the UTF-8 reading to compact form for hash and comparison */
+    uint8_t encoded[128];
+    int encoded_len = encode_reading(reading, reading_len, encoded, sizeof(encoded));
+    if (encoded_len < 0)
+        return 0;
+
     const uint32_t *buckets =
         (const uint32_t *)(section + sizeof(dict_skk_header_t));
 
-    uint32_t bucket_idx = fnv1a(reading, reading_len) % bucket_count;
+    uint32_t bucket_idx = fnv1a((const char *)encoded, encoded_len) % bucket_count;
     uint32_t offset = buckets[bucket_idx];
 
     while (offset != 0) {
@@ -73,11 +124,11 @@ int dict_skk_lookup(const char *reading, int reading_len,
         memcpy(&next, entry, 4);
         uint8_t rlen = entry[4];
         uint8_t ccount = entry[5];
-        const char *r = (const char *)entry + 6;
+        const uint8_t *r = entry + 6;
 
-        if (rlen == reading_len && memcmp(r, reading, reading_len) == 0) {
+        if (rlen == encoded_len && memcmp(r, encoded, encoded_len) == 0) {
             /* Match: extract candidates */
-            const uint8_t *p = (const uint8_t *)r + rlen;
+            const uint8_t *p = r + rlen;
             int count = 0;
             for (int i = 0; i < ccount && count < max_candidates; i++) {
                 uint8_t clen = *p++;
