@@ -17,6 +17,14 @@ class IRB
     @sandbox.execute
     @sandbox.wait(timeout: nil)
     @sandbox.suspend
+
+    # Highlight proc: returns app name byte length if line starts with an app name
+    @editor.highlight_proc = ->(line) {
+      word = line.split[0]
+      if word && find_app(word)
+        word.bytesize
+      end
+    }
   end
 
   def start

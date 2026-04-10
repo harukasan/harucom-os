@@ -4,6 +4,8 @@
 # and Keyboard. Handles line editing, cursor rendering, and input area display.
 
 class LineEditor
+  attr_accessor :highlight_proc
+
   def initialize(console:, keyboard:)
     @console = console
     @keyboard = keyboard
@@ -12,6 +14,7 @@ class LineEditor
     @prompt_cont = "> "
     @prompt_width = 2
     @input_start_row = 0
+    @highlight_proc = nil
   end
 
   # Single-line input
@@ -108,14 +111,18 @@ class LineEditor
       @input_start_row = 0 if @input_start_row < 0
     end
 
-    # Tokenize input for syntax highlighting
-    source = lines.join("\n")
-    highlight_map = SyntaxHighlight.tokenize(source)
-    hl_offsets = nil
-    if highlight_map
-      hl_offsets = []
-      offset = 0
-      lines.each { |l| hl_offsets.push(offset); offset += l.bytesize + 1 }
+    # Try custom highlight first, fall back to syntax highlighting
+    custom = @highlight_proc && line_count == 1 && @highlight_proc.call(lines[0])
+
+    unless custom
+      source = lines.join("\n")
+      highlight_map = SyntaxHighlight.tokenize(source)
+      hl_offsets = nil
+      if highlight_map
+        hl_offsets = []
+        offset = 0
+        lines.each { |l| hl_offsets.push(offset); offset += l.bytesize + 1 }
+      end
     end
 
     # Render each line
@@ -126,7 +133,9 @@ class LineEditor
       prompt = (i == 0) ? @prompt : @prompt_cont
       @console.clear_line(row)
       @console.put_string_at(0, row, prompt, @console.attr)
-      if highlight_map && hl_offsets
+      if custom && i == 0
+        draw_command_line(@prompt_width, row, lines[0], custom, max_line_width)
+      elsif highlight_map && hl_offsets
         SyntaxHighlight.draw_line(@prompt_width, row, lines[i], highlight_map, hl_offsets[i] || 0, 0, max_line_width, @console.attr)
       else
         visible_text = Editor.display_slice(lines[i], 0, max_line_width)
@@ -151,6 +160,31 @@ class LineEditor
     screen_col = Console::COLS - 1 if screen_col >= Console::COLS
     @console.move_to(screen_col, screen_row)
     @console.show_cursor
+  end
+
+  # Draw a command line with app name highlighted in sky blue
+  # app_name_len: byte length of the app name portion
+  def draw_command_line(col, row, line, app_name_len, max_width)
+    return unless line && line.bytesize > 0
+
+    app_part = Editor.display_slice(line, 0, max_width)
+    return unless app_part
+
+    if app_name_len > 0 && app_name_len <= line.bytesize
+      name = line.byteslice(0, app_name_len).to_s
+      rest = line.byteslice(app_name_len, line.bytesize - app_name_len).to_s
+      name_width = Editor.display_width(name)
+      if name_width <= max_width
+        DVI::Text.put_string(col, row, name, 0xC0) # palette 12 (sky blue)
+        if rest.bytesize > 0
+          rest_visible = Editor.display_slice(rest, 0, max_width - name_width)
+          DVI::Text.put_string(col + name_width, row, rest_visible, 0xF0) if rest_visible # palette 15 (white)
+        end
+        return
+      end
+    end
+
+    DVI::Text.put_string(col, row, app_part, 0xF0)
   end
 
   def feed
