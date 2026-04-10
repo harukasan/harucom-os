@@ -72,6 +72,8 @@ class InputMethod
       case @mode
       when :hiragana, :katakana
         process_kana(key, im)
+      when :zenkaku
+        process_zenkaku(key, im)
       when :kanji
         process_kanji(key, im)
       when :candidate
@@ -85,9 +87,22 @@ class InputMethod
       case @mode
       when :hiragana  then "[あ]"
       when :katakana  then "[ア]"
+      when :zenkaku   then "[Ａ]"
       when :kanji     then "[あ]"
       when :candidate then "[あ]"
       end
+    end
+
+    # Return to hiragana mode from any sub-mode. Returns true if mode changed.
+    def back_to_hiragana(im)
+      return false if @mode == :hiragana
+      if @mode == :kanji || @mode == :candidate
+        reset(im)
+      else
+        @mode = :hiragana
+        im.set_preedit("")
+      end
+      true
     end
 
     def reset(im)
@@ -106,6 +121,30 @@ class InputMethod
     end
 
     private
+
+    # ASCII 0x21..0x7E to full-width U+FF01..U+FF5E, space to U+3000
+    def to_zenkaku(ch)
+      b = ch.getbyte(0)
+      if b == 0x20
+        "\u3000"  # full-width space
+      elsif b >= 0x21 && b <= 0x7E
+        cp = 0xFF01 + (b - 0x21)
+        buf = ""
+        buf << ((0xEF).chr)
+        buf << ((0x80 | ((cp >> 6) & 0x3F)).chr)
+        buf << ((0x80 | (cp & 0x3F)).chr)
+        buf
+      else
+        ch
+      end
+    end
+
+    def process_zenkaku(key, im)
+      return :passthrough unless key.printable?
+
+      im.commit(to_zenkaku(key.to_s))
+      :commit
+    end
 
     def process_kana(key, im)
       # 'l' switches to ASCII mode (deactivate engine)
@@ -141,6 +180,13 @@ class InputMethod
       end
 
       ch = key.to_s
+
+      # Shift+L: switch to full-width ASCII mode
+      if ch == "L"
+        flush_n(im)
+        @mode = :zenkaku
+        return :consumed
+      end
 
       # Uppercase letter: start kanji entry mode
       if ch >= "A" && ch <= "Z"
@@ -332,7 +378,8 @@ class InputMethod
       # Any other key: confirm candidate then reprocess
       if candidates && candidates[idx]
         confirm_candidate(im, candidates, idx)
-        return process_kana(key, im)
+        process_kana(key, im)
+        return :commit
       end
 
       :passthrough

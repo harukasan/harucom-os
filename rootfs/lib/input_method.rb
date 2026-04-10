@@ -37,10 +37,13 @@ class InputMethod
 
   # Process a Keyboard::Key. Returns :passthrough, :consumed, or :commit.
   def process(key)
-    # Ctrl-J: toggle SKK hiragana mode
+    # Ctrl-J: activate SKK hiragana mode, or return to hiragana from sub-modes.
+    # If already in hiragana, deactivate SKK.
     if key.match?(:j, ctrl: true)
       if @engine_name == :skk
-        set_engine(nil)
+        unless @engine.back_to_hiragana(self)
+          set_engine(nil)
+        end
       else
         set_engine(:skk)
       end
