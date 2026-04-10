@@ -108,6 +108,16 @@ class LineEditor
       @input_start_row = 0 if @input_start_row < 0
     end
 
+    # Tokenize input for syntax highlighting
+    source = lines.join("\n")
+    highlight_map = SyntaxHighlight.tokenize(source)
+    hl_offsets = nil
+    if highlight_map
+      hl_offsets = []
+      offset = 0
+      lines.each { |l| hl_offsets.push(offset); offset += l.bytesize + 1 }
+    end
+
     # Render each line
     max_line_width = Console::COLS - @prompt_width
     i = 0
@@ -116,8 +126,12 @@ class LineEditor
       prompt = (i == 0) ? @prompt : @prompt_cont
       @console.clear_line(row)
       @console.put_string_at(0, row, prompt, @console.attr)
-      visible_text = Editor.display_slice(lines[i], 0, max_line_width)
-      @console.put_string_at(@prompt_width, row, visible_text, @console.attr) if visible_text
+      if highlight_map && hl_offsets
+        SyntaxHighlight.draw_line(@prompt_width, row, lines[i], highlight_map, hl_offsets[i] || 0, 0, max_line_width, @console.attr)
+      else
+        visible_text = Editor.display_slice(lines[i], 0, max_line_width)
+        @console.put_string_at(@prompt_width, row, visible_text, @console.attr) if visible_text
+      end
       i += 1
     end
 

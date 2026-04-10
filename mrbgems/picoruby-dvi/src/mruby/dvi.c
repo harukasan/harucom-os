@@ -588,6 +588,19 @@ mrb_dvi_text_write_line(mrb_state *mrb, mrb_value klass)
   return mrb_nil_value();
 }
 
+/*
+ * DVI::Text.set_palette_entry(index, color)
+ *   Set a palette entry to an RGB332 color value.
+ */
+static mrb_value
+mrb_dvi_text_set_palette_entry(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int index, color;
+  mrb_get_args(mrb, "ii", &index, &color);
+  dvi_text_set_palette_entry((int)index, (uint8_t)color);
+  return mrb_nil_value();
+}
+
 void
 mrb_picoruby_dvi_gem_init(mrb_state *mrb)
 {
@@ -640,6 +653,8 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              mrb_dvi_text_read_line, MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, class_Text, MRB_SYM(write_line),
                              mrb_dvi_text_write_line, MRB_ARGS_REQ(2));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(set_palette_entry),
+                             mrb_dvi_text_set_palette_entry, MRB_ARGS_REQ(2));
 
   // DVI::Text::Line (opaque container for scrollback)
   class_Line = mrb_define_class_under_id(mrb, class_Text, MRB_SYM(Line),
