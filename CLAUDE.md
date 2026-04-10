@@ -117,6 +117,34 @@ Guidelines:
 - **PSRAM: 8 MB (APS6404L).** Mapped via QMI CS1 at `0x11000000`. Used for
   the mruby heap.
 
+## mrbgem structure
+
+Custom mrbgems live in `mrbgems/`. Each gem follows this layout:
+
+```
+mrbgems/picoruby-example/
+  include/example.h           # Public C header (no pico-sdk dependencies)
+  src/example.c               # mrbgem entry point (compiled by PicoRuby rake)
+  src/mruby/example.c         # mruby VM bindings (gem_init, Ruby method defs)
+  mrblib/example.rb           # Ruby source (compiled into libmruby.a)
+  ports/rp2350/example.c      # pico-sdk dependent code (compiled by CMake)
+  mrbgem.rake                 # Gem specification
+```
+
+Build responsibilities:
+- **PicoRuby rake** compiles `src/*.c` and `mrblib/*.rb` into `libmruby.a`.
+  These files must not include pico-sdk headers (`<hardware/*.h>`) because
+  the presym scanner runs `arm-none-eabi-gcc -E` without pico-sdk paths.
+- **CMake** compiles `ports/rp2350/*.c` into the main executable. These files
+  can use pico-sdk headers. Register them in `CMakeLists.txt` under
+  `add_executable(harucom_os ...)` and add the gem's `include/` to
+  `target_include_directories`.
+- `src/example.c` includes `src/mruby/example.c` via `#include "mruby/example.c"`
+  guarded by `#if defined(PICORB_VM_MRUBY)`. This project only targets mruby,
+  not mruby/c.
+- `include/` headers are automatically added to the mrbgem include path.
+  They declare the C API shared between `ports/` and `src/mruby/`.
+
 ## Common pitfalls
 
 - **PicoRuby presym files are auto-generated.** Do not edit files under
