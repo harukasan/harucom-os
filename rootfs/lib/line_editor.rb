@@ -86,6 +86,15 @@ class LineEditor
       when Keyboard::ENTER
         script = @buffer.dump.chomp
         if check.call(script)
+          # Re-indent last line (e.g. de-indent end) before execution
+          last_y = @buffer.cursor_y
+          source = @buffer.lines.join("\n")
+          result = RubySyntax.analyze(source)
+          if result
+            RubySyntax.reindent_line(@buffer, last_y, result.indent_level(last_y))
+          end
+          refresh
+          @console.commit
           feed
           return script
         else
