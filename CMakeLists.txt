@@ -164,6 +164,7 @@ add_executable(harucom_os
     ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/ports/rp2040/io-console.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
+    mrbgems/harucom-os-dict/ports/rp2350/dict_region.c
 )
 
 add_dependencies(harucom_os build_picoruby ruby_scripts_gen)
@@ -219,6 +220,7 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems
     ${PICORUBY_ROOT}/mrbgems/picoruby-adc/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include
+    ${CMAKE_CURRENT_LIST_DIR}/mrbgems/harucom-os-dict/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-pwm-audio/include
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems/picoruby-dvi/include
 )

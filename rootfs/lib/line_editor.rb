@@ -6,9 +6,10 @@
 class LineEditor
   attr_accessor :highlight_proc
 
-  def initialize(console:, keyboard:)
+  def initialize(console:, keyboard:, ime: nil)
     @console = console
     @keyboard = keyboard
+    @ime = ime
     @buffer = Editor::Buffer.new
     @prompt = "> "
     @prompt_cont = "> "
@@ -32,16 +33,21 @@ class LineEditor
     @prompt_width = Editor.display_width(@prompt)
     @input_start_row = @console.row
     @buffer.clear
+    @needs_refresh = true
 
     loop do
-      refresh
-      @console.commit
+      if @needs_refresh
+        refresh
+        @console.commit
+        @needs_refresh = false
+      end
 
       c = @keyboard.read_char
       unless c
         DVI.wait_vsync
         next
       end
+      @needs_refresh = true
 
       # Return to live view if scrolled back
       if @console.scroll_offset > 0
@@ -51,6 +57,19 @@ class LineEditor
         else
           @console.scroll_forward(@console.scroll_offset) if c.printable?
         end
+      end
+
+      # Process through input method if active
+      if @ime
+        ime_result = @ime.process(c)
+        case ime_result
+        when :commit
+          @buffer.put(@ime.take_committed)
+          next
+        when :consumed
+          next
+        end
+        # :passthrough falls through to normal handling
       end
 
       case c
@@ -101,11 +120,15 @@ class LineEditor
     lines = @buffer.lines
     line_count = lines.length
 
-    # Scroll if input area would exceed screen
-    needed_rows = line_count
+    # Reserve rows: input lines + candidate row (if active) + IME status row
+    ime_active = @ime && @ime.mode_label
+    reserved = line_count
+    reserved += 1 if @ime && @ime.candidates  # candidate list row
+    reserved += 1 if ime_active               # mode indicator row
+
     available_rows = Console::ROWS - @input_start_row
-    if needed_rows > available_rows
-      scroll_amount = needed_rows - available_rows
+    if reserved > available_rows
+      scroll_amount = reserved - available_rows
       @console.scroll_up(scroll_amount)
       @input_start_row -= scroll_amount
       @input_start_row = 0 if @input_start_row < 0
@@ -144,16 +167,58 @@ class LineEditor
       i += 1
     end
 
-    # Clear rows below input (remove stale content)
+    # Clear up to (but not including) IME status row
+    clear_limit = ime_active ? Console::ROWS - 1 : Console::ROWS
+
+    # Clear rows below input up to (but not including) IME status row
     clear_row = @input_start_row + line_count
-    while clear_row < Console::ROWS
+    while clear_row < clear_limit
       @console.clear_line(clear_row)
       clear_row += 1
     end
 
-    # Position cursor
+    # Draw IME mode indicator on last row
+    if ime_active
+      label = @ime.mode_label
+      ime_row = Console::ROWS - 1
+      @console.clear_line(ime_row)
+      label_col = Console::COLS - Editor.display_width(label)
+      DVI::Text.put_string(label_col, ime_row, label, InputMethod::PREEDIT_ATTR)
+    end
+
+    # Draw preedit overlay if IME has uncommitted text
+    preedit_width = 0
+    if @ime && @ime.preedit.bytesize > 0
+      cursor_display_col = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x)
+      preedit_col = @prompt_width + cursor_display_col
+      preedit_row = @input_start_row + @buffer.cursor_y
+      max_preedit = Console::COLS - preedit_col
+      if max_preedit > 0
+        visible = Editor.display_slice(@ime.preedit, 0, max_preedit)
+        if visible && visible.bytesize > 0
+          DVI::Text.put_string(preedit_col, preedit_row, visible, InputMethod::PREEDIT_ATTR)
+          preedit_width = Editor.display_width(visible)
+        end
+      end
+    end
+
+    # Draw candidate list on the row below input
+    if @ime && @ime.candidates
+      cand_row = @input_start_row + line_count
+      @console.clear_line(cand_row)
+      cand_text = ""
+      @ime.candidates.each_with_index do |c, ci|
+        break if ci >= 7
+        cand_text += " " if ci > 0
+        cand_text += "#{ci + 1}:#{c}"
+      end
+      visible = Editor.display_slice(cand_text, 0, Console::COLS)
+      DVI::Text.put_string(0, cand_row, visible, InputMethod::CANDIDATE_ATTR) if visible
+    end
+
+    # Position cursor (after preedit if present)
     cursor_display_col = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x)
-    screen_col = @prompt_width + cursor_display_col
+    screen_col = @prompt_width + cursor_display_col + preedit_width
     screen_row = @input_start_row + @buffer.cursor_y
 
     # Clamp cursor within screen

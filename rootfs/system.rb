@@ -11,6 +11,9 @@ Task.new(name: "usb_host") do
 end
 
 require "console"
+require "input_method"
+require "input_method_skk"
+require "input_method_tcode"
 require "line_editor"
 require "keyboard_input"
 require "syntax_highlight_draw"
@@ -21,7 +24,8 @@ $stdout = $console
 
 # Set up USB keyboard as standard input
 $keyboard = Keyboard.new
-line_editor = LineEditor.new(console: $console, keyboard: $keyboard)
+$ime = InputMethod.new
+line_editor = LineEditor.new(console: $console, keyboard: $keyboard, ime: $ime)
 $stdin = KeyboardInput.new(line_editor: line_editor)
 
 # Keyboard polling background task

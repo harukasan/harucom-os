@@ -181,8 +181,15 @@ end
 
 def draw_command_bar(console)
   bar = " Ctrl-S:Save  Ctrl-Q:Quit  Ctrl-Z:Undo  Ctrl-Y:Redo"
-  padding = Console::COLS - Editor.display_width(bar)
-  bar += " " * padding if padding > 0
+  mode = $ime ? $ime.mode_label : nil
+  if mode
+    padding = Console::COLS - Editor.display_width(bar) - Editor.display_width(mode)
+    bar += " " * padding if padding > 0
+    bar += mode
+  else
+    padding = Console::COLS - Editor.display_width(bar)
+    bar += " " * padding if padding > 0
+  end
   console.put_string_at(0, COMMAND_ROW, Editor.display_slice(bar, 0, Console::COLS), COMMAND_ATTR)
 end
 
@@ -306,6 +313,25 @@ while running
   old_dirty = buffer.dirty
   buffer.clear_dirty
 
+  # Process through input method if active
+  ime_handled = false
+  if $ime
+    ime_result = $ime.process(c)
+    case ime_result
+    when :commit
+      text = $ime.take_committed
+      redo_stack.clear
+      undo_record(undo_stack, [:insert, buffer.cursor_y, buffer.cursor_x, text])
+      buffer.put(text)
+      ime_handled = true
+    when :consumed
+      buffer.mark_dirty(:content)
+      ime_handled = true
+    end
+    # :passthrough falls through to normal handling
+  end
+
+  unless ime_handled
   case c
   when Keyboard::CTRL_Q
     if buffer.changed
@@ -416,6 +442,7 @@ while running
       buffer.put(input) if input
     end
   end
+  end # unless ime_handled
 
   # Adjust scroll for cursor visibility
   new_vscroll = adjust_vertical_scroll(buffer, scroll_top)
@@ -449,8 +476,47 @@ while running
 
   draw_status(console, filepath, buffer, scroll_top, message)
 
-  # Position cursor
-  screen_col = Editor.byte_to_display_col(buffer.current_line, buffer.cursor_x) - scroll_left
+  # Draw preedit overlay if IME has uncommitted text
+  preedit_width = 0
+  if $ime && $ime.preedit.bytesize > 0
+    cursor_col = Editor.byte_to_display_col(buffer.current_line, buffer.cursor_x) - scroll_left
+    preedit_row = EDIT_TOP + buffer.cursor_y - scroll_top
+    if preedit_row >= EDIT_TOP && preedit_row <= EDIT_BOTTOM
+      max_preedit = COLS - cursor_col
+      if max_preedit > 0
+        visible = Editor.display_slice($ime.preedit, 0, max_preedit)
+        if visible && visible.bytesize > 0
+          DVI::Text.put_string(cursor_col, preedit_row, visible, InputMethod::PREEDIT_ATTR)
+          preedit_width = Editor.display_width(visible)
+        end
+      end
+    end
+  end
+
+  # Draw candidate list on command bar if available, otherwise redraw command bar for mode label
+  if $ime && $ime.candidates
+    cand_text = ""
+    $ime.candidates.each_with_index do |c, ci|
+      break if ci >= 7
+      cand_text += " " if ci > 0
+      cand_text += "#{ci + 1}:#{c}"
+    end
+    mode = $ime.mode_label
+    if mode
+      padding = Console::COLS - Editor.display_width(cand_text) - Editor.display_width(mode)
+      cand_text += " " * padding if padding > 0
+      cand_text += mode
+    else
+      padding = Console::COLS - Editor.display_width(cand_text)
+      cand_text += " " * padding if padding > 0
+    end
+    console.put_string_at(0, COMMAND_ROW, Editor.display_slice(cand_text, 0, Console::COLS), COMMAND_ATTR)
+  else
+    draw_command_bar(console)
+  end
+
+  # Position cursor (after preedit if present)
+  screen_col = Editor.byte_to_display_col(buffer.current_line, buffer.cursor_x) - scroll_left + preedit_width
   screen_row = EDIT_TOP + buffer.cursor_y - scroll_top
   console.move_to(screen_col, screen_row)
   console.show_cursor
