@@ -13,6 +13,7 @@ end
 require "console"
 require "line_editor"
 require "keyboard_input"
+require "syntax_highlight_draw"
 
 # Set up DVI as standard output (mirrored to UART internally)
 $console = Console.new

@@ -204,6 +204,43 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## Inter
+
+- Repository: https://github.com/rsms/inter
+- License: SIL Open Font License 1.1
+
+```
+Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+```
+
+## Outfit
+
+- Repository: https://github.com/Outfitio/Outfit-Fonts
+- License: SIL Open Font License 1.1
+
+```
+Copyright 2021 The Outfit Project Authors (https://github.com/nicolo-ribaudo/outfit)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+```
+
+## RubyKaigi 2026 Keynote Template
+
+- Source: https://rubykaigi.org/2026/goodies/
+- The title slide background image (`data/rubykaigi2026_title.png`) is based on the
+  RubyKaigi 2026 Keynote template provided by RubyKaigi 2026 Team.
+- License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+
+```
+This work by RubyKaigi 2026 Team is licensed under CC BY 4.0 Speaker, session, and sponsor information is provided by respective parties and is not covered by this license.
+```
+
 ## x8y12pxDenkiChip
 
 - Repository: https://github.com/hicchicc/x8y12pxDenkiChip

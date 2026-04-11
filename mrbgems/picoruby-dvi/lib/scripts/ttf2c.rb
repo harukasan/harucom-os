@@ -10,6 +10,7 @@
 #   -s SIZE     Pixel size (default: 12)
 #   -r RANGE    Character range as "first-last" (default: 0x20-0x7f)
 #   --jis       JIS X 0208 mode: generate JIS-indexed font via Unicode mapping
+#   --aa        Anti-aliased 4bpp rendering
 
 require "optparse"
 require "freetype"
@@ -20,7 +21,8 @@ options = {
   output: nil,
   size: 12,
   range: "0x20-0x7f",
-  jis: false
+  jis: false,
+  aa: false
 }
 
 OptionParser.new do |opts|
@@ -30,6 +32,7 @@ OptionParser.new do |opts|
   opts.on("-s SIZE", Integer, "Pixel size") { |s| options[:size] = s }
   opts.on("-r RANGE", "Character range (e.g., 0x20-0x7f)") { |r| options[:range] = r }
   opts.on("--jis", "JIS X 0208 mode") { options[:jis] = true }
+  opts.on("--aa", "Anti-aliased 4bpp rendering") { options[:aa] = true }
 end.parse!
 
 input_path = ARGV[0] or abort "Error: no input TTF file specified"
@@ -38,10 +41,21 @@ font_name = options[:name] || File.basename(input_path, ".*").gsub(/[^a-zA-Z0-9_
 font = FreeType::API::Font.open(input_path)
 font.set_char_size(0, options[:size] * 64, 72, 72)
 
-# Render a glyph and return {bitmap: [row_bytes...], width:, height:, advance:}
+# Load a glyph with FT_LOAD_RENDER for outline fonts.
+# Returns the FreeType glyph slot with rendered bitmap.
+def load_rendered_glyph(font, codepoint, mono: true)
+  flags = FreeType::C::FT_LOAD_RENDER
+  flags |= FreeType::C::FT_LOAD_MONOCHROME if mono
+  err = FreeType::C::FT_Load_Char(font.face, codepoint, flags)
+  raise "FT_Load_Char failed for codepoint #{codepoint}: error #{err}" unless err == 0
+  font.face[:glyph]
+end
+
+# Render a 1bpp glyph and return {rows:, width:, advance:}
 # Bitmap rows are MSB-first, padded to full bytes.
-def render_glyph(font, codepoint, target_height, glyph_width)
-  g = font.glyph(codepoint)
+# ascender is the baseline position in pixels from the top of the glyph cell.
+def render_glyph(font, codepoint, target_height, glyph_width, ascender: nil)
+  g = load_rendered_glyph(font, codepoint, mono: true)
   bm = g[:bitmap]
   w = bm[:width]
   h = bm[:rows]
@@ -49,10 +63,11 @@ def render_glyph(font, codepoint, target_height, glyph_width)
   bitmap_top = g[:bitmap_top]
   bitmap_left = g[:bitmap_left]
 
-  # Place into target_height bitmap, aligned from the top.
+  # Place into target_height bitmap.
   # bitmap_top = distance from baseline to top of bitmap.
-  # We align all glyphs so that baseline is at (target_height - 1).
-  y_start = (target_height - 1) - bitmap_top
+  # Baseline is at ascender pixels from top (or target_height - 1 as fallback).
+  baseline = ascender || (target_height - 1)
+  y_start = baseline - bitmap_top
 
   src_bytes_per_row = (w + 7) / 8
   dst_bytes_per_row = (glyph_width + 7) / 8
@@ -83,20 +98,64 @@ def render_glyph(font, codepoint, target_height, glyph_width)
   {rows: rows, width: w, advance: advance}
 end
 
-# Determine max glyph dimensions for the character set
-def scan_dimensions(font, codepoints, pixel_size)
-  max_width = 0
-  max_height = 0
-  codepoints.each do |cp|
-    g = font.glyph(cp)
-    bm = g[:bitmap]
-    w = bm[:width] + g[:bitmap_left]
-    max_width = w if w > max_width
-    h = bm[:rows]
-    max_height = h if h > max_height
+# Render a 4bpp anti-aliased glyph and return {pixels:, width:, advance:, bitmap_left:}
+# pixels is a 2D array [row][col] of 4-bit alpha values (0-15).
+# ascender is the baseline position in pixels from the top of the glyph cell.
+# left_offset shifts all glyphs right by -left_offset to accommodate negative bearing.
+def render_glyph_aa(font, codepoint, target_height, glyph_width, ascender: nil, left_offset: 0)
+  g = load_rendered_glyph(font, codepoint, mono: false)
+  bm = g[:bitmap]
+  w = bm[:width]
+  h = bm[:rows]
+  advance = g[:advance][:x] >> 6
+  bitmap_top = g[:bitmap_top]
+  bitmap_left = g[:bitmap_left]
+
+  baseline = ascender || (target_height - 1)
+  y_start = baseline - bitmap_top
+  buf = bm[:buffer]
+  pitch = bm[:pitch]
+
+  pixels = Array.new(target_height) { Array.new(glyph_width, 0) }
+  h.times do |src_y|
+    dst_y = y_start + src_y
+    next if dst_y < 0 || dst_y >= target_height
+
+    w.times do |src_x|
+      dst_x = bitmap_left - left_offset + src_x
+      next if dst_x < 0 || dst_x >= glyph_width
+
+      # FreeType grayscale: 8bpp, one byte per pixel
+      gray = buf.get_uint8(src_y * pitch + src_x)
+      # Quantize 8bpp (0-255) to 4bpp (0-15)
+      pixels[dst_y][dst_x] = (gray + 8) / 17
+    end
   end
-  # Height is the pixel size (ascent + descent)
-  [max_width, pixel_size]
+
+  {pixels: pixels, width: w, advance: advance, bitmap_left: bitmap_left}
+end
+
+# Determine max glyph dimensions for the character set.
+# Returns [glyph_width, glyph_height, ascender_pixels, min_left].
+# glyph_width covers the full extent from min(bitmap_left) to max(bitmap_left + bitmap_width).
+# min_left is the minimum bitmap_left across all glyphs (0 or negative).
+def scan_dimensions(font, codepoints, pixel_size, mono: true)
+  min_left = 0
+  max_right = 0
+  codepoints.each do |cp|
+    g = load_rendered_glyph(font, cp, mono: mono)
+    bm = g[:bitmap]
+    left = g[:bitmap_left]
+    right = left + bm[:width]
+    min_left = left if left < min_left
+    max_right = right if right > max_right
+  end
+  metrics = font.face[:size][:metrics]
+  ascender = (metrics[:ascender] + 63) >> 6   # round up
+  descender = (-metrics[:descender] + 63) >> 6 # round up (descender is negative)
+  glyph_height = ascender + descender
+  glyph_width = max_right - min_left
+  [glyph_width, glyph_height, ascender, min_left]
 end
 
 def pack_rows(rows, glyph_width)
@@ -105,6 +164,18 @@ def pack_rows(rows, glyph_width)
     # Shift row to fill glyph_width from MSB
     bytes_per_row.times.map do |b|
       (row >> (8 * (bytes_per_row - 1 - b))) & 0xFF
+    end
+  end
+end
+
+# Pack 4bpp pixel data: 2 pixels per byte, high nibble = left pixel.
+def pack_pixels_4bpp(pixels, glyph_width)
+  bytes_per_row = (glyph_width + 1) / 2
+  pixels.flat_map do |row|
+    bytes_per_row.times.map do |b|
+      left = row[b * 2] || 0
+      right = row[b * 2 + 1] || 0
+      (left << 4) | right
     end
   end
 end
@@ -156,10 +227,19 @@ static const dvi_font_t font_<%= font_name %> = {
 <% if is_proportional -%>
     .widths       = font_<%= font_name %>_widths,
 <% end -%>
+<% if font_bpp && font_bpp > 1 -%>
+    .glyph_stride = <%= glyph_stride %>,
+    .bpp          = <%= font_bpp %>,
+    .bitmap_left  = <%= bitmap_left_value %>,
+<% end -%>
 };
 
 #endif
 TEMPLATE
+
+font_bpp = options[:aa] ? 4 : nil
+glyph_stride = nil
+bitmap_left_value = 0
 
 if options[:jis]
   # JIS mode: generate JIS-indexed font from Unicode TTF
@@ -167,9 +247,11 @@ if options[:jis]
   num_chars = 94 * 94
 
   jis_codepoints = uni2jis.keys
-  glyph_width, glyph_height = scan_dimensions(font, jis_codepoints, options[:size])
-  bytes_per_row = (glyph_width + 7) / 8
+  glyph_width, glyph_height, ascender, min_left = scan_dimensions(font, jis_codepoints, options[:size], mono: !options[:aa])
+  bitmap_left_value = min_left if options[:aa]
+  bytes_per_row = options[:aa] ? (glyph_width + 1) / 2 : (glyph_width + 7) / 8
   bytes_per_glyph = bytes_per_row * glyph_height
+  glyph_stride = bytes_per_glyph if options[:aa]
 
   jis2uni = {}
   uni2jis.each { |cp, idx| jis2uni[idx] = cp }
@@ -177,9 +259,16 @@ if options[:jis]
   rendered = {}
   advances = {}
   jis2uni.each do |idx, cp|
-    r = render_glyph(font, cp, glyph_height, glyph_width)
-    rendered[idx] = r
-    advances[idx] = r[:advance]
+    if options[:aa]
+      r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender, left_offset: min_left)
+      rendered[idx] = r
+      # Clamp advance to cover this glyph's own bitmap extent
+      advances[idx] = [r[:advance], r[:bitmap_left] + r[:width]].max
+    else
+      r = render_glyph(font, cp, glyph_height, glyph_width, ascender: ascender)
+      rendered[idx] = r
+      advances[idx] = r[:advance]
+    end
   end
 
   is_proportional = advances.values.uniq.length > 1
@@ -187,7 +276,11 @@ if options[:jis]
 
   glyphs = num_chars.times.map do |idx|
     r = rendered[idx]
-    bytes = r ? pack_rows(r[:rows], glyph_width) : Array.new(bytes_per_glyph, 0)
+    if options[:aa]
+      bytes = r ? pack_pixels_4bpp(r[:pixels], glyph_width) : Array.new(bytes_per_glyph, 0)
+    else
+      bytes = r ? pack_rows(r[:rows], glyph_width) : Array.new(bytes_per_glyph, 0)
+    end
     ku = idx / 94 + 1
     ten = idx % 94 + 1
     {bytes: bytes, comment: "idx=%d ku=%d ten=%d" % [idx, ku, ten]}
@@ -197,7 +290,8 @@ if options[:jis]
 
   generator_comment = "JIS X 0208, from TTF via FreeType"
   populated = rendered.size
-  $stderr.puts "JIS mode: #{populated}/#{num_chars} slots, #{glyph_width}x#{glyph_height}, proportional=#{is_proportional}"
+  bpp_label = options[:aa] ? ", 4bpp" : ""
+  $stderr.puts "JIS mode: #{populated}/#{num_chars} slots, #{glyph_width}x#{glyph_height}, proportional=#{is_proportional}#{bpp_label}"
 
 else
   # ASCII/Latin mode
@@ -207,22 +301,32 @@ else
   codepoints = (first_char..last_char).to_a
   num_chars = last_char - first_char + 1
 
-  glyph_width, glyph_height = scan_dimensions(font, codepoints, options[:size])
-  bytes_per_row = (glyph_width + 7) / 8
+  glyph_width, glyph_height, ascender, min_left = scan_dimensions(font, codepoints, options[:size], mono: !options[:aa])
+  bitmap_left_value = min_left if options[:aa]
+  bytes_per_row = options[:aa] ? (glyph_width + 1) / 2 : (glyph_width + 7) / 8
+  glyph_stride = bytes_per_row * glyph_height if options[:aa]
 
   advances = []
   glyphs = codepoints.map do |cp|
-    r = render_glyph(font, cp, glyph_height, glyph_width)
-    bytes = pack_rows(r[:rows], glyph_width)
-    advances << r[:advance]
+    if options[:aa]
+      r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender, left_offset: min_left)
+      bytes = pack_pixels_4bpp(r[:pixels], glyph_width)
+      # Clamp advance to cover this glyph's own bitmap extent
+      advances << [r[:advance], r[:bitmap_left] + r[:width]].max
+    else
+      r = render_glyph(font, cp, glyph_height, glyph_width, ascender: ascender)
+      bytes = pack_rows(r[:rows], glyph_width)
+      advances << r[:advance]
+    end
     comment = cp >= 0x20 && cp <= 0x7E ? "0x%02x '%s'" % [cp, cp.chr] : "0x%02x" % cp
     {bytes: bytes, comment: comment}
   end
 
   is_proportional = advances.uniq.length > 1
   first_char_hex = "0x%04x" % first_char
-  generator_comment = "from TTF via FreeType"
-  $stderr.puts "#{font_name}, #{glyph_width}x#{glyph_height}, chars 0x%02x-0x%02x, proportional=#{is_proportional}" % [first_char, last_char]
+  bpp_label = options[:aa] ? ", 4bpp" : ""
+  generator_comment = options[:aa] ? "4bpp anti-aliased, from TTF via FreeType" : "from TTF via FreeType"
+  $stderr.puts "#{font_name}, #{glyph_width}x#{glyph_height}, chars 0x%02x-0x%02x, proportional=#{is_proportional}#{bpp_label}" % [first_char, last_char]
 end
 
 guard = "DVI_FONT_#{font_name.upcase}_H"

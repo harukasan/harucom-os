@@ -18,11 +18,23 @@
 #include "disk.h"
 #include "dvi.h"
 
+/* Check if DVI is running by examining the frame counter.
+ * When DVI has not started, frame_count stays at 0 and
+ * dvi_wait_vsync() would hang forever. */
+static bool
+dvi_is_running(void)
+{
+    return dvi_get_frame_count() > 0;
+}
+
 int
 FLASH_disk_erase(void)
 {
-    dvi_set_blanking(true);
-    dvi_wait_vsync();
+    bool dvi = dvi_is_running();
+    if (dvi) {
+        dvi_set_blanking(true);
+        dvi_wait_vsync();
+    }
 
     uint32_t ints = save_and_disable_interrupts();
     flash_range_erase(
@@ -31,8 +43,10 @@ FLASH_disk_erase(void)
     );
     restore_interrupts(ints);
 
-    dvi_set_blanking(false);
-    dvi_wait_vsync();
+    if (dvi) {
+        dvi_set_blanking(false);
+        dvi_wait_vsync();
+    }
     return 0;
 }
 
@@ -67,8 +81,11 @@ FLASH_disk_write(const BYTE *buff, LBA_t sector, UINT count)
     uint32_t offset = FLASH_TARGET_OFFSET + sector * FLASH_SECTOR_SIZE;
     size_t size = (size_t)(FLASH_SECTOR_SIZE * count);
 
-    dvi_set_blanking(true);
-    dvi_wait_vsync();
+    bool dvi = dvi_is_running();
+    if (dvi) {
+        dvi_set_blanking(true);
+        dvi_wait_vsync();
+    }
 
     uint32_t ints = save_and_disable_interrupts();
     flash_range_erase(offset, size);
@@ -87,8 +104,10 @@ FLASH_disk_write(const BYTE *buff, LBA_t sector, UINT count)
         restore_interrupts(ints);
     }
 
-    dvi_set_blanking(false);
-    dvi_wait_vsync();
+    if (dvi) {
+        dvi_set_blanking(false);
+        dvi_wait_vsync();
+    }
     return 0;
 }
 

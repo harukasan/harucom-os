@@ -123,7 +123,18 @@ target_include_directories(picoruby-dvi PUBLIC
 )
 target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_dma)
 target_compile_options(picoruby-dvi PRIVATE -O2)
-target_compile_definitions(picoruby-dvi PRIVATE DVI_DIAGNOSTICS)
+# target_compile_definitions(picoruby-dvi PUBLIC DVI_DIAGNOSTICS)
+
+# --- PWM Audio library ---
+add_library(picoruby-pwm-audio
+    mrbgems/picoruby-pwm-audio/src/pwm_audio.c
+    mrbgems/picoruby-pwm-audio/ports/rp2350/pwm_audio_port.c
+)
+add_dependencies(picoruby-pwm-audio build_picoruby)
+target_include_directories(picoruby-pwm-audio PUBLIC
+    mrbgems/picoruby-pwm-audio/include
+)
+target_link_libraries(picoruby-pwm-audio pico_stdlib hardware_pwm pico_time)
 
 # --- Ruby scripts (rootfs/ -> ruby_scripts.h) ---
 file(GLOB_RECURSE RUBY_SCRIPTS ${CMAKE_SOURCE_DIR}/rootfs/*.rb)
@@ -149,6 +160,7 @@ add_executable(harucom_os
     src/env.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-rng/ports/rp2040/rng.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-adc/ports/rp2040/adc.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/ports/rp2040/io-console.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
@@ -205,7 +217,9 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/lib/ff14b/source
     ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/src/hal
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems
+    ${PICORUBY_ROOT}/mrbgems/picoruby-adc/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include
+    ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-pwm-audio/include
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems/picoruby-dvi/include
 )
 
@@ -219,6 +233,7 @@ target_link_libraries(harucom_os
     pico_unique_id
     pico_aon_timer
     hardware_timer
+    hardware_adc
     hardware_gpio
     hardware_flash
     hardware_sync
@@ -227,6 +242,7 @@ target_link_libraries(harucom_os
     tinyusb_pico_pio_usb
     mruby
     picoruby-dvi
+    picoruby-pwm-audio
 )
 
 # Core 0 needs 32 KB stack for mruby compiler (mrc_load_string_cxt).

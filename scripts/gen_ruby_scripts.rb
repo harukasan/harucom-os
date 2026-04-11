@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-# Generate a C header containing Ruby scripts from rootfs/ as byte arrays.
+# Generate a C header containing rootfs files as byte arrays.
 #
 # Usage: ruby scripts/gen_ruby_scripts.rb <rootfs_dir> <output_header>
 
@@ -9,7 +9,8 @@ rootfs_dir = Pathname.new(ARGV[0] || "rootfs")
 output_path = ARGV[1] || "ruby_scripts.h"
 
 entries = []
-rootfs_dir.glob("**/*.rb").sort.each do |path|
+rootfs_dir.glob("**/*").sort.each do |path|
+  next unless path.file?
   rel = path.relative_path_from(rootfs_dir).to_s
   var_name = "ruby_script_" + rel.gsub(/[\/.]/, "_")
   fatfs_path = "flash:" + rel

@@ -37,6 +37,11 @@ scroll_left = 0
 running = true
 message = nil
 
+# Syntax highlighting state
+highlight_enabled = filepath && filepath.end_with?(".rb")
+highlight_map = nil
+line_offsets = nil
+
 # Undo stack
 # Each entry: [:insert, y, x, text] | [:delete, y, x, text]
 #           | [:split, y, x]        | [:join, y, x]
@@ -139,6 +144,21 @@ if filepath && File.exist?(filepath)
   buffer.changed = false
 end
 
+def rebuild_highlight(buffer)
+  source = buffer.lines.join("\n")
+  map = SyntaxHighlight.tokenize(source)
+  return nil, nil unless map
+  offsets = []
+  offset = 0
+  buffer.lines.each { |l| offsets.push(offset); offset += l.bytesize + 1 }
+  return map, offsets
+end
+
+# Initial tokenization
+if highlight_enabled
+  highlight_map, line_offsets = rebuild_highlight(buffer)
+end
+
 # -- Drawing helpers --
 
 def draw_status(console, filepath, buffer, scroll_top, message)
@@ -207,22 +227,25 @@ def prompt_input(console, keyboard, label, y_or_n: false)
   end
 end
 
-def draw_line(console, buffer, screen_row, scroll_top, scroll_left)
+def draw_line(console, buffer, screen_row, scroll_top, scroll_left, highlight_map, line_offsets)
   row = EDIT_TOP + screen_row
   line_index = scroll_top + screen_row
-  if line_index < buffer.lines.length
-    text = Editor.display_slice(buffer.lines[line_index], scroll_left, Console::COLS)
-    console.clear_line(row)
-    console.put_string_at(0, row, text, EDIT_ATTR) if text && text.bytesize > 0
+  console.clear_line(row)
+  return if line_index >= buffer.lines.length
+
+  line = buffer.lines[line_index]
+  if highlight_map && line_offsets
+    SyntaxHighlight.draw_line(0, row, line, highlight_map, line_offsets[line_index] || 0, scroll_left, Console::COLS, EDIT_ATTR)
   else
-    console.clear_line(row)
+    text = Editor.display_slice(line, scroll_left, Console::COLS)
+    console.put_string_at(0, row, text, EDIT_ATTR) if text && text.bytesize > 0
   end
 end
 
-def draw_all_lines(console, buffer, scroll_top, scroll_left)
+def draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line_offsets)
   i = 0
   while i < EDIT_ROWS
-    draw_line(console, buffer, i, scroll_top, scroll_left)
+    draw_line(console, buffer, i, scroll_top, scroll_left, highlight_map, line_offsets)
     i += 1
   end
 end
@@ -260,7 +283,7 @@ end
 # -- Initial draw --
 console.clear
 draw_command_bar(console)
-draw_all_lines(console, buffer, scroll_top, scroll_left)
+draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line_offsets)
 draw_status(console, filepath, buffer, scroll_top, nil)
 
 # Position cursor
@@ -411,12 +434,17 @@ while running
   dirty = buffer.dirty
   dirty = old_dirty if dirty == :none && old_dirty != :none
 
+  # Re-tokenize on content changes
+  if highlight_enabled && (dirty == :content || dirty == :structure)
+    highlight_map, line_offsets = rebuild_highlight(buffer)
+  end
+
   case dirty
   when :structure
-    draw_all_lines(console, buffer, scroll_top, scroll_left)
+    draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line_offsets)
   when :content
     screen_row = buffer.cursor_y - scroll_top
-    draw_line(console, buffer, screen_row, scroll_top, scroll_left)
+    draw_line(console, buffer, screen_row, scroll_top, scroll_left, highlight_map, line_offsets)
   end
 
   draw_status(console, filepath, buffer, scroll_top, message)

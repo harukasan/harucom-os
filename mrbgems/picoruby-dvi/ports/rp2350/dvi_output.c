@@ -273,24 +273,24 @@ static uint32_t text_palette32[16];
 static uint32_t font_byte_mask[256][2]
     __attribute__((section(".scratch_y.font_byte_mask"), aligned(8)));
 
-// VGA-compatible default palette
+// Default 16-color palette (RGB332, ANSI color order)
 static const uint8_t default_palette[16] = {
-    0x00, // 0  Black
-    0x03, // 1  Blue
-    0x1C, // 2  Green
-    0x1F, // 3  Cyan
-    0xE0, // 4  Red
-    0xE3, // 5  Magenta
-    0xFC, // 6  Brown/Yellow
-    0x92, // 7  Light Gray
-    0x49, // 8  Dark Gray
-    0x4F, // 9  Light Blue
-    0x3E, // 10 Light Green
-    0x3F, // 11 Light Cyan
-    0xEC, // 12 Light Red
-    0xEF, // 13 Light Magenta
-    0xFE, // 14 Yellow
-    0xFF, // 15 White
+    0x00, // 0  Black        (R0 G0 B0)
+    0xE0, // 1  Red          (R7 G0 B0)
+    0x1C, // 2  Green        (R0 G7 B0)
+    0xA8, // 3  Brown        (R5 G2 B0)
+    0x03, // 4  Blue         (R0 G0 B3)
+    0xE3, // 5  Magenta      (R7 G0 B3)
+    0x1F, // 6  Cyan         (R0 G7 B3)
+    0xB6, // 7  Light Gray   (R5 G5 B2)
+    0x49, // 8  Dark Gray    (R2 G2 B1)
+    0xF0, // 9  Orange       (R7 G4 B0)
+    0x7C, // 10 Lime         (R3 G7 B0)
+    0xFC, // 11 Yellow       (R7 G7 B0)
+    0x17, // 12 Sky Blue     (R0 G5 B3)
+    0xEA, // 13 Pink         (R7 G2 B2)
+    0x5F, // 14 Bright Cyan  (R2 G7 B3)
+    0xFF, // 15 White        (R7 G7 B3)
 };
 
 static void update_palette32(void) {
