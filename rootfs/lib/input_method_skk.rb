@@ -413,6 +413,7 @@ class InputMethod
       text = (candidates && candidates[idx]) ? candidates[idx] : ""
       text += @okuri_kana if @okuri_kana.bytesize > 0
       im.commit(text) if text.bytesize > 0
+      im.clear_candidates
       @reading = ""
       @romaji = ""
       clear_okuri
