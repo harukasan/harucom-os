@@ -24,4 +24,4 @@
 	url = https://gitlab.freedesktop.org/xorg/font/adobe-75dpi.git
 [submodule "vendor/harucom-os-dict"]
 	path = vendor/harucom-os-dict
-	url = ./vendor/harucom-os-dict
+	url = git@github.com:harukasan/harucom-os-dict.git
