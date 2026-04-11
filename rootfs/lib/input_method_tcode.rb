@@ -24,6 +24,10 @@ class InputMethod
       @stroke1_ms = 0       # timestamp of first stroke
     end
 
+    def idle?
+      @stroke1.nil?
+    end
+
     def process(key, im)
       # Check timeout on first stroke
       if @stroke1

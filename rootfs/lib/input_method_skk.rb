@@ -59,6 +59,8 @@ class InputMethod
     # Hiragana -> Katakana offset (Unicode block difference)
     KATA_OFFSET = 0x60  # U+30A0 - U+3040
 
+    USER_DICT_PATH = "/data/skk-user-dict.txt"
+
     def initialize
       @mode = :hiragana
       @romaji = ""       # romaji accumulation buffer
@@ -66,6 +68,13 @@ class InputMethod
       @okuri_prefix = nil  # okurigana consonant prefix (e.g. "m" for NoMu)
       @okuri_romaji = ""   # okurigana romaji accumulation
       @okuri_kana = ""     # completed okurigana kana
+      @user_dict = {}      # reading => [candidate, ...]
+      load_user_dict
+    end
+
+    # True when engine is in base state (no pending conversion)
+    def idle?
+      @mode == :hiragana && @romaji.bytesize == 0
     end
 
     def process(key, im)
@@ -118,6 +127,13 @@ class InputMethod
       end
       im.set_preedit("")
       im.clear_candidates
+    end
+
+    def register_word(reading, candidate)
+      @user_dict[reading] ||= []
+      @user_dict[reading].delete(candidate)
+      @user_dict[reading].unshift(candidate)
+      save_user_dict
     end
 
     private
@@ -255,16 +271,24 @@ class InputMethod
       if key.to_s == " "
         flush_n_to_reading
         if @reading.bytesize > 0
-          candidates = InputMethod.skk_lookup(@reading)
+          candidates = lookup(@reading)
           if candidates
             im.set_candidates(candidates, 0)
             im.set_preedit("▼" + candidates[0])
             @mode = :candidate
             return :consumed
           end
+          # No candidates: enter register mode (unless already registering)
+          if im.registering
+            # Already registering: commit reading as-is
+            im.commit(@reading)
+          else
+            im.start_register(@reading)
+          end
+          @reading = ""
+          @romaji = ""
+          @mode = :hiragana
         end
-        # No candidates found
-        im.set_preedit("▽" + @reading)
         return :consumed
       end
 
@@ -289,7 +313,7 @@ class InputMethod
           @okuri_prefix = ch.downcase
           @okuri_romaji = @okuri_prefix
           @okuri_kana = ""
-          candidates = InputMethod.skk_lookup(@reading + @okuri_prefix)
+          candidates = lookup(@reading + @okuri_prefix)
           if candidates
             im.set_candidates(candidates, 0)
             im.set_preedit("▼" + candidates[0] + "*" + @okuri_romaji)
@@ -499,6 +523,45 @@ class InputMethod
     def flush_romaji(im)
       flush_n(im)
       im.set_preedit("")
+    end
+
+    # Look up a reading in user dict first, then flash dict.
+    # Returns Array of candidates, or nil.
+    def lookup(reading)
+      user = @user_dict[reading]
+      flash = InputMethod.skk_lookup(reading)
+      if user && flash
+        # Merge: user candidates first, then flash (skip duplicates)
+        merged = user.dup
+        flash.each { |c| merged.push(c) unless merged.include?(c) }
+        merged
+      else
+        user || flash
+      end
+    end
+
+    def load_user_dict
+      return unless File.exist?(USER_DICT_PATH)
+      content = File.open(USER_DICT_PATH, "r") { |f| f.read }
+      return unless content
+      content.split("\n").each do |line|
+        next if line.bytesize == 0
+        reading, rest = line.split(" ", 2)
+        next unless rest
+        candidates = []
+        rest.split("/").each do |c|
+          candidates.push(c) if c.bytesize > 0
+        end
+        @user_dict[reading] = candidates if candidates.length > 0
+      end
+    end
+
+    def save_user_dict
+      content = ""
+      @user_dict.each do |reading, candidates|
+        content += reading + " /" + candidates.join("/") + "/\n"
+      end
+      File.open(USER_DICT_PATH, "w") { |f| f.write(content) }
     end
 
     # Convert hiragana string to katakana
