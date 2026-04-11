@@ -94,18 +94,10 @@ class LineEditor
           source = @buffer.lines.join("\n")
           result = RubySyntax.analyze(source)
           if result
-            # Re-indent previous line (e.g. de-indent end keyword)
+            # Re-indent previous line (e.g. de-indent end/else/ensure)
             prev_y = @buffer.cursor_y - 1
             if prev_y >= 0
-              prev_line = @buffer.lines[prev_y]
-              prev_spaces = 0
-              while prev_spaces < prev_line.bytesize && prev_line.getbyte(prev_spaces) == 0x20
-                prev_spaces += 1
-              end
-              desired = "  " * result.indent_level(prev_y)
-              if prev_spaces != desired.bytesize
-                @buffer.lines[prev_y] = desired + prev_line.byteslice(prev_spaces, 65535).to_s
-              end
+              RubySyntax.reindent_line(@buffer, prev_y, result.indent_level(prev_y))
             end
             # Indent new line
             level = result.indent_level(@buffer.cursor_y)
@@ -125,6 +117,14 @@ class LineEditor
       else
         if c.printable?
           @buffer.put(c.to_s)
+          # De-indent on space after keywords like when, elsif, rescue, in
+          if c.to_s == " " && RubySyntax.should_dedent_on_space?(@buffer.current_line)
+            source = @buffer.lines.join("\n")
+            result = RubySyntax.analyze(source)
+            if result
+              RubySyntax.reindent_line(@buffer, @buffer.cursor_y, result.indent_level(@buffer.cursor_y))
+            end
+          end
         else
           input = c.to_buffer_input
           @buffer.put(input) if input

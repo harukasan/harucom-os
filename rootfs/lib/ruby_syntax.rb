@@ -33,6 +33,40 @@ module RubySyntax
     false, # 8: method
   ].freeze
 
+  # Keywords that trigger de-indent when followed by a space.
+  DEDENT_ON_SPACE = ["when ", "elsif ", "rescue ", "in "]
+
+  # Re-indent a line in the buffer to match the given indent level.
+  # Returns true if the line was modified.
+  def self.reindent_line(buffer, line_index, level)
+    line = buffer.lines[line_index]
+    return false unless line
+    current_spaces = 0
+    while current_spaces < line.bytesize && line.getbyte(current_spaces) == 0x20
+      current_spaces += 1
+    end
+    desired = "  " * level
+    return false if current_spaces == desired.bytesize
+    buffer.lines[line_index] = desired + line.byteslice(current_spaces, 65535).to_s
+    # Adjust cursor if on this line
+    if buffer.cursor_y == line_index
+      delta = desired.bytesize - current_spaces
+      new_x = buffer.cursor_x + delta
+      buffer.move_to(new_x < 0 ? 0 : new_x, line_index)
+    end
+    true
+  end
+
+  # Check if a line ends with a keyword that should trigger de-indent
+  # when space is pressed.
+  def self.should_dedent_on_space?(line)
+    DEDENT_ON_SPACE.each do |kw|
+      stripped = line.lstrip
+      return true if stripped == kw
+    end
+    false
+  end
+
   # Draw a single line with syntax highlighting.
   #
   # col_start:     screen column to start drawing

@@ -264,13 +264,13 @@ visit_node(const pm_node_t *node, void *data)
 
     /* Indent-specific processing */
     bool opens_block = false;
+    bool is_clause = false;  /* intermediate clause (when, elsif, else, rescue, ensure) */
 
     switch (PM_NODE_TYPE(node)) {
     case PM_CLASS_NODE:
     case PM_MODULE_NODE:
     case PM_SINGLETON_CLASS_NODE:
     case PM_DEF_NODE:
-    case PM_IF_NODE:
     case PM_UNLESS_NODE:
     case PM_WHILE_NODE:
     case PM_UNTIL_NODE:
@@ -280,11 +280,24 @@ visit_node(const pm_node_t *node, void *data)
     case PM_BEGIN_NODE:
     case PM_BLOCK_NODE:
     case PM_LAMBDA_NODE:
+        opens_block = true;
+        break;
+    case PM_IF_NODE: {
+        /* elsif is represented as a nested PM_IF_NODE. Detect it by
+         * checking the keyword length: "if" = 2, "elsif" = 5. */
+        const pm_if_node_t *if_node = (const pm_if_node_t *)node;
+        opens_block = true;
+        if (if_node->if_keyword_loc.end - if_node->if_keyword_loc.start > 2) {
+            is_clause = true;
+        }
+        break;
+    }
     case PM_RESCUE_NODE:
     case PM_ENSURE_NODE:
     case PM_ELSE_NODE:
     case PM_WHEN_NODE:
         opens_block = true;
+        is_clause = true;
         break;
     default:
         break;
@@ -335,21 +348,36 @@ visit_node(const pm_node_t *node, void *data)
 
         bool has_real_closing = (closing.start != NULL && closing.start < closing.end);
 
-        if (has_real_closing) {
+        if (is_clause) {
+            /* Intermediate clause (when, elsif, else, rescue, ensure):
+             * only fix the keyword line to the parent's depth. Body
+             * indentation is already handled by the parent block's
+             * indent_range, so no body range is needed here. */
+            uint8_t clause_depth = sd->depth > 0 ? sd->depth - 1 : 0;
+            if (node_start < sd->line_count) {
+                sd->indent_levels[node_start] = clause_depth;
+            }
+        } else if (has_real_closing) {
             /* Complete block: indent body lines, exclude closing keyword line */
             if (node_start < node_end) {
                 indent_range(sd, node_start + 1, node_end, child_depth);
             }
         } else {
-            /* Incomplete block (missing end) or no own closing keyword:
-             * include node_end so the cursor line gets indented */
-            if (node_start < node_end) {
-                indent_range(sd, node_start + 1, node_end + 1, child_depth);
-            }
+            /* Incomplete block (missing end): indent from the line after
+             * the keyword. When the missing end is on the same line as
+             * the keyword (e.g. "begin\n"), node_start == node_end, so
+             * we ensure at least the next line gets indented. */
+            size_t body_start = node_start + 1;
+            size_t body_end = (node_end > node_start)
+                ? node_end + 1
+                : node_start + 2;
+            indent_range(sd, body_start, body_end, child_depth);
         }
 
         uint8_t saved_depth = sd->depth;
-        sd->depth++;
+        if (!is_clause) {
+            sd->depth++;
+        }
         pm_visit_child_nodes(node, visit_node, data);
         sd->depth = saved_depth;
     } else {

@@ -423,19 +423,12 @@ while running
       source = buffer.lines.join("\n")
       result = RubySyntax.analyze(source)
       if result
-        # Re-indent previous line (e.g. de-indent end keyword)
+        # Re-indent previous line (e.g. de-indent end/else/ensure)
         prev_y = buffer.cursor_y - 1
         if prev_y >= 0
-          prev_line = buffer.lines[prev_y]
-          prev_spaces = 0
-          while prev_spaces < prev_line.bytesize && prev_line.getbyte(prev_spaces) == 0x20
-            prev_spaces += 1
-          end
-          desired = "  " * result.indent_level(prev_y)
-          if prev_spaces != desired.bytesize
-            new_line = desired + prev_line.byteslice(prev_spaces, 65535).to_s
-            undo_record(undo_stack, [:replace_line, prev_y, prev_line])
-            buffer.lines[prev_y] = new_line
+          old_line = buffer.lines[prev_y]
+          if RubySyntax.reindent_line(buffer, prev_y, result.indent_level(prev_y))
+            undo_record(undo_stack, [:replace_line, prev_y, old_line])
           end
         end
         # Indent new line
@@ -468,6 +461,18 @@ while running
       redo_stack.clear
       undo_record(undo_stack, [:insert, buffer.cursor_y, buffer.cursor_x, c.to_s])
       buffer.put(c.to_s)
+      # De-indent on space after keywords like when, elsif, rescue, in
+      if highlight_enabled && c.to_s == " " && RubySyntax.should_dedent_on_space?(buffer.current_line)
+        source = buffer.lines.join("\n")
+        result = RubySyntax.analyze(source)
+        if result
+          old_line = buffer.current_line
+          if RubySyntax.reindent_line(buffer, buffer.cursor_y, result.indent_level(buffer.cursor_y))
+            undo_record(undo_stack, [:replace_line, buffer.cursor_y, old_line])
+            buffer.mark_dirty(:content)
+          end
+        end
+      end
     else
       input = c.to_buffer_input
       buffer.put(input) if input
