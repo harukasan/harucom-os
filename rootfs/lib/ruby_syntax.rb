@@ -1,4 +1,4 @@
-# SyntaxHighlight drawing helpers for DVI text mode.
+# RubySyntax drawing helpers for DVI text mode.
 #
 # Provides a shared draw_line method used by both the editor (edit.rb)
 # and the IRB line editor (line_editor.rb) to render syntax-highlighted
@@ -6,7 +6,7 @@
 #
 # Color theme: Monokai-inspired (ANSI-ordered RGB332 palette).
 
-module SyntaxHighlight
+module RubySyntax
   # Category -> DVI attribute byte (fg palette index << 4 | bg=0)
   CATEGORY_ATTRS = [
     0xF0, # 0: default    -> palette 15 (white)
@@ -38,7 +38,7 @@ module SyntaxHighlight
   # col_start:     screen column to start drawing
   # row:           screen row
   # line:          source line string
-  # highlight_map: byte string from SyntaxHighlight.tokenize (or nil)
+  # highlight_map: byte string from RubySyntax.analyze(source).highlight_map (or nil)
   # line_offset:   byte offset of this line within the full source
   # scroll:        horizontal scroll offset (display columns)
   # max_width:     maximum display columns to render

@@ -37,8 +37,9 @@ scroll_left = 0
 running = true
 message = nil
 
-# Syntax highlighting state
+# Syntax analysis state (highlighting and indentation)
 highlight_enabled = filepath && filepath.end_with?(".rb")
+syntax_result = nil
 highlight_map = nil
 line_offsets = nil
 
@@ -144,19 +145,20 @@ if filepath && File.exist?(filepath)
   buffer.changed = false
 end
 
-def rebuild_highlight(buffer)
+def rebuild_syntax(buffer)
   source = buffer.lines.join("\n")
-  map = SyntaxHighlight.tokenize(source)
-  return nil, nil unless map
+  result = RubySyntax.analyze(source)
+  return nil, nil, nil unless result
+  map = result.highlight_map
   offsets = []
   offset = 0
   buffer.lines.each { |l| offsets.push(offset); offset += l.bytesize + 1 }
-  return map, offsets
+  return result, map, offsets
 end
 
-# Initial tokenization
+# Initial syntax analysis
 if highlight_enabled
-  highlight_map, line_offsets = rebuild_highlight(buffer)
+  syntax_result, highlight_map, line_offsets = rebuild_syntax(buffer)
 end
 
 # -- Drawing helpers --
@@ -242,7 +244,7 @@ def draw_line(console, buffer, screen_row, scroll_top, scroll_left, highlight_ma
 
   line = buffer.lines[line_index]
   if highlight_map && line_offsets
-    SyntaxHighlight.draw_line(0, row, line, highlight_map, line_offsets[line_index] || 0, scroll_left, Console::COLS, EDIT_ATTR)
+    RubySyntax.draw_line(0, row, line, highlight_map, line_offsets[line_index] || 0, scroll_left, Console::COLS, EDIT_ATTR)
   else
     text = Editor.display_slice(line, scroll_left, Console::COLS)
     console.put_string_at(0, row, text, EDIT_ATTR) if text && text.bytesize > 0
@@ -416,6 +418,35 @@ while running
     undo_record(undo_stack, [:split, buffer.cursor_y, buffer.cursor_x])
     undo_record_break(undo_stack)
     buffer.put(c.to_buffer_input)
+    # Auto-indent: re-analyze after line split to get correct indent
+    if highlight_enabled
+      source = buffer.lines.join("\n")
+      result = RubySyntax.analyze(source)
+      if result
+        # Re-indent previous line (e.g. de-indent end keyword)
+        prev_y = buffer.cursor_y - 1
+        if prev_y >= 0
+          prev_line = buffer.lines[prev_y]
+          prev_spaces = 0
+          while prev_spaces < prev_line.bytesize && prev_line.getbyte(prev_spaces) == 0x20
+            prev_spaces += 1
+          end
+          desired = "  " * result.indent_level(prev_y)
+          if prev_spaces != desired.bytesize
+            new_line = desired + prev_line.byteslice(prev_spaces, 65535).to_s
+            undo_record(undo_stack, [:replace_line, prev_y, prev_line])
+            buffer.lines[prev_y] = new_line
+          end
+        end
+        # Indent new line
+        level = result.indent_level(buffer.cursor_y)
+        if level > 0
+          spaces = "  " * level
+          undo_record(undo_stack, [:insert, buffer.cursor_y, 0, spaces])
+          buffer.put(spaces)
+        end
+      end
+    end
   when Keyboard::BSPACE
     redo_stack.clear
     if buffer.cursor_x > 0
@@ -461,9 +492,9 @@ while running
   dirty = buffer.dirty
   dirty = old_dirty if dirty == :none && old_dirty != :none
 
-  # Re-tokenize on content changes
+  # Re-analyze on content changes
   if highlight_enabled && (dirty == :content || dirty == :structure)
-    highlight_map, line_offsets = rebuild_highlight(buffer)
+    syntax_result, highlight_map, line_offsets = rebuild_syntax(buffer)
   end
 
   case dirty

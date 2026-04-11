@@ -90,6 +90,27 @@ class LineEditor
           return script
         else
           @buffer.put(c.to_buffer_input)
+          # Auto-indent: re-analyze and adjust indentation
+          source = @buffer.lines.join("\n")
+          result = RubySyntax.analyze(source)
+          if result
+            # Re-indent previous line (e.g. de-indent end keyword)
+            prev_y = @buffer.cursor_y - 1
+            if prev_y >= 0
+              prev_line = @buffer.lines[prev_y]
+              prev_spaces = 0
+              while prev_spaces < prev_line.bytesize && prev_line.getbyte(prev_spaces) == 0x20
+                prev_spaces += 1
+              end
+              desired = "  " * result.indent_level(prev_y)
+              if prev_spaces != desired.bytesize
+                @buffer.lines[prev_y] = desired + prev_line.byteslice(prev_spaces, 65535).to_s
+              end
+            end
+            # Indent new line
+            level = result.indent_level(@buffer.cursor_y)
+            @buffer.put("  " * level) if level > 0
+          end
         end
       when Keyboard::PAGEUP
         @console.scroll_back(Console::ROWS - 1)
@@ -139,7 +160,8 @@ class LineEditor
 
     unless custom
       source = lines.join("\n")
-      highlight_map = SyntaxHighlight.tokenize(source)
+      result = RubySyntax.analyze(source)
+      highlight_map = result && result.highlight_map
       hl_offsets = nil
       if highlight_map
         hl_offsets = []
@@ -159,7 +181,7 @@ class LineEditor
       if custom && i == 0
         draw_command_line(@prompt_width, row, lines[0], custom, max_line_width)
       elsif highlight_map && hl_offsets
-        SyntaxHighlight.draw_line(@prompt_width, row, lines[i], highlight_map, hl_offsets[i] || 0, 0, max_line_width, @console.attr)
+        RubySyntax.draw_line(@prompt_width, row, lines[i], highlight_map, hl_offsets[i] || 0, 0, max_line_width, @console.attr)
       else
         visible_text = Editor.display_slice(lines[i], 0, max_line_width)
         @console.put_string_at(@prompt_width, row, visible_text, @console.attr) if visible_text
