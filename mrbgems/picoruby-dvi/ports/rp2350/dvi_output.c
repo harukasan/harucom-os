@@ -1102,6 +1102,7 @@ void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
   if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows)
     return;
   int phys = physical_row(row, write_scroll_offset);
+  render_wide_glyph_at(col, phys, ch, text_wide_font, false);
   dvi_text_cell_t *left = &write_vram[phys * text_cols + col];
   dvi_text_cell_t *right = &write_vram[phys * text_cols + col + 1];
   left->ch = ch; // linear JIS index (used by write_line for re-rendering)
@@ -1111,13 +1112,13 @@ void dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr) {
   right->attr = attr;
   right->flags = DVI_CELL_FLAG_WIDE_R;
   write_row_has_wide[phys] = 1;
-  render_wide_glyph_at(col, phys, ch, text_wide_font, false);
 }
 
 void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
   if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows)
     return;
   int phys = physical_row(row, write_scroll_offset);
+  render_wide_glyph_at(col, phys, ch, text_wide_font, true);
   dvi_text_cell_t *left = &write_vram[phys * text_cols + col];
   dvi_text_cell_t *right = &write_vram[phys * text_cols + col + 1];
   left->ch = ch; // linear JIS index
@@ -1127,7 +1128,6 @@ void dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr) {
   right->attr = attr;
   right->flags = DVI_CELL_FLAG_WIDE_R | DVI_CELL_FLAG_BOLD;
   write_row_has_wide[phys] = 1;
-  render_wide_glyph_at(col, phys, ch, text_wide_font, true);
 }
 
 // Decode one UTF-8 character from str, store codepoint in *cp.
@@ -1257,7 +1257,6 @@ void dvi_text_clear(uint8_t attr) {
     write_vram[i].flags = 0;
   }
   memset(write_row_has_wide, 0, text_rows);
-  memset(screenbuf.glyph_bitmap, 0, GLYPH_BITMAP_SIZE);
   write_scroll_offset = 0;
 }
 
@@ -1270,10 +1269,6 @@ static void clear_physical_line(int phys, uint8_t attr) {
     line[i].flags = 0;
   }
   write_row_has_wide[phys] = 0;
-  // Clear glyph bitmap for this physical row
-  memset(screenbuf.glyph_bitmap +
-             phys * TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE,
-         0, TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE);
 }
 
 void dvi_text_clear_line(int row, uint8_t attr) {
@@ -1403,9 +1398,8 @@ void dvi_text_write_line(int row, const dvi_text_cell_t *src) {
   if (row < 0 || row >= text_rows || !src)
     return;
   int phys = physical_row(row, write_scroll_offset);
-  memcpy(&write_vram[phys * text_cols], src,
-         text_cols * sizeof(dvi_text_cell_t));
-  // Re-render wide glyphs from cell data into per-position bitmap.
+  // Render wide glyphs before VRAM update so the bitmap is ready
+  // when the renderer sees the new cells.
   uint8_t has_wide = 0;
   for (int col = 0; col < text_cols; col++) {
     if (src[col].flags & DVI_CELL_FLAG_WIDE_L) {
@@ -1414,5 +1408,7 @@ void dvi_text_write_line(int row, const dvi_text_cell_t *src) {
       has_wide = 1;
     }
   }
+  memcpy(&write_vram[phys * text_cols], src,
+         text_cols * sizeof(dvi_text_cell_t));
   write_row_has_wide[phys] = has_wide;
 }

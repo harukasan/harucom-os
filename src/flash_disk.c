@@ -1,8 +1,6 @@
 /*
  * Flash disk driver for FatFs on RP2350 (Harucom Board, 16 MB flash).
  *
- * DVI blanking is enabled before flash operations to ensure Core 1
- * does not access flash-resident data during XIP-disabled window.
  * Core 0 interrupts are disabled during flash_range_erase/program
  * to prevent flash-resident IRQ handlers from running.
  */
@@ -16,37 +14,16 @@
 #include <hardware/flash.h>
 
 #include "disk.h"
-#include "dvi.h"
-
-/* Check if DVI is running by examining the frame counter.
- * When DVI has not started, frame_count stays at 0 and
- * dvi_wait_vsync() would hang forever. */
-static bool
-dvi_is_running(void)
-{
-    return dvi_get_frame_count() > 0;
-}
 
 int
 FLASH_disk_erase(void)
 {
-    bool dvi = dvi_is_running();
-    if (dvi) {
-        dvi_set_blanking(true);
-        dvi_wait_vsync();
-    }
-
     uint32_t ints = save_and_disable_interrupts();
     flash_range_erase(
         (uint32_t)FLASH_TARGET_OFFSET,
         (size_t)(FLASH_SECTOR_SIZE * FLASH_SECTOR_COUNT)
     );
     restore_interrupts(ints);
-
-    if (dvi) {
-        dvi_set_blanking(false);
-        dvi_wait_vsync();
-    }
     return 0;
 }
 
@@ -81,12 +58,6 @@ FLASH_disk_write(const BYTE *buff, LBA_t sector, UINT count)
     uint32_t offset = FLASH_TARGET_OFFSET + sector * FLASH_SECTOR_SIZE;
     size_t size = (size_t)(FLASH_SECTOR_SIZE * count);
 
-    bool dvi = dvi_is_running();
-    if (dvi) {
-        dvi_set_blanking(true);
-        dvi_wait_vsync();
-    }
-
     uint32_t ints = save_and_disable_interrupts();
     flash_range_erase(offset, size);
     restore_interrupts(ints);
@@ -104,10 +75,6 @@ FLASH_disk_write(const BYTE *buff, LBA_t sector, UINT count)
         restore_interrupts(ints);
     }
 
-    if (dvi) {
-        dvi_set_blanking(false);
-        dvi_wait_vsync();
-    }
     return 0;
 }
 
