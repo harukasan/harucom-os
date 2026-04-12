@@ -8,6 +8,12 @@ allotted_time: 30
 
 # Self Introduction
 
+```p5
+bmp = PicoRabbit::BMP.load("/data/pixelcat.bmp")
+ix = 640 - 40 - bmp.width
+p5.image_masked(bmp.data, bmp.mask, ix, y, bmp.width, bmp.height)
+```
+
 Shunsuke Michii
 a.k.a Harukasan
 
@@ -38,15 +44,12 @@ We're hiring!
 # PicoRabbit
 
 A presentation tool inspired by Rabbit
+**Rewritten as a Ruby application on Harucom**
 
 - Markdown-based slides
 - 640x480 rendering with anti-aliased fonts
 - Bitmap image support
-- Scriptable themes in Ruby
-
-{::wait/}
-
-**Rewritten as a full Ruby application on Harucom**
+- Scriptable theme in Ruby
 
 # Harucom OS
 
@@ -58,9 +61,9 @@ p5.text_align(:center)
 # Stack diagram
 layers = [
   [0xE0, "Application (Ruby)"],
-  [0x1C, "Harucom OS (Ruby)"],
-  [p5.color(0, 80, 200), "PicoRuby"],
-  [0x49, "mruby VM"],
+  [0xA0, "Harucom OS (Ruby)"],
+  [0x80, "PicoRuby"],
+  [0x60, "mruby VM"],
   [0x24, "RP2350 Hardware"],
 ]
 bw = 360
