@@ -63,6 +63,7 @@ module PicoRabbit
       def render_element(p5, element, x, y)
         if element.type == :bullet
           indent = x + element.level * bullet_indent
+          p5.text_align(:left)
           p5.text_font(G::FONT_INTER_SYMBOLS_22)
           p5.text_color(ACCENT)
           p5.text(bullet_char, indent, y)
