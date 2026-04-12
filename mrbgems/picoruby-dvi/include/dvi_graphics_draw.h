@@ -103,6 +103,16 @@ int dvi_graphics_text_width(const char *text, const dvi_font_t *font, const dvi_
 void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height, int x0, int y0,
                                   int x1, int y1, int thickness, uint8_t color);
 
+// Draw text with a 2x3 affine transform.
+// The text is rendered as if it were a horizontal image (text_width x font_height),
+// then transformed by the affine matrix. Supports 1bpp and 4bpp (anti-aliased) fonts.
+void dvi_graphics_draw_text_affine(uint8_t *framebuffer, int fb_width, int fb_height,
+                                   const char *text, uint8_t color,
+                                   const dvi_font_t *font, const dvi_font_t *wide_font,
+                                   int origin_x, int origin_y,
+                                   float m00, float m01, float m10, float m11,
+                                   float tx, float ty);
+
 // Blit an RGB332 image with a 2x3 affine transform.
 // The affine matrix [m00 m01 / m10 m11 / tx ty] is the current coordinate
 // transform. origin_x, origin_y is the image's top-left position in user

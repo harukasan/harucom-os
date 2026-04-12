@@ -275,7 +275,8 @@ module PicoRabbit
         x = $__picorabbit_x
         y = $__picorabbit_y
         #{setup}
-        loop do
+        while true
+          # Re-read globals updated by render_p5_code before each resume
           p5 = $__picorabbit_p5
           x = $__picorabbit_x
           y = $__picorabbit_y
@@ -286,14 +287,31 @@ module PicoRabbit
       if @p5_last_code != code
         @p5_last_code = code
         @p5_sandbox = Sandbox.new("p5_draw")
-        @p5_sandbox.compile(code)
+        unless @p5_sandbox.compile(code)
+          msg = "[p5] compile error"
+          puts msg
+          render_p5_error(p5, msg, y)
+          return y
+        end
         @p5_sandbox.execute
       else
         @p5_sandbox.resume
       end
       @p5_sandbox.wait
+      if (err = @p5_sandbox.error)
+        msg = "[p5] #{err.class}: #{err.message}"
+        puts msg
+        render_p5_error(p5, msg, y)
+      end
       @p5_setup_lines = nil
       y
+    end
+
+    def render_p5_error(p5, msg, y)
+      p5.text_font(G::FONT_MPLUS_12)
+      p5.text_color(0xE0)
+      p5.text_align(:left)
+      p5.text(msg, margin_x, y)
     end
 
     def render_footer(p5, slide_index, total_slides)

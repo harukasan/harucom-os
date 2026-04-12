@@ -25,7 +25,7 @@ p5.pop_matrix
 ```
 
 Shunsuke Michii
-a.k.a Harukasan
+a.k.a **Harukasan**
 
 * Software Engineer
 * Electronics Hobbyist
@@ -33,8 +33,7 @@ a.k.a Harukasan
 
 # Harucom Board
 
-- RP2350A (ARM Cortex-M33, dual core)
-- 520 KB SRAM
+- RP2350A (dual core ARM Cortex-M33, 520 KB SRAM)
 - 16 MB Flash
 - 8 MB PSRAM
 - DVI output (640x480 @ 60Hz)
@@ -63,51 +62,51 @@ A presentation tool inspired by Rabbit
 
 # Harucom OS
 
-```p5
-g = DVI::Graphics
-p5.text_font(g::FONT_SOURCE_CODE_PRO_18)
-p5.text_align(:center)
+```p5_setup
 
 # Stack diagram
-layers = [
-  [0xE0, "Application (Ruby)"],
-  [0xA0, "Harucom OS (Ruby)"],
-  [0x80, "PicoRuby"],
-  [0x60, "mruby VM"],
-  [0x24, "RP2350 Hardware"],
+rows = [
+  [[0xE0, "Ruby Applications"]],
+  [[0xA0, "Harucom OS"]],
+  [[0x80, "PicoRuby"], [0x64, "DVI/USB Drivers"]],
+  [[0x60, "mruby VM"]],
+  [[0x24, "RP2350 Hardware"]],
 ]
 bw = 360
 bh = 40
+gap = 4
 bx = 320 - bw / 2
 by = 120
-layers.each_with_index do |layer, i|
-  p5.fill(layer[0])
-  p5.no_stroke
-  p5.rect(bx, by + i * (bh + 4), bw, bh)
-  p5.text_color(0xFF)
-  p5.text(layer[1], 320, by + i * (bh + 4) + 12)
-end
 ```
 
-{::wait/}
+```p5
+p5.text_font(DVI::Graphics::FONT_SOURCE_CODE_PRO_18)
+p5.text_align(:center)
 
-- Display output + USB keyboard input
-- FAT filesystem on flash
-- Cooperative multitasking
+rows.each_with_index do |row, i|
+  col_gap = 4
+  col_w = (bw - col_gap * (row.size - 1)) / row.size
+  row.each_with_index do |col, j|
+    x = bx + j * (col_w + col_gap)
+    y = by + i * (bh + gap)
+    p5.fill(col[0])
+    p5.no_stroke
+    p5.rect(x, y, col_w, bh)
+    p5.text_color(0xFF)
+    p5.text(col[1], x + col_w / 2, y + 12)
+  end
+end
+```
 
 # Goals
 
 1. Run rich embedded applications with mruby
 2. Build my own computer with my own hands
+3. **A good first choise for learning programming**
 
 {::wait/}
 
-3. **The best first computer for learning programming**
-
-{::wait/}
-
-- No complex OS, just a TV and a keyboard
-- Grove connector for hardware hacking
+- No complex OS, just connect a display and a keyboard
 - Fully hackable and open source
 
 # Dive deep into the architecture
@@ -118,19 +117,18 @@ How hard can it be?
 
 # Pixel clock frequency
 
-DVI requires a continuous pixel stream
-
-- H total: 640 + 16 + 96 + 48 = 800 pixels
-- V total: 480 + 10 + 2 + 33 = 525 lines
-
+- DVI requires a continuous pixel stream
 - 800 x 525 x 60 Hz = **25.2 MHz**
-- Must output one pixel every 40 ns
 
 ```p5
 # DVI frame timing diagram
 s = 0.4
-ox = 300
-oy = 190
+ox = 320 - (800 * s).to_i / 2
+oy = 200
+
+g = DVI::Graphics
+font = g::FONT_SOURCE_CODE_PRO_18
+font_bold = g::FONT_SOURCE_CODE_PRO_BOLD_18
 
 # Total frame area (800 x 525)
 tw = (800 * s).to_i
@@ -144,35 +142,61 @@ aw = (640 * s).to_i
 ah = (480 * s).to_i
 bpx = (48 * s).to_i
 bpy = (33 * s).to_i
-p5.fill(p5.color(0, 80, 200))
-p5.rect(ox + bpx, oy + bpy, aw, ah)
+ax = ox + bpx
+ay = oy + bpy
+p5.fill(0xFF)
+p5.rect(ax, ay, aw, ah)
+p5.fill(0x64)
+p5.rect(ax, ay, aw, 10*s)
 
-g = DVI::Graphics
-p5.text_font(g::FONT_SOURCE_CODE_PRO_18)
-p5.text_color(0xFF)
-p5.text_align(:center)
-p5.text("640 x 480", ox + bpx + aw / 2, oy + bpy + ah / 2 - 4)
-
-hy = oy + th + 12
-p5.stroke(0x49)
-p5.line(ox + bpx, hy, ox + bpx + aw, hy)
-p5.no_stroke
-p5.text_color(0xDB)
-p5.text("640", ox + bpx + aw / 2, hy + 4)
-
-hy2 = hy + 16
-p5.stroke(0x49)
-p5.line(ox, hy2, ox + tw, hy2)
-p5.no_stroke
-p5.text_color(0x92)
-p5.text("800", ox + tw / 2, hy2 + 4)
-
-vx = ox + tw + 8
+# Active area label
+p5.text_font(font)
+p5.text_color(0x64)
 p5.text_align(:left)
-p5.text_color(0xDB)
-p5.text("480", vx, oy + bpy + ah / 2 - 4)
-p5.text_color(0x92)
-p5.text("525", vx, oy + th / 2 - 4)
+p5.text_font(font_bold)
+p5.text("Active area", ax + 10, ay + 10)
+p5.stroke(0x64)
+p5.line(ax + 10, ay + 30, ax + aw - 10, ay + 30)
+p5.text_align(:center)
+p5.text_font(font)
+p5.text("640 x 480", ax + aw / 2, ay + ah / 2 - 4)
+
+# Horizontal dimensions (below the diagram)
+hy = oy + th + 10
+
+# Total width line and label
+p5.stroke(0x49)
+p5.stroke_weight(2)
+p5.line(ox, hy, ox + tw, hy)
+p5.line(ox, hy, ox + 5, hy - 5)
+p5.line(ox, hy, ox + 5, hy + 5)
+p5.line(ox + tw, hy, ox + tw - 5, hy - 5)
+p5.line(ox + tw, hy, ox + tw - 5, hy + 5)
+p5.stroke_weight(1)
+p5.text_color(0x40)
+p5.text_font(font_bold)
+p5.text("H total: 640+16+96+48 = 800 px", ox + tw / 2, hy + 4)
+
+# Vertical dimensions (right of the diagram)
+vx = ox + tw + 10
+p5.stroke(0x49)
+p5.stroke_weight(2)
+p5.line(vx, oy, vx, oy + th)
+p5.line(vx, oy, vx - 5, oy + 5)
+p5.line(vx, oy, vx + 5, oy + 5)
+p5.line(vx, oy + th, vx - 5, oy + th - 5)
+p5.line(vx, oy + th, vx + 5, oy + th - 5)
+p5.stroke_weight(1)
+
+p5.text_align(:center)
+p5.text_color(0x40)
+p5.push_matrix
+p5.translate(vx, oy + th / 2 - 4)
+p5.rotate(-Math::PI / 2)
+p5.text("V total: 480+10+2+33", 0, 10)
+p5.text("= 525 lines", 0, 30)
+
+p5.pop_matrix
 ```
 
 # DVI bit rate
@@ -185,9 +209,78 @@ DVI uses TMDS: 10-bit encoding per channel
 - Total wire rate: **1 Gbps** across 4 differential pairs
 - One bit every **4 ns**
 
-# HSTX: High-Speed Serial Transmit
+```p5
+g = DVI::Graphics
+p5.text_font(g::FONT_SOURCE_CODE_PRO_18)
 
-RP2350 has a built-in solution: **HSTX**
+# Layout
+ox = 120
+sw = 460
+sy = 262
+amp = 6
+dg = 3
+ps = 42
+num_bits = 20
+bw = sw / num_bits
+
+# Bit patterns (data channels pseudo-random, clock regular)
+d = [
+  [1,0,1,1,0,0,1,0,1,1,0,1,0,0,1,1,0,1,0,1],
+  [0,1,1,0,1,0,0,1,1,0,1,1,0,1,0,0,1,0,1,1],
+  [1,1,0,1,0,1,1,0,0,1,0,1,1,0,1,0,0,1,1,0],
+  [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+]
+labels = ["D2 (R)", "D1 (G)", "D0 (B)", "CLK"]
+colors = [0xE0, 0x1C, 0x03, 0x49]
+
+ch = 0
+while ch < 4
+  yp = sy + ch * ps
+  ym = yp + amp * 2 + dg
+  color = colors[ch]
+  bits = d[ch]
+
+  # Label
+  p5.no_stroke
+  p5.text_color(color)
+  p5.text_align(:right)
+  p5.text(labels[ch], ox - 8, yp + amp - 4)
+
+  p5.stroke(color)
+
+  # D+ waveform
+  px = ox
+  py = bits[0] == 1 ? yp - amp : yp + amp
+  i = 0
+  while i < num_bits
+    ny = bits[i] == 1 ? yp - amp : yp + amp
+    p5.line(px, py, px, ny) if ny != py
+    nx = px + bw
+    p5.line(px, ny, nx, ny)
+    py = ny
+    px = nx
+    i += 1
+  end
+
+  # D- waveform (complementary)
+  px = ox
+  py = bits[0] == 0 ? ym - amp : ym + amp
+  i = 0
+  while i < num_bits
+    ny = bits[i] == 0 ? ym - amp : ym + amp
+    p5.line(px, py, px, ny) if ny != py
+    nx = px + bw
+    p5.line(px, ny, nx, ny)
+    py = ny
+    px = nx
+    i += 1
+  end
+
+  ch += 1
+end
+```
+
+# HSTX: High-Speed Serial Transmit
 
 - Dedicated high-speed serializer on GPIO 12-19
 - 4 differential pairs for TMDS output

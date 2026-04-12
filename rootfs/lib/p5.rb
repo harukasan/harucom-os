@@ -276,30 +276,35 @@ class P5
     end
   end
 
-  # Text (translate only, rotation not supported).
-  # Supports text_align (horizontal/vertical) and text_leading (line spacing).
+  # Text with alignment and affine transform support.
 
   def text(str, x, y)
-    tx, ty = transform(x, y)
-
-    # Apply horizontal alignment
+    # Apply horizontal alignment in user space
     if @text_align_h == :center
-      tx -= text_width(str) / 2
+      x -= text_width(str) / 2
     elsif @text_align_h == :right
-      tx -= text_width(str)
+      x -= text_width(str)
     end
 
-    # Apply vertical alignment (uses font glyph height)
+    # Apply vertical alignment in user space
     if @text_align_v == :center
-      ty -= font_height / 2
+      y -= font_height / 2
     elsif @text_align_v == :bottom
-      ty -= font_height
+      y -= font_height
     end
 
-    if @wide_font
-      G.draw_text(tx, ty, str, @text_color, @font, @wide_font)
+    if translate_only?
+      tx, ty = transform(x, y)
+      if @wide_font
+        G.draw_text(tx, ty, str, @text_color, @font, @wide_font)
+      else
+        G.draw_text(tx, ty, str, @text_color, @font)
+      end
     else
-      G.draw_text(tx, ty, str, @text_color, @font)
+      m = @matrix
+      wide_id = @wide_font ? @wide_font : -1
+      G.draw_text_affine(str, @text_color, @font, wide_id, x, y,
+                         m[0], m[1], m[2], m[3], m[4], m[5])
     end
   end
 
