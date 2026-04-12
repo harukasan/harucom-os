@@ -103,4 +103,26 @@ int dvi_graphics_text_width(const char *text, const dvi_font_t *font, const dvi_
 void dvi_graphics_draw_thick_line(uint8_t *framebuffer, int width, int height, int x0, int y0,
                                   int x1, int y1, int thickness, uint8_t color);
 
+// Blit an RGB332 image with a 2x3 affine transform.
+// The affine matrix [m00 m01 / m10 m11 / tx ty] is the current coordinate
+// transform. origin_x, origin_y is the image's top-left position in user
+// space. The function computes the effective mapping from source pixel
+// (col, row) to framebuffer coordinates:
+//   screen_x = m00 * (origin_x + col) + m01 * (origin_y + row) + tx
+//   screen_y = m10 * (origin_x + col) + m11 * (origin_y + row) + ty
+void dvi_graphics_draw_image_affine(uint8_t *framebuffer, int fb_width, int fb_height,
+                                    const uint8_t *data,
+                                    int image_width, int image_height,
+                                    int origin_x, int origin_y,
+                                    float m00, float m01, float m10, float m11,
+                                    float tx, float ty);
+
+// Blit an RGB332 image with a 1bpp mask and a 2x3 affine transform.
+void dvi_graphics_draw_image_masked_affine(uint8_t *framebuffer, int fb_width, int fb_height,
+                                           const uint8_t *data, const uint8_t *mask,
+                                           int image_width, int image_height,
+                                           int origin_x, int origin_y,
+                                           float m00, float m01, float m10, float m11,
+                                           float tx, float ty);
+
 #endif // DVI_GRAPHICS_DRAW_H

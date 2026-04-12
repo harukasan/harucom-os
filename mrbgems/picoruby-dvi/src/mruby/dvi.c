@@ -399,6 +399,52 @@ mrb_dvi_draw_image_masked(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.draw_image_affine(data, w, h, ox, oy, m00, m01, m10, m11, tx, ty)
+ */
+static mrb_value
+mrb_dvi_draw_image_affine(mrb_state *mrb, mrb_value klass)
+{
+  const char *data;
+  mrb_int data_len, w, h, ox, oy;
+  mrb_float m00, m01, m10, m11, tx, ty;
+  mrb_get_args(mrb, "siiiiffffff", &data, &data_len, &w, &h, &ox, &oy,
+               &m00, &m01, &m10, &m11, &tx, &ty);
+  if (data_len < w * h)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
+  dvi_graphics_draw_image_affine(dvi_get_framebuffer(),
+                                 dvi_graphics_get_width(), dvi_graphics_get_height(),
+                                 (const uint8_t *)data, w, h, ox, oy,
+                                 (float)m00, (float)m01, (float)m10, (float)m11,
+                                 (float)tx, (float)ty);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_image_masked_affine(data, mask, w, h, ox, oy, m00, m01, m10, m11, tx, ty)
+ */
+static mrb_value
+mrb_dvi_draw_image_masked_affine(mrb_state *mrb, mrb_value klass)
+{
+  const char *data, *mask;
+  mrb_int data_len, mask_len, w, h, ox, oy;
+  mrb_float m00, m01, m10, m11, tx, ty;
+  mrb_get_args(mrb, "ssiiiiffffff", &data, &data_len, &mask, &mask_len,
+               &w, &h, &ox, &oy,
+               &m00, &m01, &m10, &m11, &tx, &ty);
+  if (data_len < w * h)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
+  if (mask_len < (w * h + 7) / 8)
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "mask too short");
+  dvi_graphics_draw_image_masked_affine(dvi_get_framebuffer(),
+                                        dvi_graphics_get_width(), dvi_graphics_get_height(),
+                                        (const uint8_t *)data, (const uint8_t *)mask,
+                                        w, h, ox, oy,
+                                        (float)m00, (float)m01, (float)m10, (float)m11,
+                                        (float)tx, (float)ty);
+  return mrb_nil_value();
+}
+
+/*
  * DVI.text_put_string(col, row, str, attr)
  */
 static mrb_value
@@ -692,6 +738,10 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              MRB_ARGS_REQ(5));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image_masked),
                              mrb_dvi_draw_image_masked, MRB_ARGS_REQ(6));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image_affine),
+                             mrb_dvi_draw_image_affine, MRB_ARGS_REQ(11));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image_masked_affine),
+                             mrb_dvi_draw_image_masked_affine, MRB_ARGS_REQ(12));
 }
 
 void

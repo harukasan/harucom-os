@@ -116,17 +116,17 @@ class P5
   # and fall back to full matrix transform for rotation/scale.
 
   def translate(tx, ty)
-    @matrix = matrix_multiply([1.0, 0.0, 0.0, 1.0, tx.to_f, ty.to_f], @matrix)
+    @matrix = matrix_multiply(@matrix, [1.0, 0.0, 0.0, 1.0, tx.to_f, ty.to_f])
   end
 
   def rotate(angle)
     c = Math.cos(angle)
     s = Math.sin(angle)
-    @matrix = matrix_multiply([c, -s, s, c, 0.0, 0.0], @matrix)
+    @matrix = matrix_multiply(@matrix, [c, -s, s, c, 0.0, 0.0])
   end
 
   def scale(sx, sy = sx)
-    @matrix = matrix_multiply([sx.to_f, 0.0, 0.0, sy.to_f, 0.0, 0.0], @matrix)
+    @matrix = matrix_multiply(@matrix, [sx.to_f, 0.0, 0.0, sy.to_f, 0.0, 0.0])
   end
 
   def push_matrix
@@ -303,16 +303,28 @@ class P5
     end
   end
 
-  # Image (translate only, rotation not supported)
+  # Image
 
   def image(data, x, y, w, h)
-    tx, ty = transform(x, y)
-    G.draw_image(data, tx, ty, w, h)
+    if translate_only?
+      tx, ty = transform(x, y)
+      G.draw_image(data, tx, ty, w, h)
+    else
+      m = @matrix
+      G.draw_image_affine(data, w, h, x, y,
+                          m[0], m[1], m[2], m[3], m[4], m[5])
+    end
   end
 
   def image_masked(data, mask, x, y, w, h)
-    tx, ty = transform(x, y)
-    G.draw_image_masked(data, mask, tx, ty, w, h)
+    if translate_only?
+      tx, ty = transform(x, y)
+      G.draw_image_masked(data, mask, tx, ty, w, h)
+    else
+      m = @matrix
+      G.draw_image_masked_affine(data, mask, w, h, x, y,
+                                 m[0], m[1], m[2], m[3], m[4], m[5])
+    end
   end
 
   # Pixel access

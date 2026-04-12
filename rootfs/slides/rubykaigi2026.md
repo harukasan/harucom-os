@@ -11,7 +11,14 @@ allotted_time: 30
 ```p5
 bmp = PicoRabbit::BMP.load("/data/pixelcat.bmp")
 ix = 640 - 40 - bmp.width
-p5.image_masked(bmp.data, bmp.mask, ix, y, bmp.width, bmp.height)
+cx = ix + bmp.width / 2
+cy = y + bmp.height / 2
+angle = (DVI.frame_count % 360) * Math::PI / 180.0
+p5.push_matrix
+p5.translate(cx, cy)
+p5.rotate(angle)
+p5.image_masked(bmp.data, bmp.mask, -bmp.width / 2, -bmp.height / 2, bmp.width, bmp.height)
+p5.pop_matrix
 ```
 
 Shunsuke Michii

@@ -704,3 +704,123 @@ dvi_graphics_draw_image_masked(uint8_t *framebuffer, int width, int height, cons
     }
   }
 }
+
+// Compute the axis-aligned bounding box of the four transformed corners,
+// clamp to framebuffer bounds, and compute the inverse 2x2 matrix.
+// The affine matrix maps source pixel (col, row) to screen:
+//   screen_x = m00 * col + m01 * row + tx
+//   screen_y = m10 * col + m11 * row + ty
+
+static void image_affine_bounds(int image_width, int image_height,
+                                int origin_x, int origin_y,
+                                float m00, float m01, float m10, float m11,
+                                float tx, float ty,
+                                int fb_width, int fb_height,
+                                int *out_min_x, int *out_min_y,
+                                int *out_max_x, int *out_max_y,
+                                float *out_inv00, float *out_inv01,
+                                float *out_inv10, float *out_inv11,
+                                float *out_etx, float *out_ety)
+{
+    // Effective translation: maps source pixel (0, 0) to screen
+    float etx = m00 * origin_x + m01 * origin_y + tx;
+    float ety = m10 * origin_x + m11 * origin_y + ty;
+
+    // Four corners: (0,0), (w,0), (w,h), (0,h) mapped to screen
+    float cx[4], cy[4];
+    cx[0] = etx;
+    cy[0] = ety;
+    cx[1] = m00 * image_width + etx;
+    cy[1] = m10 * image_width + ety;
+    cx[2] = m00 * image_width + m01 * image_height + etx;
+    cy[2] = m10 * image_width + m11 * image_height + ety;
+    cx[3] = m01 * image_height + etx;
+    cy[3] = m11 * image_height + ety;
+
+    float min_x = cx[0], min_y = cy[0], max_x = cx[0], max_y = cy[0];
+    for (int i = 1; i < 4; i++) {
+        if (cx[i] < min_x) min_x = cx[i];
+        if (cx[i] > max_x) max_x = cx[i];
+        if (cy[i] < min_y) min_y = cy[i];
+        if (cy[i] > max_y) max_y = cy[i];
+    }
+
+    *out_min_x = (int)floorf(min_x);
+    *out_min_y = (int)floorf(min_y);
+    *out_max_x = (int)ceilf(max_x);
+    *out_max_y = (int)ceilf(max_y);
+
+    if (*out_min_x < 0) *out_min_x = 0;
+    if (*out_min_y < 0) *out_min_y = 0;
+    if (*out_max_x > fb_width)  *out_max_x = fb_width;
+    if (*out_max_y > fb_height) *out_max_y = fb_height;
+
+    // Inverse of 2x2 part: [m00 m01; m10 m11]
+    float det = m00 * m11 - m01 * m10;
+    float inv_det = 1.0f / det;
+    *out_inv00 =  m11 * inv_det;
+    *out_inv01 = -m01 * inv_det;
+    *out_inv10 = -m10 * inv_det;
+    *out_inv11 =  m00 * inv_det;
+    *out_etx = etx;
+    *out_ety = ety;
+}
+
+void dvi_graphics_draw_image_affine(uint8_t *framebuffer, int fb_width, int fb_height,
+                                    const uint8_t *data,
+                                    int image_width, int image_height,
+                                    int origin_x, int origin_y,
+                                    float m00, float m01, float m10, float m11,
+                                    float tx, float ty)
+{
+    int dst_min_x, dst_min_y, dst_max_x, dst_max_y;
+    float inv00, inv01, inv10, inv11, etx, ety;
+    image_affine_bounds(image_width, image_height, origin_x, origin_y,
+                        m00, m01, m10, m11, tx, ty,
+                        fb_width, fb_height,
+                        &dst_min_x, &dst_min_y, &dst_max_x, &dst_max_y,
+                        &inv00, &inv01, &inv10, &inv11, &etx, &ety);
+
+    for (int dy = dst_min_y; dy < dst_max_y; dy++) {
+        float ry = dy - ety + 0.5f;
+        for (int dx = dst_min_x; dx < dst_max_x; dx++) {
+            float rx = dx - etx + 0.5f;
+            int sx = (int)floorf(inv00 * rx + inv01 * ry);
+            int sy = (int)floorf(inv10 * rx + inv11 * ry);
+            if (sx < 0 || sx >= image_width || sy < 0 || sy >= image_height)
+                continue;
+            framebuffer[dy * fb_width + dx] = data[sy * image_width + sx];
+        }
+    }
+}
+
+void dvi_graphics_draw_image_masked_affine(uint8_t *framebuffer, int fb_width, int fb_height,
+                                           const uint8_t *data, const uint8_t *mask,
+                                           int image_width, int image_height,
+                                           int origin_x, int origin_y,
+                                           float m00, float m01, float m10, float m11,
+                                           float tx, float ty)
+{
+    int dst_min_x, dst_min_y, dst_max_x, dst_max_y;
+    float inv00, inv01, inv10, inv11, etx, ety;
+    image_affine_bounds(image_width, image_height, origin_x, origin_y,
+                        m00, m01, m10, m11, tx, ty,
+                        fb_width, fb_height,
+                        &dst_min_x, &dst_min_y, &dst_max_x, &dst_max_y,
+                        &inv00, &inv01, &inv10, &inv11, &etx, &ety);
+
+    for (int dy = dst_min_y; dy < dst_max_y; dy++) {
+        float ry = dy - ety + 0.5f;
+        for (int dx = dst_min_x; dx < dst_max_x; dx++) {
+            float rx = dx - etx + 0.5f;
+            int sx = (int)floorf(inv00 * rx + inv01 * ry);
+            int sy = (int)floorf(inv10 * rx + inv11 * ry);
+            if (sx < 0 || sx >= image_width || sy < 0 || sy >= image_height)
+                continue;
+            int si = sy * image_width + sx;
+            if (!(mask[si >> 3] & (1 << (si & 7))))
+                continue;
+            framebuffer[dy * fb_width + dx] = data[si];
+        }
+    }
+}
