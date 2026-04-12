@@ -8,7 +8,15 @@ module PicoRabbit
     end
 
     def render_slide(p5, slide, slide_index, total_slides, step = nil, metadata = {})
-      render_background(p5)
+      slide_changed = @last_slide_index != slide_index || @last_step != step
+      if slide_changed
+        @last_slide_index = slide_index
+        @last_step = step
+        @p5_rendered = false
+        render_background(p5)
+      else
+        render_footer_background(p5)
+      end
       if slide.title_slide
         render_title_slide(p5, slide, metadata)
       else
@@ -63,6 +71,13 @@ module PicoRabbit
 
     def render_background(p5)
       p5.background(background_color)
+    end
+
+    def render_footer_background(p5)
+      p5.fill(background_color)
+      p5.no_stroke
+      p5.rect(0, PicoRabbit::Timer::TRACK_Y + PicoRabbit::Timer::SPRITE_OFFSET_Y, 640, 480 - PicoRabbit::Timer::TRACK_Y - PicoRabbit::Timer::SPRITE_OFFSET_Y)
+      p5.no_fill
     end
 
     def render_title(p5, title)
@@ -257,15 +272,13 @@ module PicoRabbit
     end
 
     def render_p5_code(p5, lines, x, y)
-      sandbox = Sandbox.new("p5_draw")
-      sandbox.compile("nil")
-      sandbox.execute
-      sandbox.wait(timeout: nil)
-      sandbox.suspend
+      return y if @p5_rendered
+      @p5_rendered = true
       $__picorabbit_p5 = p5
       $__picorabbit_x = x
       $__picorabbit_y = y
       code = "p5 = $__picorabbit_p5\nx = $__picorabbit_x\ny = $__picorabbit_y\n" + lines.join("\n")
+      sandbox = Sandbox.new("p5_draw")
       sandbox.compile(code)
       sandbox.execute
       sandbox.wait

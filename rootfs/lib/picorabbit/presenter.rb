@@ -11,7 +11,7 @@ module PicoRabbit
 
     def start
       render_current
-      loop do
+      while true
         key = @keyboard.read_char
         if key
           case key
