@@ -8,11 +8,14 @@ allotted_time: 30
 
 # Self Introduction
 
-```p5
+```p5_setup
 bmp = PicoRabbit::BMP.load("/data/pixelcat.bmp")
-ix = 640 - 40 - bmp.width
+ix = 640 - 60 - bmp.width
 cx = ix + bmp.width / 2
 cy = y + bmp.height / 2
+```
+
+```p5
 angle = (DVI.frame_count % 360) * Math::PI / 180.0
 p5.push_matrix
 p5.translate(cx, cy)

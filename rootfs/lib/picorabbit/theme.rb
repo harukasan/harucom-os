@@ -144,6 +144,9 @@ module PicoRabbit
         y + bmp.height + leading
       when :code_block
         render_code_block(p5, element.text, x, y)
+      when :p5_setup
+        @p5_setup_lines = element.text
+        y
       when :p5_code
         render_p5_code(p5, element.text, x, y)
       when :blank
@@ -265,8 +268,21 @@ module PicoRabbit
       $__picorabbit_p5 = p5
       $__picorabbit_x = x
       $__picorabbit_y = y
-      code = "loop do\np5 = $__picorabbit_p5\nx = $__picorabbit_x\ny = $__picorabbit_y\n" +
-             lines.join("\n") + "\nTask.current.suspend\nend"
+      setup = @p5_setup_lines ? @p5_setup_lines.join("\n") : ""
+      draw = lines.join("\n")
+      code = <<~RUBY
+        p5 = $__picorabbit_p5
+        x = $__picorabbit_x
+        y = $__picorabbit_y
+        #{setup}
+        loop do
+          p5 = $__picorabbit_p5
+          x = $__picorabbit_x
+          y = $__picorabbit_y
+          #{draw}
+          Task.current.suspend
+        end
+      RUBY
       if @p5_last_code != code
         @p5_last_code = code
         @p5_sandbox = Sandbox.new("p5_draw")
@@ -276,6 +292,7 @@ module PicoRabbit
         @p5_sandbox.resume
       end
       @p5_sandbox.wait
+      @p5_setup_lines = nil
       y
     end
 

@@ -61,7 +61,11 @@ module PicoRabbit
             in_code_block = false
           else
             lang = line.strip[3, line.strip.length - 3]
-            code_block_type = lang == "p5" ? :p5_code : :code_block
+            code_block_type = case lang
+                              when "p5" then :p5_code
+                              when "p5_setup" then :p5_setup
+                              else :code_block
+                              end
             in_code_block = true
           end
           next
