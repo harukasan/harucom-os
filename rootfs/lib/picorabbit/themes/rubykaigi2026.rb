@@ -59,6 +59,16 @@ module PicoRabbit
         p5.no_fill
       end
 
+      def render_slide(p5, slide, slide_index, total_slides, step = nil, metadata = {})
+        if !slide.title_slide && title_only?(slide)
+          p5.background(ACCENT)
+          render_centered_slide(p5, slide)
+          render_footer(p5, slide_index, total_slides)
+        else
+          super
+        end
+      end
+
       # Bullet char in accent color, body text in black
       def render_element(p5, element, x, y)
         if element.type == :bullet
@@ -72,6 +82,42 @@ module PicoRabbit
         else
           super
         end
+      end
+
+      private
+
+      def title_only?(slide)
+        slide.elements.all? { |e| e.type == :blank || e.type == :text }
+      end
+
+      def render_centered_slide(p5, slide)
+        texts = slide.elements.select { |e| e.type == :text }
+
+        # Calculate total content height for vertical centering
+        total_height = title_font_height
+        if texts.length > 0
+          total_height += 16
+          texts.each { total_height += body_font_height + leading }
+          total_height -= leading
+        end
+        y = (480 - total_height) / 2
+
+        # Title
+        p5.text_font(title_font)
+        p5.text_color(0xFF)
+        p5.text_align(:center)
+        p5.text(slide.title, 320, y)
+        y += title_font_height + 16
+
+        # Body text
+        p5.text_font(body_font)
+        p5.text_color(0xDB)
+        texts.each do |element|
+          p5.text(element.text, 320, y)
+          y += body_font_height + leading
+        end
+
+        p5.text_align(:left)
       end
     end
   end
