@@ -212,10 +212,11 @@ static int text_rows = DVI_TEXT_MAX_ROWS;
 // flash-resident data access during rendering.
 static uint8_t blank_line_buf[MODE_H_ACTIVE_PIXELS + 4] __attribute__((aligned(4)));
 
-// Scanline output buffers in main SRAM (8-bank striped).
+// Scanline output buffers in main SRAM (4-bank striped per 256 KB half).
 // Stride = 644 bytes (640 data + 4 padding).  Word offset = 161 per buffer,
-// so buf[i] maps to SRAM bank (161*i % 8) = {0,1,2,3,4,5,6,7}: all 8 buffers
-// land on different banks, giving zero bank collisions between any pair.
+// 161 % 4 = 1 so buf[0..3] map to banks {0,1,2,3}: zero collisions within
+// each set of N=4 buffers.  buf[i] and buf[i+4] share the same bank, so
+// DMA reads and CPU renders may contend when accessing different halves.
 // 2N=8 buffers are needed for batch rendering (N=4): one set of N buffers
 // being DMA'd while the CPU renders into the other N buffers.
 #define LINE_BUF_STRIDE (MODE_H_ACTIVE_PIXELS + 4)

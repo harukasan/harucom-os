@@ -13,8 +13,9 @@
  * Memory layout for DVI stability:
  *   Core 0 stack:  BSS (main SRAM), 32 KB -- enough for mruby compiler
  *   Text VRAM:     main SRAM, ~31 KB (106x37 cells, double-buffered)
- *   DMA cmd bufs:  SCRATCH_Y
- *   Line buffers:  SCRATCH_Y (double-buffered 640B each)
+ *   DMA cmd bufs:  main SRAM (double-buffered, 36 words each)
+ *   Line buffers:  main SRAM (8x 644B, 4-bank striped)
+ *   Font LUT:      SCRATCH_Y (font_byte_mask, 2 KB)
  *   IRQ handler:   SCRATCH_X (code) -- no I/D bus contention with SCRATCH_Y
  */
 
