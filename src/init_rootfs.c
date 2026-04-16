@@ -103,6 +103,17 @@ init_rootfs(void)
         return;
     }
 
+    /* Reformat if trigger file exists (created by user via "touch /FORMAT") */
+    FILINFO fno;
+    if (f_stat("flash:FORMAT", &fno) == FR_OK) {
+        printf("rootfs: format trigger found, reformatting...\n");
+        res = format_and_mount(&fatfs);
+        if (res != FR_OK) {
+            printf("rootfs: reformat failed (%d)\n", res);
+            return;
+        }
+    }
+
     /* Write all scripts; reformat and retry once on failure */
     if (!write_scripts()) {
         printf("rootfs: write errors detected, reformatting...\n");

@@ -97,6 +97,7 @@ class IRB
     sandbox.load_file(path, join: false)
     wait_app(sandbox)
     if error = sandbox.error
+      return if error.is_a?(SystemExit)
       puts "#{path}: #{error.message} (#{error.class})"
       if error.respond_to?(:backtrace) && (bt = error.backtrace)
         bt.each { |line| puts "  #{line}" }

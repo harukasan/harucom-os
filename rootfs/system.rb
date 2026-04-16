@@ -10,6 +10,7 @@ Task.new(name: "usb_host") do
   end
 end
 
+require "system_exit"
 require "console"
 require "input_method"
 require "input_method_skk"
