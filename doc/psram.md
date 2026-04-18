@@ -76,14 +76,27 @@ operands in RAM-resident instructions.
 
 ### Step 2: Configure CS1 (bootrom flash_devinfo API)
 
-The bootrom is informed about the CS1 device via its runtime API:
+The bootrom is informed about the CS1 device via its runtime API. The
+QMI M0 (flash CS0) registers are saved around the bootrom calls to
+preserve the fast QSPI XIP mode that boot2 configured at startup:
 
 ```c
 flash_devinfo_set_cs_gpio(1, PICO_RP2350_PSRAM_CS_PIN);  // GPIO 0
 flash_devinfo_set_cs_size(1, FLASH_DEVINFO_SIZE_8M);      // 8 MB
+
+// Save M0 (flash CS0) before the bootrom overwrites it
+uint32_t m0_timing = qmi_hw->m[0].timing;
+uint32_t m0_rfmt   = qmi_hw->m[0].rfmt;
+uint32_t m0_rcmd   = qmi_hw->m[0].rcmd;
+
 rom_connect_internal_flash();
 rom_flash_exit_xip();
 rom_flash_enter_cmd_xip();
+
+// Restore fast QSPI XIP mode for flash CS0
+qmi_hw->m[0].timing = m0_timing;
+qmi_hw->m[0].rfmt   = m0_rfmt;
+qmi_hw->m[0].rcmd   = m0_rcmd;
 ```
 
 This API is the runtime equivalent of programming the OTP FLASH_DEVINFO
@@ -101,6 +114,22 @@ memory-mapped CS1 access. The bootrom must set up additional internal state
 
 This behavior is discussed in the pico-sdk GitHub issue:
 https://github.com/raspberrypi/pico-sdk/issues/2205
+
+#### Preserving fast QSPI XIP mode for flash
+
+`rom_flash_exit_xip()` and `rom_flash_enter_cmd_xip()` reprogram the QMI
+M0 (flash CS0) registers for slow single-SPI XIP access. Without
+restoring them, code execution from flash runs 2-6x slower after
+`psram_init()` returns. The VM's bytecode interpreter runs from flash
+XIP, so this affects all Ruby code execution.
+
+`pico-sdk`'s `flash_range_erase()` / `flash_range_program()` normally
+restore fast QSPI mode via an internal `flash_enable_xip_via_boot2()`
+call, so this slowdown only manifests on boot paths that perform no
+flash writes after PSRAM init. We save M0 (`timing`, `rfmt`, `rcmd`)
+before the bootrom calls and restore them immediately after. This is
+the same save/restore pattern pico-sdk uses for CS1 preservation in
+`flash_rp2350_save_qmi_cs1`.
 
 ### Step 3: Enter QPI mode
 

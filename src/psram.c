@@ -50,9 +50,13 @@
  * References
  * ----------
  *  - APS6404L-3SQR datasheet (AP Memory)
+ *    https://www.apmemory.com/en/downloadFiles/032411212009597427
  *  - RP2350 datasheet §4.4 "External flash and PSRAM (XIP)"
+ *    https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf
  *  - pico-sdk issue #2205 — runtime CS1 configuration without OTP
+ *    https://github.com/raspberrypi/pico-sdk/issues/2205
  *  - SparkFun sparkfun-pico library (sfe_psram.c, MIT license)
+ *    https://github.com/sparkfun/sparkfun-pico
  */
 
 #include "psram.h"
