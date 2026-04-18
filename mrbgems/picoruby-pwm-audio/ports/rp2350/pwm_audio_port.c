@@ -16,8 +16,8 @@
 
 #include "../../include/pwm_audio.h"
 
-#define AUDIO_HW_ALARM  1
-#define AUDIO_IRQ       TIMER1_IRQ_1
+#define AUDIO_HW_ALARM 1
+#define AUDIO_IRQ      TIMER1_IRQ_1
 
 static uint slice_num;
 static uint chan_l;
@@ -31,7 +31,7 @@ static bool
 audio_isr(repeating_timer_t *t)
 {
   (void)t;
-  if (pwm_audio_rd == pwm_audio_wr) return true;  /* buffer empty */
+  if (pwm_audio_rd == pwm_audio_wr) return true; /* buffer empty */
   uint32_t sample = pwm_audio_buf[pwm_audio_rd & PWM_AUDIO_BUF_MASK];
   pwm_audio_rd++;
   uint16_t l = sample >> 16;
@@ -75,12 +75,10 @@ pwm_audio_init(uint8_t l_pin, uint8_t r_pin)
 
   if (!audio_alarm_pool) {
     audio_alarm_pool = alarm_pool_create(AUDIO_HW_ALARM, 2);
-    irq_set_priority(AUDIO_IRQ, 0);  /* highest priority */
+    irq_set_priority(AUDIO_IRQ, 0); /* highest priority */
   }
-  if (!alarm_pool_add_repeating_timer_us(
-        audio_alarm_pool,
-        -(1000000 / PWM_AUDIO_SAMPLE_RATE),
-        audio_isr, NULL, &audio_timer)) {
+  if (!alarm_pool_add_repeating_timer_us(audio_alarm_pool, -(1000000 / PWM_AUDIO_SAMPLE_RATE),
+                                         audio_isr, NULL, &audio_timer)) {
     return;
   }
 

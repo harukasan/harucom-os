@@ -38,7 +38,9 @@ static volatile uint32_t interrupt_nesting = 0;
 static volatile bool in_tick_processing = false;
 static mrb_state *mrb_;
 
-static void alarm_handler(void) {
+static void
+alarm_handler(void)
+{
   if (in_tick_processing) {
     timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + US_PER_MS;
     hw_clear_bits(&timer_hw->intr, 1u << ALARM_NUM);
@@ -59,7 +61,9 @@ static void alarm_handler(void) {
   in_tick_processing = false;
 }
 
-void mrb_hal_task_init(mrb_state *mrb) {
+void
+mrb_hal_task_init(mrb_state *mrb)
+{
   mrb_ = mrb;
   hal_stdin_init();
   hw_set_bits(&timer_hw->inte, 1u << ALARM_NUM);
@@ -71,7 +75,11 @@ void mrb_hal_task_init(mrb_state *mrb) {
   timer_hw->alarm[ALARM_NUM] = timer_hw->timerawl + US_PER_MS;
 }
 
-void mrb_hal_task_final(mrb_state *mrb) { (void)mrb; }
+void
+mrb_hal_task_final(mrb_state *mrb)
+{
+  (void)mrb;
+}
 
 /*-------------------------------------
  *
@@ -79,7 +87,9 @@ void mrb_hal_task_final(mrb_state *mrb) { (void)mrb; }
  *
  *------------------------------------*/
 
-void mrb_task_enable_irq(void) {
+void
+mrb_task_enable_irq(void)
+{
   if (interrupt_nesting == 0) {
     return;
   }
@@ -91,7 +101,9 @@ void mrb_task_enable_irq(void) {
   asm volatile("cpsie i" : : : "memory");
 }
 
-void mrb_task_disable_irq(void) {
+void
+mrb_task_disable_irq(void)
+{
   asm volatile("cpsid i" : : : "memory");
   __dmb();
   interrupt_nesting++;
@@ -103,7 +115,9 @@ void mrb_task_disable_irq(void) {
  *
  *------------------------------------*/
 
-void mrb_hal_task_idle_cpu(mrb_state *mrb) {
+void
+mrb_hal_task_idle_cpu(mrb_state *mrb)
+{
   (void)mrb;
   asm volatile("wfe\n"
                "nop\n"
@@ -113,7 +127,9 @@ void mrb_hal_task_idle_cpu(mrb_state *mrb) {
                : "memory");
 }
 
-void mrb_hal_task_sleep_us(mrb_state *mrb, mrb_int usec) {
+void
+mrb_hal_task_sleep_us(mrb_state *mrb, mrb_int usec)
+{
   (void)mrb;
   sleep_us((uint32_t)usec);
 }
@@ -126,4 +142,8 @@ void mrb_hal_task_sleep_us(mrb_state *mrb, mrb_int usec) {
 
 extern char __etext;
 
-bool mrb_ro_data_p(const char *p) { return p < &__etext; }
+bool
+mrb_ro_data_p(const char *p)
+{
+  return p < &__etext;
+}

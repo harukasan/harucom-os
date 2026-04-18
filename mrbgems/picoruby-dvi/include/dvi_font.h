@@ -19,17 +19,17 @@
 #include <stdint.h>
 
 typedef struct {
-    uint8_t glyph_width;    // max glyph width (bitmap storage width)
-    uint8_t glyph_height;   // pixels per glyph vertically
-    uint16_t first_char;    // first character code in bitmap array
-    uint16_t num_chars;     // number of glyphs in bitmap array
-    const uint8_t *bitmap;  // glyph bitmap data (1bpp or 4bpp)
-    const uint8_t *widths;  // per-glyph advance widths (NULL = fixed width)
-    uint16_t glyph_stride;  // bytes between consecutive glyphs
-                            // (0 = auto: ((glyph_width+7)/8) * glyph_height)
-    uint8_t bpp;            // bits per pixel: 0 or 1 = 1bpp, 4 = 4bpp anti-aliased
-    int8_t bitmap_left;     // min bitmap_left offset (0 or negative),
-                            // shifts glyph rendering to cover negative bearing
+  uint8_t glyph_width;   // max glyph width (bitmap storage width)
+  uint8_t glyph_height;  // pixels per glyph vertically
+  uint16_t first_char;   // first character code in bitmap array
+  uint16_t num_chars;    // number of glyphs in bitmap array
+  const uint8_t *bitmap; // glyph bitmap data (1bpp or 4bpp)
+  const uint8_t *widths; // per-glyph advance widths (NULL = fixed width)
+  uint16_t glyph_stride; // bytes between consecutive glyphs
+                         // (0 = auto: ((glyph_width+7)/8) * glyph_height)
+  uint8_t bpp;           // bits per pixel: 0 or 1 = 1bpp, 4 = 4bpp anti-aliased
+  int8_t bitmap_left;    // min bitmap_left offset (0 or negative),
+                         // shifts glyph rendering to cover negative bearing
 } dvi_font_t;
 
 #endif

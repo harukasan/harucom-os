@@ -82,13 +82,13 @@
  * Quad Mode (0xF5) returns to SPI and is the only command that must
  * be sent in quad width while the device is in QPI mode.
  */
-#define CMD_RESET_ENABLE 0x66  /* Reset Enable (SPI & QPI) */
-#define CMD_RESET        0x99  /* Reset (SPI & QPI) — must follow 0x66 immediately */
-#define CMD_QUAD_ENABLE  0x35  /* Enter Quad Mode (SPI only) */
-#define CMD_QUAD_END     0xF5  /* Exit Quad Mode (QPI only) */
-#define CMD_READ_ID      0x9F  /* Read ID (SPI only) */
-#define CMD_READ_QUAD    0xEB  /* Fast Quad Read: cmd + 24-bit addr + 6 wait cycles + data */
-#define CMD_WRITE_QUAD   0x38  /* Quad Write: cmd + 24-bit addr + data (no wait cycles) */
+#define CMD_RESET_ENABLE 0x66 /* Reset Enable (SPI & QPI) */
+#define CMD_RESET        0x99 /* Reset (SPI & QPI) — must follow 0x66 immediately */
+#define CMD_QUAD_ENABLE  0x35 /* Enter Quad Mode (SPI only) */
+#define CMD_QUAD_END     0xF5 /* Exit Quad Mode (QPI only) */
+#define CMD_READ_ID      0x9F /* Read ID (SPI only) */
+#define CMD_READ_QUAD    0xEB /* Fast Quad Read: cmd + 24-bit addr + 6 wait cycles + data */
+#define CMD_WRITE_QUAD   0x38 /* Quad Write: cmd + 24-bit addr + data (no wait cycles) */
 #define CMD_NOOP         0xFF
 
 /* Known Good Die identifier (datasheet §10.4, Table 4) */
@@ -108,9 +108,9 @@
  * 250 Mbps bit clock this specific harmonic issue does not apply.
  */
 #define SEC_TO_FS             1000000000000000ll
-#define PSRAM_MAX_SELECT_FS   125000000  /* tCEM / 64 (QMI MAX_SELECT unit) */
-#define PSRAM_MIN_DESELECT_FS 50000000   /* tCPH */
-#define PSRAM_MAX_SCK_HZ      109000000  /* APS6404L max (wrapped burst) */
+#define PSRAM_MAX_SELECT_FS   125000000 /* tCEM / 64 (QMI MAX_SELECT unit) */
+#define PSRAM_MIN_DESELECT_FS 50000000  /* tCPH */
+#define PSRAM_MAX_SCK_HZ      109000000 /* APS6404L max (wrapped burst) */
 
 /* ------------------------------------------------------------------ */
 
@@ -127,7 +127,8 @@
  * Must run from RAM (__no_inline_not_in_flash_func) because QMI direct
  * mode pauses all XIP (flash) access.
  */
-static size_t __no_inline_not_in_flash_func(get_psram_size)(void)
+static size_t
+__no_inline_not_in_flash_func(get_psram_size)(void)
 {
   size_t psram_size = 0;
   uint32_t save = save_and_disable_interrupts();
@@ -138,9 +139,8 @@ static size_t __no_inline_not_in_flash_func(get_psram_size)(void)
 
   /* Exit QPI mode (0xF5 in quad width) — harmless if already in SPI */
   qmi_hw->direct_csr |= QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
-  qmi_hw->direct_tx = QMI_DIRECT_TX_OE_BITS
-             | (QMI_DIRECT_TX_IWIDTH_VALUE_Q << QMI_DIRECT_TX_IWIDTH_LSB)
-             | CMD_QUAD_END;
+  qmi_hw->direct_tx = QMI_DIRECT_TX_OE_BITS |
+                      (QMI_DIRECT_TX_IWIDTH_VALUE_Q << QMI_DIRECT_TX_IWIDTH_LSB) | CMD_QUAD_END;
   while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) {}
   (void)qmi_hw->direct_rx;
   qmi_hw->direct_csr &= ~QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
@@ -155,9 +155,12 @@ static size_t __no_inline_not_in_flash_func(get_psram_size)(void)
     qmi_hw->direct_tx = (i == 0) ? CMD_READ_ID : CMD_NOOP;
     while ((qmi_hw->direct_csr & QMI_DIRECT_CSR_TXEMPTY_BITS) == 0) {}
     while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) {}
-    if (i == 5)      kgd = (uint8_t)qmi_hw->direct_rx;
-    else if (i == 6) eid = (uint8_t)qmi_hw->direct_rx;
-    else             (void)qmi_hw->direct_rx;
+    if (i == 5)
+      kgd = (uint8_t)qmi_hw->direct_rx;
+    else if (i == 6)
+      eid = (uint8_t)qmi_hw->direct_rx;
+    else
+      (void)qmi_hw->direct_rx;
   }
   qmi_hw->direct_csr &= ~QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
   qmi_hw->direct_csr &= ~(QMI_DIRECT_CSR_ASSERT_CS1N_BITS | QMI_DIRECT_CSR_EN_BITS);
@@ -185,7 +188,8 @@ static size_t __no_inline_not_in_flash_func(get_psram_size)(void)
  *
  * Call this again after overclocking to keep PSRAM within spec.
  */
-static void __no_inline_not_in_flash_func(set_psram_timing)(void)
+static void
+__no_inline_not_in_flash_func(set_psram_timing)(void)
 {
   uint32_t sys_hz = clock_get_hz(clk_sys);
   uint8_t clkdiv = (sys_hz + PSRAM_MAX_SCK_HZ - 1) / PSRAM_MAX_SCK_HZ;
@@ -199,19 +203,17 @@ static void __no_inline_not_in_flash_func(set_psram_timing)(void)
    * At 125 MHz (8 ns/cycle): rxdelay=1 → 4 ns (OK, plus inherent CLKDIV margin).
    * At 372 MHz (2.7 ns/cycle): rxdelay=3 → 4 ns.
    */
-  uint32_t half_period_ps = 500000000u / (sys_hz / 1000);  /* ps per half cycle */
+  uint32_t half_period_ps = 500000000u / (sys_hz / 1000); /* ps per half cycle */
   uint8_t rxdelay = (4000 + half_period_ps - 1) / half_period_ps;
   if (rxdelay < 1) rxdelay = 1;
 
   uint32_t save = save_and_disable_interrupts();
   qmi_hw->m[1].timing =
-      (2u << QMI_M1_TIMING_PAGEBREAK_LSB)      /* 1024-byte page boundary */
-    | (3u << QMI_M1_TIMING_SELECT_HOLD_LSB)    /* 3 extra hold cycles */
-    | (1u << QMI_M1_TIMING_COOLDOWN_LSB)       /* sequential burst reuse */
-    | (rxdelay << QMI_M1_TIMING_RXDELAY_LSB)
-    | (max_select << QMI_M1_TIMING_MAX_SELECT_LSB)
-    | (min_deselect << QMI_M1_TIMING_MIN_DESELECT_LSB)
-    | (clkdiv << QMI_M1_TIMING_CLKDIV_LSB);
+      (2u << QMI_M1_TIMING_PAGEBREAK_LSB)     /* 1024-byte page boundary */
+      | (3u << QMI_M1_TIMING_SELECT_HOLD_LSB) /* 3 extra hold cycles */
+      | (1u << QMI_M1_TIMING_COOLDOWN_LSB)    /* sequential burst reuse */
+      | (rxdelay << QMI_M1_TIMING_RXDELAY_LSB) | (max_select << QMI_M1_TIMING_MAX_SELECT_LSB) |
+      (min_deselect << QMI_M1_TIMING_MIN_DESELECT_LSB) | (clkdiv << QMI_M1_TIMING_CLKDIV_LSB);
   restore_interrupts(save);
 }
 
@@ -223,7 +225,8 @@ static void __no_inline_not_in_flash_func(set_psram_timing)(void)
  * read/write storage at XIP_BASE + 16 MB (0x11000000), and flash XIP
  * (CS0) retains the fast QSPI mode that boot2 configured at startup.
  */
-static void __no_inline_not_in_flash_func(setup_psram)(void)
+static void
+__no_inline_not_in_flash_func(setup_psram)(void)
 {
   /*
    * Inform the bootrom about CS1 via the runtime flash_devinfo API.
@@ -250,8 +253,8 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
    * code execution remains fast.  See file header comment for details.
    */
   uint32_t m0_timing_save = qmi_hw->m[0].timing;
-  uint32_t m0_rfmt_save   = qmi_hw->m[0].rfmt;
-  uint32_t m0_rcmd_save   = qmi_hw->m[0].rcmd;
+  uint32_t m0_rfmt_save = qmi_hw->m[0].rfmt;
+  uint32_t m0_rcmd_save = qmi_hw->m[0].rcmd;
 
   /* Apply CS1 configuration through the bootrom */
   rom_connect_internal_flash();
@@ -260,8 +263,8 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
 
   /* Restore fast QSPI XIP mode for flash CS0 */
   qmi_hw->m[0].timing = m0_timing_save;
-  qmi_hw->m[0].rfmt   = m0_rfmt_save;
-  qmi_hw->m[0].rcmd   = m0_rcmd_save;
+  qmi_hw->m[0].rfmt = m0_rfmt_save;
+  qmi_hw->m[0].rcmd = m0_rcmd_save;
 
   /*
    * Enter QPI mode on the PSRAM via direct mode.
@@ -291,7 +294,9 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
     qmi_hw->direct_tx = cmds[i];
     while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) {}
     qmi_hw->direct_csr &= ~QMI_DIRECT_CSR_ASSERT_CS1N_BITS;
-    for (volatile int j = 0; j < 20; j++) { __asm volatile("nop"); }
+    for (volatile int j = 0; j < 20; j++) {
+      __asm volatile("nop");
+    }
     (void)qmi_hw->direct_rx;
   }
 
@@ -308,15 +313,14 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
    *   24-bit address, 6 wait cycles = 24 dummy bits.
    *   Max frequency 133 MHz (datasheet §8.5).
    */
-  qmi_hw->m[1].rfmt =
-      (QMI_M1_RFMT_PREFIX_WIDTH_VALUE_Q << QMI_M1_RFMT_PREFIX_WIDTH_LSB)
-    | (QMI_M1_RFMT_ADDR_WIDTH_VALUE_Q << QMI_M1_RFMT_ADDR_WIDTH_LSB)
-    | (QMI_M1_RFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M1_RFMT_SUFFIX_WIDTH_LSB)
-    | (QMI_M1_RFMT_DUMMY_WIDTH_VALUE_Q << QMI_M1_RFMT_DUMMY_WIDTH_LSB)
-    | (QMI_M1_RFMT_DUMMY_LEN_VALUE_24 << QMI_M1_RFMT_DUMMY_LEN_LSB)
-    | (QMI_M1_RFMT_DATA_WIDTH_VALUE_Q << QMI_M1_RFMT_DATA_WIDTH_LSB)
-    | (QMI_M1_RFMT_PREFIX_LEN_VALUE_8 << QMI_M1_RFMT_PREFIX_LEN_LSB)
-    | (QMI_M1_RFMT_SUFFIX_LEN_VALUE_NONE << QMI_M1_RFMT_SUFFIX_LEN_LSB);
+  qmi_hw->m[1].rfmt = (QMI_M1_RFMT_PREFIX_WIDTH_VALUE_Q << QMI_M1_RFMT_PREFIX_WIDTH_LSB) |
+                      (QMI_M1_RFMT_ADDR_WIDTH_VALUE_Q << QMI_M1_RFMT_ADDR_WIDTH_LSB) |
+                      (QMI_M1_RFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M1_RFMT_SUFFIX_WIDTH_LSB) |
+                      (QMI_M1_RFMT_DUMMY_WIDTH_VALUE_Q << QMI_M1_RFMT_DUMMY_WIDTH_LSB) |
+                      (QMI_M1_RFMT_DUMMY_LEN_VALUE_24 << QMI_M1_RFMT_DUMMY_LEN_LSB) |
+                      (QMI_M1_RFMT_DATA_WIDTH_VALUE_Q << QMI_M1_RFMT_DATA_WIDTH_LSB) |
+                      (QMI_M1_RFMT_PREFIX_LEN_VALUE_8 << QMI_M1_RFMT_PREFIX_LEN_LSB) |
+                      (QMI_M1_RFMT_SUFFIX_LEN_VALUE_NONE << QMI_M1_RFMT_SUFFIX_LEN_LSB);
   qmi_hw->m[1].rcmd = CMD_READ_QUAD << QMI_M1_RCMD_PREFIX_LSB;
 
   /*
@@ -324,15 +328,14 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
    *   All phases on 4 lines, no dummy/wait cycles.
    *   Max frequency 133 MHz (datasheet §8.5).
    */
-  qmi_hw->m[1].wfmt =
-      (QMI_M1_WFMT_PREFIX_WIDTH_VALUE_Q << QMI_M1_WFMT_PREFIX_WIDTH_LSB)
-    | (QMI_M1_WFMT_ADDR_WIDTH_VALUE_Q << QMI_M1_WFMT_ADDR_WIDTH_LSB)
-    | (QMI_M1_WFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M1_WFMT_SUFFIX_WIDTH_LSB)
-    | (QMI_M1_WFMT_DUMMY_WIDTH_VALUE_Q << QMI_M1_WFMT_DUMMY_WIDTH_LSB)
-    | (QMI_M1_WFMT_DUMMY_LEN_VALUE_NONE << QMI_M1_WFMT_DUMMY_LEN_LSB)
-    | (QMI_M1_WFMT_DATA_WIDTH_VALUE_Q << QMI_M1_WFMT_DATA_WIDTH_LSB)
-    | (QMI_M1_WFMT_PREFIX_LEN_VALUE_8 << QMI_M1_WFMT_PREFIX_LEN_LSB)
-    | (QMI_M1_WFMT_SUFFIX_LEN_VALUE_NONE << QMI_M1_WFMT_SUFFIX_LEN_LSB);
+  qmi_hw->m[1].wfmt = (QMI_M1_WFMT_PREFIX_WIDTH_VALUE_Q << QMI_M1_WFMT_PREFIX_WIDTH_LSB) |
+                      (QMI_M1_WFMT_ADDR_WIDTH_VALUE_Q << QMI_M1_WFMT_ADDR_WIDTH_LSB) |
+                      (QMI_M1_WFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M1_WFMT_SUFFIX_WIDTH_LSB) |
+                      (QMI_M1_WFMT_DUMMY_WIDTH_VALUE_Q << QMI_M1_WFMT_DUMMY_WIDTH_LSB) |
+                      (QMI_M1_WFMT_DUMMY_LEN_VALUE_NONE << QMI_M1_WFMT_DUMMY_LEN_LSB) |
+                      (QMI_M1_WFMT_DATA_WIDTH_VALUE_Q << QMI_M1_WFMT_DATA_WIDTH_LSB) |
+                      (QMI_M1_WFMT_PREFIX_LEN_VALUE_8 << QMI_M1_WFMT_PREFIX_LEN_LSB) |
+                      (QMI_M1_WFMT_SUFFIX_LEN_VALUE_NONE << QMI_M1_WFMT_SUFFIX_LEN_LSB);
   qmi_hw->m[1].wcmd = CMD_WRITE_QUAD << QMI_M1_WCMD_PREFIX_LSB;
 
   /*
@@ -347,7 +350,8 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
   restore_interrupts(save);
 }
 
-void *psram_init(size_t *size_out)
+void *
+psram_init(size_t *size_out)
 {
   gpio_set_function(PICO_RP2350_PSRAM_CS_PIN, GPIO_FUNC_XIP_CS1);
 
@@ -365,13 +369,11 @@ void *psram_init(size_t *size_out)
   test[0] = 0xDEADBEEF;
   test[1] = 0x12345678;
   if (test[0] != 0xDEADBEEF || test[1] != 0x12345678) {
-    printf("PSRAM verify failed: %08lx %08lx\n",
-         (unsigned long)test[0], (unsigned long)test[1]);
+    printf("PSRAM verify failed: %08lx %08lx\n", (unsigned long)test[0], (unsigned long)test[1]);
     return NULL;
   }
 
-  if (size_out)
-    *size_out = psram_size;
+  if (size_out) *size_out = psram_size;
 
   return (void *)(XIP_BASE + 16 * 1024 * 1024);
 }

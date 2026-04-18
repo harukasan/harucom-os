@@ -24,28 +24,26 @@
 #define ROOTFS_MARKER_PATH "flash:ROOTFS_HASH"
 
 /* Ensure parent directories exist for a FatFs path like "flash:lib/foo.rb". */
-static void ensure_directories(const char *path) {
+static void
+ensure_directories(const char *path)
+{
   /* Find the start of the relative path after "flash:" */
   const char *rel = strchr(path, ':');
-  if (!rel)
-    return;
+  if (!rel) return;
   rel++; /* skip ':' */
 
   /* Work buffer: "flash:" + directory components */
   char buf[128];
   size_t prefix_len = (size_t)(rel - path);
-  if (prefix_len >= sizeof(buf))
-    return;
+  if (prefix_len >= sizeof(buf)) return;
   memcpy(buf, path, prefix_len);
 
   const char *p = rel;
   while (*p) {
     const char *slash = strchr(p, '/');
-    if (!slash)
-      break;
+    if (!slash) break;
     size_t dir_len = (size_t)(slash - rel);
-    if (prefix_len + dir_len >= sizeof(buf))
-      break;
+    if (prefix_len + dir_len >= sizeof(buf)) break;
     memcpy(buf + prefix_len, rel, dir_len);
     buf[prefix_len + dir_len] = '\0';
     f_mkdir(buf); /* ignore errors (already exists is OK) */
@@ -53,7 +51,9 @@ static void ensure_directories(const char *path) {
   }
 }
 
-static FRESULT format_and_mount(FATFS *fatfs) {
+static FRESULT
+format_and_mount(FATFS *fatfs)
+{
   printf("rootfs: formatting...\n");
   f_mount(NULL, "flash:", 0);
   static uint8_t work[FF_MAX_SS];
@@ -67,10 +67,11 @@ static FRESULT format_and_mount(FATFS *fatfs) {
 }
 
 /* Read the rootfs hash marker from the FAT volume. */
-static bool read_rootfs_marker(uint32_t *hash) {
+static bool
+read_rootfs_marker(uint32_t *hash)
+{
   FIL fp;
-  if (f_open(&fp, ROOTFS_MARKER_PATH, FA_READ) != FR_OK)
-    return false;
+  if (f_open(&fp, ROOTFS_MARKER_PATH, FA_READ) != FR_OK) return false;
   UINT br;
   FRESULT res = f_read(&fp, hash, sizeof(*hash), &br);
   f_close(&fp);
@@ -78,10 +79,11 @@ static bool read_rootfs_marker(uint32_t *hash) {
 }
 
 /* Write the rootfs hash marker to the FAT volume. */
-static void write_rootfs_marker(void) {
+static void
+write_rootfs_marker(void)
+{
   FIL fp;
-  if (f_open(&fp, ROOTFS_MARKER_PATH, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
-    return;
+  if (f_open(&fp, ROOTFS_MARKER_PATH, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) return;
   uint32_t hash = rootfs_hash;
   UINT bw;
   f_write(&fp, &hash, sizeof(hash), &bw);
@@ -89,7 +91,9 @@ static void write_rootfs_marker(void) {
 }
 
 /* Write all scripts to flash. Returns true if all writes succeeded. */
-static bool write_scripts(void) {
+static bool
+write_scripts(void)
+{
   bool ok = true;
   for (int i = 0; i < ruby_scripts_count; i++) {
     const ruby_script_entry_t *entry = &ruby_scripts[i];
@@ -106,8 +110,7 @@ static bool write_scripts(void) {
     }
     res = f_write(&fp, entry->data, entry->size, &bw);
     if (res != FR_OK || bw != entry->size) {
-      printf("rootfs: f_write(%s) failed (%d, wrote %u/%u)\n", entry->path, res,
-             bw, entry->size);
+      printf("rootfs: f_write(%s) failed (%d, wrote %u/%u)\n", entry->path, res, bw, entry->size);
       ok = false;
     }
     f_close(&fp);
@@ -117,11 +120,12 @@ static bool write_scripts(void) {
 }
 
 /* Deploy all rootfs files and write the marker last. */
-static void deploy_all(FATFS *fatfs) {
+static void
+deploy_all(FATFS *fatfs)
+{
   if (!write_scripts()) {
     printf("rootfs: write errors, reformatting...\n");
-    if (format_and_mount(fatfs) != FR_OK)
-      return;
+    if (format_and_mount(fatfs) != FR_OK) return;
     write_scripts();
   }
   write_rootfs_marker();
@@ -129,7 +133,9 @@ static void deploy_all(FATFS *fatfs) {
          (unsigned long)rootfs_hash);
 }
 
-void init_rootfs(void) {
+void
+init_rootfs(void)
+{
   FATFS fatfs;
   FRESULT res;
 

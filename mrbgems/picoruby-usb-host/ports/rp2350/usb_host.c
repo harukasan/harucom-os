@@ -20,12 +20,12 @@
 
 /* HID keycodes and modifier bits for Ctrl-Alt-Delete reboot */
 #define HID_KEY_DELETE_FORWARD 0x4C
-#define HID_MOD_CTRL_MASK  0x11  /* Left Ctrl (0x01) | Right Ctrl (0x10) */
-#define HID_MOD_ALT_MASK   0x44  /* Left Alt (0x04) | Right Alt (0x40) */
+#define HID_MOD_CTRL_MASK      0x11 /* Left Ctrl (0x01) | Right Ctrl (0x10) */
+#define HID_MOD_ALT_MASK       0x44 /* Left Alt (0x04) | Right Alt (0x40) */
 
 /* Board pin definitions (from harucom_board.h) */
 #ifndef HARUCOM_USBH_DP_PIN
-#define HARUCOM_USBH_DP_PIN      8
+#define HARUCOM_USBH_DP_PIN 8
 #endif
 #ifndef HARUCOM_USBH_VBUS_EN_PIN
 #define HARUCOM_USBH_VBUS_EN_PIN 10
@@ -94,8 +94,7 @@ usb_host_keyboard_keycodes(void)
  *--------------------------------------------------------------------*/
 
 void
-tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
-                 uint8_t const *desc_report, uint16_t desc_len)
+tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_report, uint16_t desc_len)
 {
   (void)desc_report;
   (void)desc_len;
@@ -103,8 +102,7 @@ tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
   uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
   if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
-    printf("USB keyboard connected (dev_addr=%d, instance=%d)\n",
-           dev_addr, instance);
+    printf("USB keyboard connected (dev_addr=%d, instance=%d)\n", dev_addr, instance);
     keyboard_dev_addr = dev_addr;
     keyboard_instance = instance;
     keyboard_connected_flag = true;
@@ -129,24 +127,20 @@ tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance)
 }
 
 void
-tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
-                            uint8_t const *report, uint16_t len)
+tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len)
 {
   (void)len;
 
   uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
   if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
-    hid_keyboard_report_t const *kbd_report =
-        (hid_keyboard_report_t const *)report;
+    hid_keyboard_report_t const *kbd_report = (hid_keyboard_report_t const *)report;
 
     keyboard_modifier_state = kbd_report->modifier;
-    memcpy(keyboard_keycodes_state, kbd_report->keycode,
-           sizeof(keyboard_keycodes_state));
+    memcpy(keyboard_keycodes_state, kbd_report->keycode, sizeof(keyboard_keycodes_state));
 
     /* Ctrl-Alt-Delete: immediate system reboot */
-    if ((kbd_report->modifier & HID_MOD_CTRL_MASK) &&
-        (kbd_report->modifier & HID_MOD_ALT_MASK)) {
+    if ((kbd_report->modifier & HID_MOD_CTRL_MASK) && (kbd_report->modifier & HID_MOD_ALT_MASK)) {
       for (int i = 0; i < 6; i++) {
         if (kbd_report->keycode[i] == HID_KEY_DELETE_FORWARD) {
           watchdog_reboot(0, 0, 0);

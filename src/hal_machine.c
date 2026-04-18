@@ -50,7 +50,7 @@ volatile int sigint_status = MACHINE_SIG_NONE;
 #endif
 
 static uint8_t stdin_buf_mem[sizeof(RingBuffer) + PICORB_STDIN_BUFFER_SIZE]
-  __attribute__((aligned(4)));
+    __attribute__((aligned(4)));
 static RingBuffer *stdin_rb = (RingBuffer *)stdin_buf_mem;
 
 void
@@ -90,9 +90,9 @@ static int canon_len = 0;
 static int canon_read_pos = 0;
 static bool canon_eof = false;
 
-#define CANON_LINE_READY    1
-#define CANON_EOF           2
-#define CANON_ACCUMULATING  0
+#define CANON_LINE_READY   1
+#define CANON_EOF          2
+#define CANON_ACCUMULATING 0
 
 static int
 canon_process_char(uint8_t raw)
@@ -142,8 +142,8 @@ canon_process_char(uint8_t raw)
  *
  *------------------------------------*/
 
-#define HAL_GETCHAR_NODATA  (-1)
-#define HAL_GETCHAR_EOF     (-2)
+#define HAL_GETCHAR_NODATA (-1)
+#define HAL_GETCHAR_EOF    (-2)
 
 static void
 poll_stdio_to_ringbuffer(void)
@@ -216,13 +216,13 @@ hal_getchar(void)
 
   int result = canon_process_char(raw);
   switch (result) {
-    case CANON_LINE_READY:
-      return hal_getchar();
-    case CANON_EOF:
-      canon_eof = false;
-      return HAL_GETCHAR_EOF;
-    default:
-      return HAL_GETCHAR_NODATA;
+  case CANON_LINE_READY:
+    return hal_getchar();
+  case CANON_EOF:
+    canon_eof = false;
+    return HAL_GETCHAR_EOF;
+  default:
+    return HAL_GETCHAR_NODATA;
   }
 }
 
@@ -237,8 +237,7 @@ hal_read_available(void)
   if (canon_read_pos < canon_len) {
     return 1;
   }
-  if (RingBuffer_search_char(stdin_rb, '\n') >= 0 ||
-      RingBuffer_search_char(stdin_rb, '\r') >= 0 ||
+  if (RingBuffer_search_char(stdin_rb, '\n') >= 0 || RingBuffer_search_char(stdin_rb, '\r') >= 0 ||
       RingBuffer_search_char(stdin_rb, 4) >= 0) {
     return 1;
   }
@@ -315,9 +314,8 @@ Machine_uptime_formatted(char *buf, int maxlen)
   uint32_t min = sec / 60;
   uint32_t hour = min / 60;
   uint32_t day = hour / 24;
-  snprintf(buf, maxlen, "%ud %02u:%02u:%02u.%02u",
-           (unsigned)day, (unsigned)(hour % 24), (unsigned)(min % 60),
-           (unsigned)(sec % 60), (unsigned)((us % 1000000) / 10000));
+  snprintf(buf, maxlen, "%ud %02u:%02u:%02u.%02u", (unsigned)day, (unsigned)(hour % 24),
+           (unsigned)(min % 60), (unsigned)(sec % 60), (unsigned)((us % 1000000) / 10000));
 }
 
 /*-------------------------------------
@@ -329,8 +327,7 @@ Machine_uptime_formatted(char *buf, int maxlen)
 bool
 Machine_get_unique_id(char *id_str)
 {
-  pico_get_unique_board_id_string(id_str,
-      PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1);
+  pico_get_unique_board_id_string(id_str, PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1);
   return true;
 }
 

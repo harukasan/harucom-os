@@ -25,8 +25,7 @@ mrb_pwm_audio_tone(mrb_state *mrb, mrb_value self)
 {
   mrb_int channel, frequency, waveform, volume;
   mrb_get_args(mrb, "iiii", &channel, &frequency, &waveform, &volume);
-  pwm_audio_set_tone((uint8_t)channel, (uint32_t)frequency,
-                     (uint8_t)waveform, (uint8_t)volume);
+  pwm_audio_set_tone((uint8_t)channel, (uint32_t)frequency, (uint8_t)waveform, (uint8_t)volume);
   return mrb_nil_value();
 }
 
@@ -93,31 +92,20 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
 {
   struct RClass *mod = mrb_define_module_id(mrb, MRB_SYM(PWMAudio));
 
-  mrb_define_const_id(mrb, mod, MRB_SYM(SINE),
-                      mrb_fixnum_value(PWM_AUDIO_WAVE_SINE));
-  mrb_define_const_id(mrb, mod, MRB_SYM(SQUARE),
-                      mrb_fixnum_value(PWM_AUDIO_WAVE_SQUARE));
-  mrb_define_const_id(mrb, mod, MRB_SYM(TRIANGLE),
-                      mrb_fixnum_value(PWM_AUDIO_WAVE_TRIANGLE));
-  mrb_define_const_id(mrb, mod, MRB_SYM(SAWTOOTH),
-                      mrb_fixnum_value(PWM_AUDIO_WAVE_SAWTOOTH));
+  mrb_define_const_id(mrb, mod, MRB_SYM(SINE), mrb_fixnum_value(PWM_AUDIO_WAVE_SINE));
+  mrb_define_const_id(mrb, mod, MRB_SYM(SQUARE), mrb_fixnum_value(PWM_AUDIO_WAVE_SQUARE));
+  mrb_define_const_id(mrb, mod, MRB_SYM(TRIANGLE), mrb_fixnum_value(PWM_AUDIO_WAVE_TRIANGLE));
+  mrb_define_const_id(mrb, mod, MRB_SYM(SAWTOOTH), mrb_fixnum_value(PWM_AUDIO_WAVE_SAWTOOTH));
 
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(init),
-                                mrb_pwm_audio_init, MRB_ARGS_REQ(2));
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(tone),
-                                mrb_pwm_audio_tone, MRB_ARGS_REQ(4));
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(pan),
-                                mrb_pwm_audio_pan, MRB_ARGS_REQ(2));
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(mute),
-                                mrb_pwm_audio_mute, MRB_ARGS_REQ(2));
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(stop),
-                                mrb_pwm_audio_stop, MRB_ARGS_REQ(1));
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(stop_all),
-                                mrb_pwm_audio_stop_all, MRB_ARGS_NONE());
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(update),
-                                mrb_pwm_audio_update, MRB_ARGS_NONE());
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(deinit),
-                                mrb_pwm_audio_deinit, MRB_ARGS_NONE());
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(init), mrb_pwm_audio_init, MRB_ARGS_REQ(2));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(tone), mrb_pwm_audio_tone, MRB_ARGS_REQ(4));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(pan), mrb_pwm_audio_pan, MRB_ARGS_REQ(2));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(mute), mrb_pwm_audio_mute, MRB_ARGS_REQ(2));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(stop), mrb_pwm_audio_stop, MRB_ARGS_REQ(1));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(stop_all), mrb_pwm_audio_stop_all,
+                                MRB_ARGS_NONE());
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(update), mrb_pwm_audio_update, MRB_ARGS_NONE());
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(deinit), mrb_pwm_audio_deinit, MRB_ARGS_NONE());
 }
 
 void

@@ -61,16 +61,14 @@ mrb_usb_host_keyboard_modifier(mrb_state *mrb, mrb_value klass)
 void
 mrb_picoruby_usb_host_gem_init(mrb_state *mrb)
 {
-  struct RClass *module_USB =
-      mrb_define_module_id(mrb, MRB_SYM(USB));
+  struct RClass *module_USB = mrb_define_module_id(mrb, MRB_SYM(USB));
 
-  struct RClass *module_Host =
-      mrb_define_module_under_id(mrb, module_USB, MRB_SYM(Host));
+  struct RClass *module_Host = mrb_define_module_under_id(mrb, module_USB, MRB_SYM(Host));
 
-  mrb_define_module_function_id(mrb, module_Host, MRB_SYM(init),
-                                mrb_usb_host_init, MRB_ARGS_NONE());
-  mrb_define_module_function_id(mrb, module_Host, MRB_SYM(task),
-                                mrb_usb_host_task, MRB_ARGS_NONE());
+  mrb_define_module_function_id(mrb, module_Host, MRB_SYM(init), mrb_usb_host_init,
+                                MRB_ARGS_NONE());
+  mrb_define_module_function_id(mrb, module_Host, MRB_SYM(task), mrb_usb_host_task,
+                                MRB_ARGS_NONE());
   mrb_define_module_function_id(mrb, module_Host, MRB_SYM_Q(keyboard_connected),
                                 mrb_usb_host_keyboard_connected, MRB_ARGS_NONE());
   mrb_define_module_function_id(mrb, module_Host, MRB_SYM(keyboard_keycodes),

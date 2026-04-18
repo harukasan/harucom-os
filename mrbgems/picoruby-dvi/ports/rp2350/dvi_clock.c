@@ -17,16 +17,16 @@
 #include "hardware/vreg.h"
 #include "pico/stdlib.h"
 
-void dvi_init_clock(void) {
-    // Raise VREG voltage for stable operation at 250 MHz.
-    vreg_set_voltage(VREG_VOLTAGE_1_15);
-    sleep_ms(10);
+void
+dvi_init_clock(void)
+{
+  // Raise VREG voltage for stable operation at 250 MHz.
+  vreg_set_voltage(VREG_VOLTAGE_1_15);
+  sleep_ms(10);
 
-    // Reconfigure PLL: 12 MHz * 125 = 1500 MHz VCO, / 6 / 1 = 250 MHz.
-    set_sys_clock_pll(1500000000, 6, 1);
+  // Reconfigure PLL: 12 MHz * 125 = 1500 MHz VCO, / 6 / 1 = 250 MHz.
+  set_sys_clock_pll(1500000000, 6, 1);
 
-    // clk_hstx = sys_clk / 2 = 125 MHz -> pixel clock = 25 MHz.
-    clock_configure(clk_hstx, 0,
-                    CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLK_SYS,
-                    250000000, 125000000);
+  // clk_hstx = sys_clk / 2 = 125 MHz -> pixel clock = 25 MHz.
+  clock_configure(clk_hstx, 0, CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLK_SYS, 250000000, 125000000);
 }
