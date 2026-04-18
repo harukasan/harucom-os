@@ -16,6 +16,15 @@
  *     Writing ATRANS registers manually is NOT sufficient; the bootrom must
  *     configure additional internal state for memory-mapped CS1 access to
  *     work.  See: https://github.com/raspberrypi/pico-sdk/issues/2205
+ *
+ *     The bootrom calls (rom_flash_exit_xip / rom_flash_enter_cmd_xip)
+ *     overwrite the QMI M0 (flash CS0) registers with slow single-SPI
+ *     XIP settings.  We save M0 (timing/rfmt/rcmd) before the bootrom
+ *     calls and restore it after, preserving the fast QSPI XIP mode that
+ *     boot2 configured at startup.  Without this restore, code execution
+ *     from flash runs 2-6x slower whenever no flash write happens after
+ *     psram_init (which would otherwise call flash_enable_xip_via_boot2
+ *     and restore the fast mode as a side effect).
  *  3. Enter QPI — Send Reset Enable (0x66), Reset (0x99), and Enter Quad
  *     Mode (0x35) to the PSRAM via QMI direct mode.
  *  4. Configure QMI M1 — Set timing, read/write format, and command
@@ -203,10 +212,12 @@ static void __no_inline_not_in_flash_func(set_psram_timing)(void)
 }
 
 /*
- * Full PSRAM setup: bootrom CS1 config → QPI mode → M1 registers.
+ * Full PSRAM setup: save M0 → bootrom CS1 config → restore M0 → QPI
+ * mode → M1 registers.
  *
  * After this function returns, the PSRAM is accessible as memory-mapped
- * read/write storage at XIP_BASE + 16 MB (0x11000000).
+ * read/write storage at XIP_BASE + 16 MB (0x11000000), and flash XIP
+ * (CS0) retains the fast QSPI mode that boot2 configured at startup.
  */
 static void __no_inline_not_in_flash_func(setup_psram)(void)
 {
@@ -226,10 +237,27 @@ static void __no_inline_not_in_flash_func(setup_psram)(void)
 
     uint32_t save = save_and_disable_interrupts();
 
+    /*
+     * Save QMI M0 (flash CS0) registers before the bootrom calls.
+     *
+     * rom_flash_exit_xip / rom_flash_enter_cmd_xip below overwrite M0
+     * with slow single-SPI XIP settings.  We save the fast QSPI values
+     * that boot2 configured at startup and restore them after, so flash
+     * code execution remains fast.  See file header comment for details.
+     */
+    uint32_t m0_timing_save = qmi_hw->m[0].timing;
+    uint32_t m0_rfmt_save   = qmi_hw->m[0].rfmt;
+    uint32_t m0_rcmd_save   = qmi_hw->m[0].rcmd;
+
     /* Apply CS1 configuration through the bootrom */
     rom_connect_internal_flash();
     rom_flash_exit_xip();
     rom_flash_enter_cmd_xip();
+
+    /* Restore fast QSPI XIP mode for flash CS0 */
+    qmi_hw->m[0].timing = m0_timing_save;
+    qmi_hw->m[0].rfmt   = m0_rfmt_save;
+    qmi_hw->m[0].rcmd   = m0_rcmd_save;
 
     /*
      * Enter QPI mode on the PSRAM via direct mode.
