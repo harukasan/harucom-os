@@ -1,0 +1,20 @@
+# Project-wide C/C++ formatting rules for Harucom OS.
+#
+# Apply with:
+#   clang-format -i <file>
+#
+# Excludes external/imported code (lib/, mrbgems/*/lib/fonts/).
+BasedOnStyle: LLVM
+IndentWidth: 2
+UseTab: Never
+ColumnLimit: 100
+BreakBeforeBraces: Linux
+AlwaysBreakAfterReturnType: AllDefinitions
+AllowShortBlocksOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AlignConsecutiveMacros: AcrossEmptyLines
+AlignTrailingComments: true
+ReflowComments: false
+SortIncludes: false
