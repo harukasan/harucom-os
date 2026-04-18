@@ -14,7 +14,6 @@ ix = 640 - 60 - bmp.width
 cx = ix + bmp.width / 2
 cy = y + bmp.height / 2
 ```
-
 ```p5
 angle = (DVI.frame_count % 360) * Math::PI / 180.0
 p5.push_matrix
@@ -23,7 +22,6 @@ p5.rotate(angle)
 p5.image_masked(bmp.data, bmp.mask, -bmp.width / 2, -bmp.height / 2, bmp.width, bmp.height)
 p5.pop_matrix
 ```
-
 Shunsuke Michii
 a.k.a **Harukasan**
 
@@ -44,7 +42,7 @@ a.k.a **Harukasan**
 # Now available on BOOTH!
 
 BOOTH: a marketplace for creative endeavors
-powered by Ruby on Rails
+Powered by Ruby on Rails
 
 {::wait/}
 
@@ -63,7 +61,6 @@ A presentation tool inspired by Rabbit
 # Harucom OS
 
 ```p5_setup
-
 # Stack diagram
 rows = [
   [[0xE0, "Ruby Applications"]],
@@ -80,7 +77,7 @@ by = 120
 ```
 
 ```p5
-p5.text_font(DVI::Graphics::FONT_SOURCE_CODE_PRO_18)
+p5.text_font(DVI::Graphics::FONT_OUTFIT_BOLD_18)
 p5.text_align(:center)
 
 rows.each_with_index do |row, i|
@@ -102,7 +99,7 @@ end
 
 1. Run rich embedded applications with mruby
 2. Build my own computer with my own hands
-3. **A good first choise for learning programming**
+3. **A good first choice for learning programming**
 
 {::wait/}
 
@@ -124,7 +121,7 @@ How hard can it be?
 # DVI frame timing diagram
 s = 0.4
 ox = 320 - (800 * s).to_i / 2
-oy = 200
+oy = 180
 
 g = DVI::Graphics
 font = g::FONT_SOURCE_CODE_PRO_18
@@ -201,127 +198,103 @@ p5.pop_matrix
 
 # DVI bit rate
 
-DVI uses TMDS: 10-bit encoding per channel
-
+DVI uses TMDS: 8b/10b encoding per channel
 - 3 data channels (R, G, B) + 1 clock channel
-- Each channel: 25 MHz x 10 bit = **250 Mbps**
-
-- Total wire rate: **1 Gbps** across 4 differential pairs
-- One bit every **4 ns**
-
-```p5
-g = DVI::Graphics
-p5.text_font(g::FONT_SOURCE_CODE_PRO_18)
-
-# Layout
-ox = 120
-sw = 460
-sy = 262
-amp = 6
-dg = 3
-ps = 42
-num_bits = 20
-bw = sw / num_bits
-
-# Bit patterns (data channels pseudo-random, clock regular)
-d = [
-  [1,0,1,1,0,0,1,0,1,1,0,1,0,0,1,1,0,1,0,1],
-  [0,1,1,0,1,0,0,1,1,0,1,1,0,1,0,0,1,0,1,1],
-  [1,1,0,1,0,1,1,0,0,1,0,1,1,0,1,0,0,1,1,0],
-  [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
-]
-labels = ["D2 (R)", "D1 (G)", "D0 (B)", "CLK"]
-colors = [0xE0, 0x1C, 0x03, 0x49]
-
-ch = 0
-while ch < 4
-  yp = sy + ch * ps
-  ym = yp + amp * 2 + dg
-  color = colors[ch]
-  bits = d[ch]
-
-  # Label
-  p5.no_stroke
-  p5.text_color(color)
-  p5.text_align(:right)
-  p5.text(labels[ch], ox - 8, yp + amp - 4)
-
-  p5.stroke(color)
-
-  # D+ waveform
-  px = ox
-  py = bits[0] == 1 ? yp - amp : yp + amp
-  i = 0
-  while i < num_bits
-    ny = bits[i] == 1 ? yp - amp : yp + amp
-    p5.line(px, py, px, ny) if ny != py
-    nx = px + bw
-    p5.line(px, ny, nx, ny)
-    py = ny
-    px = nx
-    i += 1
-  end
-
-  # D- waveform (complementary)
-  px = ox
-  py = bits[0] == 0 ? ym - amp : ym + amp
-  i = 0
-  while i < num_bits
-    ny = bits[i] == 0 ? ym - amp : ym + amp
-    p5.line(px, py, px, ny) if ny != py
-    nx = px + bw
-    p5.line(px, ny, nx, ny)
-    py = ny
-    px = nx
-    i += 1
-  end
-
-  ch += 1
-end
-```
+- Each channel: 25 MHz x 10 bits = **250 Mbps**
 
 # HSTX: High-Speed Serial Transmit
 
 - Dedicated high-speed serializer on GPIO 12-19
 - 4 differential pairs for TMDS output
 - Hardware TMDS encoding (8b/10b)
-- DMA-fed: zero CPU intervention
+- DMA-fed: minimal CPU intervention
 
 # How HSTX works
 
-```
-DMA -> HSTX FIFO -> Shift Register -> TMDS -> GPIO
-```
-
-- clk_hstx = 125 MHz (sys_clk / 2)
-- CLKDIV = 5, N_SHIFTS = 5, SHIFT = 2 bits
-- 125 / 5 = 25 MHz pixel clock
-
-{::wait/}
-
-- HSTX command expander controls output mode
-  - Sync periods: repeat sync symbols
+- Command expander: interprets command from the FIFO
+  - Each command specifies how to expand following data
+  - Sync periods: repeat raw sync symbols
   - Active region: TMDS-encode pixel data
-- DMA feeds commands + pixels, HSTX does the rest
+- IRQ handler builds commands + pixels per scanline
+
+```p5_setup
+# Block diagram layout
+boxes = [
+  "DMA",
+  "HSTX FIFO",
+  "Command\nExpander",
+  "Shift\nRegister",
+  "GPIO",
+]
+
+bw = 96
+bh = 48
+gap = 24
+total_w = boxes.size * bw + (boxes.size - 1) * gap
+sx = 320 - total_w / 2
+sy = 280
+```
+
+```p5
+p5.text_font(DVI::Graphics::FONT_OUTFIT_18)
+p5.text_align(:center)
+p5.text_color(0x00)
+
+# Draw boxes and labels
+i = 0
+while i < boxes.size
+  x = sx + i * (bw + gap)
+  p5.no_fill
+  p5.stroke(0x92)
+  p5.stroke_weight(2)
+  p5.rect(x, sy, bw, bh)
+  p5.no_stroke
+  lines = boxes[i].split("\n")
+  if lines.size == 1
+    p5.text(lines[0], x + bw / 2, sy + 16)
+  else
+    p5.text(lines[0], x + bw / 2, sy + 8)
+    p5.text(lines[1], x + bw / 2, sy + 26)
+  end
+  i += 1
+end
+
+# Draw arrows between boxes
+p5.stroke(0x92)
+i = 0
+while i < boxes.size - 1
+  x1 = sx + i * (bw + gap) + bw
+  x2 = sx + (i + 1) * (bw + gap)
+  ay = sy + bh / 2
+  p5.line(x1, ay, x2, ay)
+  # Arrowhead
+  p5.line(x2, ay, x2 - 4, ay - 4)
+  p5.line(x2, ay, x2 - 4, ay + 4)
+  i += 1
+end
+```
 
 # Data rate for DMA
 
 HSTX handles TMDS encoding, but DMA must keep up
-
 - 1 pixel = 8 bits (RGB332)
 - 25 MHz x 8 bit = **200 Mbps (25 MB/s)**
-
+- Must feed HSTX FIFO at this rate continuously
 {::wait/}
+- 32 us deadline per scanline
+- Any stall causes a **visible glitch on screen**
 
-- 1 scanline = 800 pixels in 32 us
-- Must fill HSTX FIFO continuously
-- Any stall = **visible glitch on screen**
+# DMA feeding strategy
+
+- Two DMA channels: CMD + DATA
+- CMD reads descriptors, programs DATA channel
+- DATA writes pixels to HSTX FIFO
 
 # Dual-core architecture
 
 ```p5
 g = DVI::Graphics
-p5.text_font(g::FONT_OUTFIT_BOLD_18)
+p5.text_font(g::FONT_OUTFIT_BOLD_22)
 p5.text_align(:center)
 p5.text_color(0x00)
 p5.no_fill
@@ -333,271 +306,245 @@ p5.rect(100, 160, 200, 180)
 p5.text("Core 0", 200, 170)
 
 p5.text("Ruby VM", 200, 210)
-p5.text("STDIO", 200, 234)
+p5.text("Console I/O", 200, 234)
 p5.text("Timers", 200, 258)
-p5.text("File I/O", 200, 282)
 
 # Core 1 box
 p5.rect(340, 160, 200, 180)
 p5.text("Core 1", 440, 170)
 
-p5.text("DVI Output", 440, 210)
-p5.text("DMA IRQ", 440, 234)
-p5.text("Scanline Render", 440, 258)
+p5.text("DVI Output", 440, 240)
 ```
 
 # Two display modes
 
-**Text mode** (IRB, editor)
-- 106 x 37 character cells
-- Scanline rendering from VRAM
-
-{::wait/}
-
-**Graphics mode** (PicoRabbit, P5)
-- 640x480 framebuffer
-- Direct DMA from SRAM
-
-# Graphics mode
-
-- 640x480 framebuffer in SRAM (300 KB)
+**Graphics mode** (PicoRabbit)
+- 640x480 or 320x240, switchable at runtime
 - DMA reads framebuffer directly
-- Core 1 only builds DMA commands
-
+- Core 0 handles all graphic rendering
 {::wait/}
-
-- Simple, but memory-hungry
-- All rendering done on Core 0
-
-# Text mode: scanline rendering
-
-- No framebuffer, only VRAM (106 x 37 cells, ~15 KB)
-- Render pixels from VRAM + font data per scanline
-
-{::wait/}
-
-- While DMA sends current line,
-  Core 1 renders the next line
-- Must keep up with 25 MHz pixel clock
-
-# Graphics mode vs Text mode
-
-```p5
-g = DVI::Graphics
-p5.text_font(g::FONT_SOURCE_CODE_PRO_14)
-p5.text_color(0xFF)
-
-# Table header
-headers = ["", "Graphics", "Text"]
-cols = [120, 300, 460]
-y = 140
-headers.each_with_index do |h, i|
-  p5.text_align(:center)
-  p5.text(h, cols[i], y)
-end
-
-# Separator
-p5.stroke(0x49)
-p5.line(60, y + 14, 580, y + 14)
-p5.no_stroke
-
-# Rows
-rows = [
-  ["Resolution", "640x480", "640x480"],
-  ["Memory", "300 KB + PSRAM", "~15 KB VRAM"],
-  ["Core 1 load", "Idle", "Scanline render"],
-  ["Core 0 load", "All rendering", "Light"],
-]
-rows.each_with_index do |row, ri|
-  ry = y + 34 + ri * 28
-  p5.text_align(:left)
-  p5.text_color(0xDB)
-  p5.text(row[0], 70, ry)
-  p5.text_align(:center)
-  p5.text_color(0xFF)
-  p5.text(row[1], cols[1], ry)
-  p5.text(row[2], cols[2], ry)
-end
-```
+**Text mode** (IRB, editor)
+- VRAM: 106 x 37 character cells, no framebuffer
+- Core 1 renders font glyphs to pixels per scanline
+- DMA sends current line while Core 1 renders next
 
 # Cycles per scanline
 
 At 150 MHz (default), one scanline = 32 us
-
 - 150 MHz x 32 us = 4,800 cycles total
+- DMA occupies bus during active period
 - Usable: only ~1,000 cycles (H-blanking only)
-
 {::wait/}
-
-**Overclocked to 250 MHz**
-
-- 250 MHz x 32 us = 8,000 cycles total
-- Usable for rendering: ~2,240 cycles
+**Solution 1: Overclock to 250 MHz**
+- Usable for rendering: ~2,200 cycles
+{::wait/}
+**Solution 2: Batch rendering**
+- Render 4 scanlines per IRQ instead of 1
 
 # Batch rendering
 
-Render 4 scanlines per DMA IRQ
+Batch rendering gives more cycle budget
 
-- Budget: 2,240 x 4 = **32,000 cycles** per batch
-- Actual rendering: ~8,000 cycles (4 lines)
-- Headroom: ~24,000 cycles
-
-{::wait/}
-
+- Render 4 lines at once, DMA sends while rendering next
+- Core 1 can use active period too, not just blanking
+- Cycle budget: **~32,000 cycles** per batch
 - 8 line buffers (double-buffered x 4)
-- DMA reads 4 lines while CPU renders next 4
+- IRQs per frame: 1,005 -> **165** (6x reduction)
 
 # CJK wide character support
 
 - Half-width: 256 glyphs, cached in SRAM at boot
 - Full-width: 8,000+ glyphs (JIS X 0208)
-  - 12px wide x 13 scanlines x 2 bytes each
+  - 12px wide x 13 scanlines x 2 bytes per line
   - Too large for SRAM
-
 {::wait/}
 
-- Per-cell glyph bitmap cache (~50 KB)
-- Core 0 loads glyph from flash on write to VRAM
-- Core 1 reads bitmap only (zero flash access)
-- Shares memory with graphics framebuffer
+**Solution: per-cell glyph bitmap cache**
+- Core 0 loads glyph bitmap from flash on VRAM write
+- Core 1 reads cached bitmap only (zero flash access)
+- Cache lives in graphics framebuffer region (~50 KB)
+
+# Summary: Stable DVI output
+
+Many improvements:
+
+- **CMD-to-DATA DMA** with double-buffered descriptors
+- **Batched 4 scanlines** for ~32,000 cycles render budget
+- **Isolated Core 1** for DMA IRQ only
+- **Built text mode renderer** with double-buffered VRAM
+- **Cached CJK glyph bitmaps** to remove flash access
+- Implemented cross-core VSync via ARM SEV/WFE
+- Wrote scanline renderer in inline assembly
+- Placed all Core 1 code in SRAM for flash safety
+- Optimized scroll, SRAM bank layout, and fast path
 
 # Problem 2: Bus contention
 
-> C code: stable DVI output. Done!
-> Add mruby VM... screen freezes.
+**mruby**: "Open the SRAM bus doors please, **Harucom**."
+**Harucom**: "I'm sorry, **mruby**. I'm afraid I can't do that."
 
-{::wait/}
+# Bus contention overview
 
-**Bus contention between cores**
-
-# Bus contention patterns
+```p5_setup
+# RP2350 Bus Fabric (datasheet section 2.1)
+rows = [
+  [[0x80, "Core 0"], [0x80, "Core 1"], [0x80, "DMA"]],
+  [[0x49, "Bus Fabric"]],
+  [[0xC8, "SRAM 0-7"], [0xC4, "SCRATCH X/Y"], [0xA5, "XIP Cache"]],
+]
+qmi_rows = [
+  [[0x49, "QMI"]],
+  [[0x45, "Flash"], [0x45, "PSRAM"]],
+]
+bw = 480
+bh = 36
+row_gap = 24
+col_gap = 6
+bx = 320 - bw / 2
+by = 90
+qmi_bw = (bw - col_gap * 2) / 3
+```
 
 ```p5
-g = DVI::Graphics
-p5.text_font(g::FONT_SOURCE_CODE_PRO_18)
-p5.text_color(0xFF)
+p5.text_font(DVI::Graphics::FONT_OUTFIT_BOLD_18)
 p5.text_align(:center)
 
-# SRAM banks
-p5.fill(p5.color(0, 80, 200))
-p5.no_stroke
-p5.rect(220, 120, 200, 40)
-p5.text("SRAM (10 banks)", 320, 134)
+# Draw main rows
+centers = []
+i = 0
+while i < rows.size
+  row = rows[i]
+  col_w = (bw - col_gap * (row.size - 1)) / row.size
+  ry = by + i * (bh + row_gap)
+  row_cx = []
+  j = 0
+  while j < row.size
+    col = row[j]
+    rx = bx + j * (col_w + col_gap)
+    p5.fill(col[0])
+    p5.no_stroke
+    p5.rect(rx, ry, col_w, bh)
+    p5.text_color(0xFF)
+    p5.text(col[1], rx + col_w / 2, ry + 10)
+    row_cx << (rx + col_w / 2)
+    j += 1
+  end
+  centers << row_cx
+  i += 1
+end
 
-# QMI bus
-p5.fill(p5.color(200, 120, 0))
-p5.rect(220, 220, 200, 40)
-p5.text("QMI Bus", 320, 234)
+# QMI subtree (under XIP Cache)
+xip_cx = centers[2][2]
+qmi_bx = xip_cx - qmi_bw / 2
+qmi_by = by + rows.size * (bh + row_gap)
 
-# Flash
-p5.fill(0x49)
-p5.rect(140, 300, 120, 36)
-p5.text("Flash (XIP)", 200, 312)
+qmi_centers = []
+i = 0
+while i < qmi_rows.size
+  row = qmi_rows[i]
+  col_w = (qmi_bw - col_gap * (row.size - 1)) / row.size
+  ry = qmi_by + i * (bh + row_gap)
+  row_cx = []
+  j = 0
+  while j < row.size
+    col = row[j]
+    rx = qmi_bx + j * (col_w + col_gap)
+    p5.fill(col[0])
+    p5.no_stroke
+    p5.rect(rx, ry, col_w, bh)
+    p5.text_color(0xFF)
+    p5.text(col[1], rx + col_w / 2, ry + 10)
+    row_cx << (rx + col_w / 2)
+    j += 1
+  end
+  qmi_centers << row_cx
+  i += 1
+end
 
-# PSRAM
-p5.fill(0x49)
-p5.rect(380, 300, 120, 36)
-p5.text("PSRAM", 440, 312)
+# Connection lines
+p5.stroke(0x80)
+r0_bot = by + bh
+r1_top = by + (bh + row_gap)
+r1_bot = r1_top + bh
+r2_top = r1_top + (bh + row_gap)
+r2_bot = r2_top + bh
 
-# Core 0
-p5.fill(p5.color(0, 160, 0))
-p5.rect(80, 40, 100, 36)
-p5.text("Core 0", 130, 52)
-
-# Core 1
-p5.fill(p5.color(200, 40, 0))
-p5.rect(270, 40, 100, 36)
-p5.text("Core 1", 320, 52)
-
-# DMA
-p5.fill(p5.color(160, 0, 160))
-p5.rect(460, 40, 100, 36)
-p5.text("DMA", 510, 52)
-
-# Connections
-p5.stroke(0x92)
-p5.line(130, 76, 260, 120)
-p5.line(320, 76, 320, 120)
-p5.line(510, 76, 420, 120)
-p5.line(130, 76, 260, 220)
-p5.line(320, 76, 320, 220)
-p5.line(200, 260, 200, 300)
-p5.line(440, 260, 440, 300)
+j = 0
+while j < centers[0].size
+  p5.line(centers[0][j], r0_bot, centers[0][j], r1_top)
+  j += 1
+end
+j = 0
+while j < centers[2].size
+  p5.line(centers[2][j], r1_bot, centers[2][j], r2_top)
+  j += 1
+end
+p5.line(xip_cx, r2_bot, xip_cx, qmi_by)
+j = 0
+while j < qmi_centers[1].size
+  p5.line(qmi_centers[1][j], qmi_by + bh, qmi_centers[1][j], qmi_by + bh + row_gap)
+  j += 1
+end
 p5.no_stroke
 
 # Contention markers
 p5.text_color(p5.color(255, 60, 60))
-p5.text_font(g::FONT_SOURCE_CODE_PRO_18)
-p5.text("!!", 240, 90)
-p5.text("!!", 280, 190)
+p5.text_font(DVI::Graphics::FONT_OUTFIT_BOLD_18)
+p5.text("contention!", centers[2][0] + 20, r1_bot + 3)
+p5.text("contention!", xip_cx + 20, r2_bot + 3)
 ```
 
-# Solution: Separate memory domains
+# Key idea to resolve bus contention
 
-- Core 0 (mruby): Flash + **PSRAM** only
-- Core 1 (DVI): **SRAM** only
+mruby and DVI accessing one region causes contention
 
-{::wait/}
-
-- mruby heap entirely on PSRAM (8 MB)
-- Font data pre-cached in SRAM by Core 0
-- Core 1 code in SCRATCH_X (no flash fetch)
-  -> Eliminates QMI bus contention
-
-{::wait/}
-
-**No shared bus, no contention**
+**Solution: separate memory domains**
+- mruby heap on **PSRAM** (8 MB, QMI CS1)
+- Core 0 (mruby): only accesses Flash + PSRAM
+- Core 1 (DVI): all access confined to SRAM
+  - Font data pre-cached in SRAM by Core 0
+  - No flash reads during text rendering
 
 # Bus priority
 
-- DMA gets highest bus priority
-- SRAM bank contention: DMA always wins
-- HSTX FIFO never starves
-
-{::wait/}
-
-- Core 0 may stall, but Ruby doesn't need real-time
-- Display output is always smooth
+RP2350 bus fabric has configurable priority (**BUSCTRL**)
+- Set DMA to highest priority
+- HSTX FIFO never starves under contention
+- Core 0 may stall, but display output stays smooth
 
 # SCRATCH_X / SCRATCH_Y
 
 Dedicated SRAM banks with independent bus ports
-
-- SCRATCH_X (4 KB): DMA IRQ handler + scanline renderer
+- SCRATCH_X (4 KB): DMA handler + scanline renderer
 - SCRATCH_Y (4 KB): Font byte mask LUT
 
-{::wait/}
+Core 0/1 stacks moved to main SRAM to make room
 
-- No contention with main SRAM
-- Core 0/1 stacks moved to main SRAM
-- IRQ handler fetch never conflicts with other access
+# Summary: Resolving bus contention
 
-# Line buffer bank striping
-
-- RP2350 SRAM: 8 banks, word-interleaved
-- Line buffer stride: 644 bytes = 161 words
-- 161 and 8 are coprime
-
-{::wait/}
-
-- 8 buffers land on 8 different banks
-- DMA and CPU access same pixel offset
-  but different buffers = different banks
-- **Zero contention between read and write**
+- Move mruby heap to PSRAM, confine DVI to SRAM
+- Prioritize DMA via BUSCTRL to keep HSTX fed
+- Use dedicated SCRATCH_X/Y for hot path and LUT
 
 # Boot sequence
 
+LDO? "Go," PLL? "Go," DMA? "Go," HSTX? "Go."
+Flight: "Harucom?" --- Harucom: "We're go, Flight."
+Flight: "Launch control, this is Houston. We are go for launch."
+
+# Boot sequence overview
+
 ```
 Power on
-  -> Mount FAT filesystem
-  -> Initialize PSRAM (mruby heap)
-  -> Start Core 1 (DVI output)
-  -> Start mruby VM (Core 0)
-  -> Load /system.rb
+  -> Initialize PSRAM
+  -> Install system files to flash
+  -> Start DVI output on Core 1
+  -> Initialize USB host
+  -> Start mruby VM on Core 0
 ```
 
 {::wait/}
-
+Bootstrap code embedded in main.c:
 ```ruby
 fat = FAT.new(:flash, label: "HARUCOM")
 VFS.mount(fat, "/")
@@ -607,28 +554,20 @@ load "/system.rb"
 
 # system.rb
 
-Entry point of Harucom OS
+Runs USB and keyboard polling as background tasks
 
 ```ruby
-# USB host background task
+$console = Console.new
+$keyboard = Keyboard.new
+
 Task.new(name: "usb_host") do
   loop { USB::Host.task; Task.pass }
 end
-
-# Set up console and keyboard
-$console = Console.new
-$keyboard = Keyboard.new
-line_editor = LineEditor.new(
-  console: $console, keyboard: $keyboard)
-
-# Keyboard polling background task
 Task.new(name: "keyboard") do
   loop { $keyboard.poll; Task.pass }
 end
-
-IRB.new(console: $console,
-  keyboard: $keyboard,
-  line_editor: line_editor).start
+line_editor = LineEditor.new(console: $console, ...)
+IRB.new(console: $console, ...).start
 ```
 
 # Cooperative multitasking
@@ -637,46 +576,48 @@ IRB.new(console: $console,
 - 1 ms timer interrupt triggers scheduler
 - Task.pass yields CPU explicitly
 
-{::wait/}
-
-- USB polling: background
-- Keyboard input: background
-- Main script: foreground
+```
+Task.new(name: "keyboard") do
+  loop do
+    $keyboard.poll
+    Task.pass
+  end
+end
+```
 
 # Keyboard input
 
-```
-USB Keyboard
-  -> PIO-USB (GPIO 8/9)
-  -> TinyUSB HID callback
-  -> Keyboard#poll (Ruby)
-  -> KeyboardInput ($stdin)
-```
+**picoruby-usb-host**: PIO-USB on GPIO 8/9, TinyUSB HID stack
+- USB::Host.task: drives TinyUSB from background task
+- USB::Host.keyboard_keycodes / .keyboard_modifier: HID state
 
-{::wait/}
-
-- HID report: 6 keycodes + modifier byte
-- Keyboard::Key: keycode -> char/name conversion
-- Software key repeat (400ms initial, 50ms interval)
-- Ctrl-C flag for interrupt support
+**picoruby-keyboard-input**: keycodes -> Ruby key events
+- `Keyboard::Key`: object holding key state (name, char, modifier flags)
+- `Keyboard.key(name, ...)`: returns cached `Key` for fast matching
+- Software key repeat (400 ms initial, 50 ms interval)
+- Ctrl-C flag for synchronous interrupt
 
 # IRB on Harucom
 
 ```ruby
-irb> 1 + 1
-=> 2
-irb> "Hello, RubyKaigi!"
-=> "Hello, RubyKaigi!"
+loop do
+  script = @editor.readmultiline(PROMPT, PROMPT_CONT) do |input|
+    @sandbox.compile("begin; _ = (#{input}\n); rescue => _; end; _")
+  end
+  break unless script # Ctrl-D
+  ...
+  @sandbox.execute
+  wait_sandbox
+  @sandbox.suspend
+  ...
+  puts "=> #{@sandbox.result.inspect}"
+end
 ```
 
-{::wait/}
-
-- Multi-line editing with LineEditor
-- Console with ANSI escape sequence support
-- Sandbox isolation for eval (PicoRuby)
-- Ctrl-C interrupt support
-
 # Sandbox and Ctrl-C
+
+- IRB reads key queue while sandbox runs
+- Ctrl-C -> sandbox.stop to halt execution
 
 ```ruby
 def wait_sandbox(sandbox)
@@ -691,23 +632,6 @@ def wait_sandbox(sandbox)
 end
 ```
 
-{::wait/}
-
-- Sandbox: isolated mruby VM (PicoRuby)
-- IRB reads key queue while sandbox runs
-- Ctrl-C -> sandbox.stop to halt execution
-
-# Reline-like multiline editor
-
-- Cursor movement, line insert/delete
-- Scrollback buffer
-- UTF-8 wide character width handling
-
-{::wait/}
-
-- Built on `DVI::Text` VRAM API
-- ANSI escape sequence color support
-- **Pure Ruby implementation**
 
 # P5: Processing-like API
 
@@ -738,24 +662,23 @@ p5.commit
 **mruby is powerful enough to build
 a complete computing experience**
 
-# What's next
+# Future plans
 
-- Reduce hardware cost
+- Reduce hardware cost for mass podcution
 - MIPI DSI display support
-- More educational tools
-- Better editor (syntax highlighting)
-- Networking capabilities
-
-{::wait/}
+- HD (720p) での出力をサポートする
+-
 
 **Open source hardware and software**
-GitHub: harukasan/harucom-os
+GitHub:
+- harukasan/harucom-os
+- harukasan/harucom-board
 
 # Thank you!
 
+More details:
+- https://harucom.org/
+
+
 - GitHub: harukasan/harucom-os
 - @harukasan
-
-{::wait/}
-
-**Questions?**

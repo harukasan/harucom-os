@@ -20,6 +20,10 @@ module PicoRabbit
       def bullet_char; "\xe2\x98\x85"; end
       def bullet_width; 24; end
 
+      def margin_y; 30; end
+      def title_y; 30; end
+      def body_y; 50; end
+
       # Title slide: background image
       def render_title_slide(p5, slide, metadata)
         bmp = load_image("/data/rubykaigi2026_title.bmp")
@@ -109,11 +113,31 @@ module PicoRabbit
         p5.text(slide.title, 320, y)
         y += title_font_height + 16
 
-        # Body text
-        p5.text_font(body_font)
-        p5.text_color(0xDB)
+        # Body text (centered rich text)
+        p5.text_align(:left)
         texts.each do |element|
-          p5.text(element.text, 320, y)
+          segments = parse_inline(element.text)
+          # Calculate total width for centering
+          total_w = 0
+          segments.each do |seg|
+            if seg[0] == :bold
+              p5.text_font(bold_font)
+            else
+              p5.text_font(body_font)
+            end
+            total_w += p5.text_width(seg[1])
+          end
+          cx = 320 - total_w / 2
+          segments.each do |seg|
+            if seg[0] == :bold
+              p5.text_font(bold_font)
+            else
+              p5.text_font(body_font)
+            end
+            p5.text_color(0xDB)
+            p5.text(seg[1], cx, y)
+            cx += p5.text_width(seg[1])
+          end
           y += body_font_height + leading
         end
 
