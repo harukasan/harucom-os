@@ -253,188 +253,180 @@ dvi_graphics_text_width(const char *text, const dvi_font_t *font, const dvi_font
 
 // Per-glyph info for affine text rendering.
 typedef struct {
-    const uint8_t *bitmap;    // glyph bitmap pointer
-    int width;                // glyph width in pixels
-    int bitmap_left;          // left bearing (4bpp fonts)
-    int bpp;                  // 1 or 4
-    int bytes_per_row;        // row stride in bytes
+  const uint8_t *bitmap; // glyph bitmap pointer
+  int width;             // glyph width in pixels
+  int bitmap_left;       // left bearing (4bpp fonts)
+  int bpp;               // 1 or 4
+  int bytes_per_row;     // row stride in bytes
 } text_affine_glyph_t;
 
 // Sample one pixel from the virtual text image.
 // glyph_for_x[sx] gives the glyph index, glyph_col_for_x[sx] gives the column within that glyph.
-static inline int sample_text_pixel(int sx, int sy,
-                                    const int *glyph_for_x,
-                                    const int *glyph_col_for_x,
-                                    const text_affine_glyph_t *glyphs,
-                                    int text_height)
+static inline int
+sample_text_pixel(int sx, int sy, const int *glyph_for_x, const int *glyph_col_for_x,
+                  const text_affine_glyph_t *glyphs, int text_height)
 {
-    if (sy < 0 || sy >= text_height)
-        return 0;
-    int gi = glyph_for_x[sx];
-    if (gi < 0)
-        return 0;
-    const text_affine_glyph_t *g = &glyphs[gi];
-    int col = glyph_col_for_x[sx] - g->bitmap_left;
-    if (col < 0 || col >= g->width)
-        return 0;
-    if (g->bpp == 4) {
-        int byte_val = g->bitmap[sy * g->bytes_per_row + col / 2];
-        return (col & 1) ? (byte_val & 0x0F) : (byte_val >> 4);
-    } else {
-        int byte_idx = col / 8;
-        int bit_idx = 7 - (col % 8);
-        return (g->bitmap[sy * g->bytes_per_row + byte_idx] & (1 << bit_idx)) ? 1 : 0;
-    }
+  if (sy < 0 || sy >= text_height) return 0;
+  int gi = glyph_for_x[sx];
+  if (gi < 0) return 0;
+  const text_affine_glyph_t *g = &glyphs[gi];
+  int col = glyph_col_for_x[sx] - g->bitmap_left;
+  if (col < 0 || col >= g->width) return 0;
+  if (g->bpp == 4) {
+    int byte_val = g->bitmap[sy * g->bytes_per_row + col / 2];
+    return (col & 1) ? (byte_val & 0x0F) : (byte_val >> 4);
+  } else {
+    int byte_idx = col / 8;
+    int bit_idx = 7 - (col % 8);
+    return (g->bitmap[sy * g->bytes_per_row + byte_idx] & (1 << bit_idx)) ? 1 : 0;
+  }
 }
 
 #define MAX_TEXT_AFFINE_GLYPHS 128
-#define MAX_TEXT_AFFINE_WIDTH 640
+#define MAX_TEXT_AFFINE_WIDTH  640
 
-void dvi_graphics_draw_text_affine(uint8_t *framebuffer, int fb_width, int fb_height,
-                                   const char *text, uint8_t color,
-                                   const dvi_font_t *font, const dvi_font_t *wide_font,
-                                   int origin_x, int origin_y,
-                                   float m00, float m01, float m10, float m11,
-                                   float tx, float ty)
+void
+dvi_graphics_draw_text_affine(uint8_t *framebuffer, int fb_width, int fb_height, const char *text,
+                              uint8_t color, const dvi_font_t *font, const dvi_font_t *wide_font,
+                              int origin_x, int origin_y, float m00, float m01, float m10,
+                              float m11, float tx, float ty)
 {
-    int text_height = font->glyph_height;
+  int text_height = font->glyph_height;
 
-    // Build per-glyph table
-    text_affine_glyph_t glyphs[MAX_TEXT_AFFINE_GLYPHS];
-    int glyph_starts[MAX_TEXT_AFFINE_GLYPHS]; // x offset of each glyph
-    int num_glyphs = 0;
-    int text_width = 0;
+  // Build per-glyph table
+  text_affine_glyph_t glyphs[MAX_TEXT_AFFINE_GLYPHS];
+  int glyph_starts[MAX_TEXT_AFFINE_GLYPHS]; // x offset of each glyph
+  int num_glyphs = 0;
+  int text_width = 0;
 
-    const char *p = text;
-    while (*p && num_glyphs < MAX_TEXT_AFFINE_GLYPHS) {
-        int32_t cp = utf8_decode(&p);
-        if (cp < 0)
-            continue;
+  const char *p = text;
+  while (*p && num_glyphs < MAX_TEXT_AFFINE_GLYPHS) {
+    int32_t cp = utf8_decode(&p);
+    if (cp < 0) continue;
 
-        const dvi_font_t *use_font = NULL;
-        int idx = -1;
+    const dvi_font_t *use_font = NULL;
+    int idx = -1;
 
-        // Try primary font
-        int pidx = cp - font->first_char;
-        if (pidx >= 0 && pidx < font->num_chars) {
-            use_font = font;
-            idx = pidx;
-        }
-        // Try wide font
-        if (!use_font && wide_font) {
-            int jis_idx = unicode_to_jis_index(cp);
-            if (jis_idx >= 0 && jis_idx < wide_font->num_chars) {
-                use_font = wide_font;
-                idx = jis_idx;
-            }
-        }
-
-        int advance = char_advance(cp, font, wide_font);
-        if (use_font && idx >= 0) {
-            text_affine_glyph_t *g = &glyphs[num_glyphs];
-            g->bitmap = &use_font->bitmap[glyph_offset(use_font, idx)];
-            g->width = use_font->glyph_width;
-            g->bitmap_left = (use_font->bpp == 4) ? use_font->bitmap_left : 0;
-            g->bpp = use_font->bpp;
-            g->bytes_per_row = (use_font->bpp == 4)
-                ? (use_font->glyph_width + 1) / 2
-                : (use_font->glyph_width + 7) / 8;
-            glyph_starts[num_glyphs] = text_width;
-            num_glyphs++;
-        }
-        text_width += advance;
+    // Try primary font
+    int pidx = cp - font->first_char;
+    if (pidx >= 0 && pidx < font->num_chars) {
+      use_font = font;
+      idx = pidx;
+    }
+    // Try wide font
+    if (!use_font && wide_font) {
+      int jis_idx = unicode_to_jis_index(cp);
+      if (jis_idx >= 0 && jis_idx < wide_font->num_chars) {
+        use_font = wide_font;
+        idx = jis_idx;
+      }
     }
 
-    if (text_width <= 0 || text_width > MAX_TEXT_AFFINE_WIDTH)
-        return;
-
-    // Build x-to-glyph lookup tables
-    int glyph_for_x[MAX_TEXT_AFFINE_WIDTH];
-    int glyph_col_for_x[MAX_TEXT_AFFINE_WIDTH];
-    {
-        int gi = 0;
-        int next_start = (num_glyphs > 1) ? glyph_starts[1] : text_width;
-        for (int x = 0; x < text_width; x++) {
-            while (gi + 1 < num_glyphs && x >= next_start) {
-                gi++;
-                next_start = (gi + 1 < num_glyphs) ? glyph_starts[gi + 1] : text_width;
-            }
-            if (x >= glyph_starts[gi] && gi < num_glyphs) {
-                glyph_for_x[x] = gi;
-                glyph_col_for_x[x] = x - glyph_starts[gi];
-            } else {
-                glyph_for_x[x] = -1;
-                glyph_col_for_x[x] = 0;
-            }
-        }
+    int advance = char_advance(cp, font, wide_font);
+    if (use_font && idx >= 0) {
+      text_affine_glyph_t *g = &glyphs[num_glyphs];
+      g->bitmap = &use_font->bitmap[glyph_offset(use_font, idx)];
+      g->width = use_font->glyph_width;
+      g->bitmap_left = (use_font->bpp == 4) ? use_font->bitmap_left : 0;
+      g->bpp = use_font->bpp;
+      g->bytes_per_row =
+          (use_font->bpp == 4) ? (use_font->glyph_width + 1) / 2 : (use_font->glyph_width + 7) / 8;
+      glyph_starts[num_glyphs] = text_width;
+      num_glyphs++;
     }
+    text_width += advance;
+  }
 
-    // Compute bounding box using the same approach as image_affine
-    float etx = m00 * origin_x + m01 * origin_y + tx;
-    float ety = m10 * origin_x + m11 * origin_y + ty;
+  if (text_width <= 0 || text_width > MAX_TEXT_AFFINE_WIDTH) return;
 
-    float cx[4], cy[4];
-    cx[0] = etx;                                                      cy[0] = ety;
-    cx[1] = m00 * text_width + etx;                                   cy[1] = m10 * text_width + ety;
-    cx[2] = m00 * text_width + m01 * text_height + etx;               cy[2] = m10 * text_width + m11 * text_height + ety;
-    cx[3] = m01 * text_height + etx;                                  cy[3] = m11 * text_height + ety;
-
-    float fmin_x = cx[0], fmin_y = cy[0], fmax_x = cx[0], fmax_y = cy[0];
-    for (int i = 1; i < 4; i++) {
-        if (cx[i] < fmin_x) fmin_x = cx[i];
-        if (cx[i] > fmax_x) fmax_x = cx[i];
-        if (cy[i] < fmin_y) fmin_y = cy[i];
-        if (cy[i] > fmax_y) fmax_y = cy[i];
+  // Build x-to-glyph lookup tables
+  int glyph_for_x[MAX_TEXT_AFFINE_WIDTH];
+  int glyph_col_for_x[MAX_TEXT_AFFINE_WIDTH];
+  {
+    int gi = 0;
+    int next_start = (num_glyphs > 1) ? glyph_starts[1] : text_width;
+    for (int x = 0; x < text_width; x++) {
+      while (gi + 1 < num_glyphs && x >= next_start) {
+        gi++;
+        next_start = (gi + 1 < num_glyphs) ? glyph_starts[gi + 1] : text_width;
+      }
+      if (x >= glyph_starts[gi] && gi < num_glyphs) {
+        glyph_for_x[x] = gi;
+        glyph_col_for_x[x] = x - glyph_starts[gi];
+      } else {
+        glyph_for_x[x] = -1;
+        glyph_col_for_x[x] = 0;
+      }
     }
+  }
 
-    int dst_min_x = (int)floorf(fmin_x);
-    int dst_min_y = (int)floorf(fmin_y);
-    int dst_max_x = (int)ceilf(fmax_x);
-    int dst_max_y = (int)ceilf(fmax_y);
-    if (dst_min_x < 0) dst_min_x = 0;
-    if (dst_min_y < 0) dst_min_y = 0;
-    if (dst_max_x > fb_width)  dst_max_x = fb_width;
-    if (dst_max_y > fb_height) dst_max_y = fb_height;
+  // Compute bounding box using the same approach as image_affine
+  float etx = m00 * origin_x + m01 * origin_y + tx;
+  float ety = m10 * origin_x + m11 * origin_y + ty;
 
-    // Inverse 2x2 matrix
-    float det = m00 * m11 - m01 * m10;
-    float inv_det = 1.0f / det;
-    float inv00 =  m11 * inv_det;
-    float inv01 = -m01 * inv_det;
-    float inv10 = -m10 * inv_det;
-    float inv11 =  m00 * inv_det;
+  float cx[4], cy[4];
+  cx[0] = etx;
+  cy[0] = ety;
+  cx[1] = m00 * text_width + etx;
+  cy[1] = m10 * text_width + ety;
+  cx[2] = m00 * text_width + m01 * text_height + etx;
+  cy[2] = m10 * text_width + m11 * text_height + ety;
+  cx[3] = m01 * text_height + etx;
+  cy[3] = m11 * text_height + ety;
 
-    // Check if any glyph uses 4bpp (for blending)
-    int has_4bpp = 0;
-    for (int i = 0; i < num_glyphs; i++) {
-        if (glyphs[i].bpp == 4) {
-            has_4bpp = 1;
-            break;
-        }
+  float fmin_x = cx[0], fmin_y = cy[0], fmax_x = cx[0], fmax_y = cy[0];
+  for (int i = 1; i < 4; i++) {
+    if (cx[i] < fmin_x) fmin_x = cx[i];
+    if (cx[i] > fmax_x) fmax_x = cx[i];
+    if (cy[i] < fmin_y) fmin_y = cy[i];
+    if (cy[i] > fmax_y) fmax_y = cy[i];
+  }
+
+  int dst_min_x = (int)floorf(fmin_x);
+  int dst_min_y = (int)floorf(fmin_y);
+  int dst_max_x = (int)ceilf(fmax_x);
+  int dst_max_y = (int)ceilf(fmax_y);
+  if (dst_min_x < 0) dst_min_x = 0;
+  if (dst_min_y < 0) dst_min_y = 0;
+  if (dst_max_x > fb_width) dst_max_x = fb_width;
+  if (dst_max_y > fb_height) dst_max_y = fb_height;
+
+  // Inverse 2x2 matrix
+  float det = m00 * m11 - m01 * m10;
+  float inv_det = 1.0f / det;
+  float inv00 = m11 * inv_det;
+  float inv01 = -m01 * inv_det;
+  float inv10 = -m10 * inv_det;
+  float inv11 = m00 * inv_det;
+
+  // Check if any glyph uses 4bpp (for blending)
+  int has_4bpp = 0;
+  for (int i = 0; i < num_glyphs; i++) {
+    if (glyphs[i].bpp == 4) {
+      has_4bpp = 1;
+      break;
     }
+  }
 
-    // Render loop: iterate over screen pixels in bounding box
-    for (int dy = dst_min_y; dy < dst_max_y; dy++) {
-        float ry = dy - ety + 0.5f;
-        for (int dx = dst_min_x; dx < dst_max_x; dx++) {
-            float rx = dx - etx + 0.5f;
-            int sx = (int)floorf(inv00 * rx + inv01 * ry);
-            int sy = (int)floorf(inv10 * rx + inv11 * ry);
-            if (sx < 0 || sx >= text_width || sy < 0 || sy >= text_height)
-                continue;
-            int v = sample_text_pixel(sx, sy, glyph_for_x, glyph_col_for_x,
-                                      glyphs, text_height);
-            if (v == 0)
-                continue;
-            int offset = dy * fb_width + dx;
-            if (has_4bpp) {
-                if (v >= 15)
-                    framebuffer[offset] = color;
-                else
-                    framebuffer[offset] = blend_aa_pixel(framebuffer[offset], color, v);
-            } else {
-                dvi_graphics_write_pixel(framebuffer, offset, color);
-            }
-        }
+  // Render loop: iterate over screen pixels in bounding box
+  for (int dy = dst_min_y; dy < dst_max_y; dy++) {
+    float ry = dy - ety + 0.5f;
+    for (int dx = dst_min_x; dx < dst_max_x; dx++) {
+      float rx = dx - etx + 0.5f;
+      int sx = (int)floorf(inv00 * rx + inv01 * ry);
+      int sy = (int)floorf(inv10 * rx + inv11 * ry);
+      if (sx < 0 || sx >= text_width || sy < 0 || sy >= text_height) continue;
+      int v = sample_text_pixel(sx, sy, glyph_for_x, glyph_col_for_x, glyphs, text_height);
+      if (v == 0) continue;
+      int offset = dy * fb_width + dx;
+      if (has_4bpp) {
+        if (v >= 15)
+          framebuffer[offset] = color;
+        else
+          framebuffer[offset] = blend_aa_pixel(framebuffer[offset], color, v);
+      } else {
+        dvi_graphics_write_pixel(framebuffer, offset, color);
+      }
     }
+  }
 }

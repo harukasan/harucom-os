@@ -408,23 +408,19 @@ mrb_dvi_draw_text_affine(mrb_state *mrb, mrb_value klass)
   const char *text;
   mrb_int color, font_id, wide_font_id, ox, oy;
   mrb_float m00, m01, m10, m11, tx, ty;
-  mrb_get_args(mrb, "ziiiiiffffff", &text, &color, &font_id, &wide_font_id,
-               &ox, &oy, &m00, &m01, &m10, &m11, &tx, &ty);
+  mrb_get_args(mrb, "ziiiiiffffff", &text, &color, &font_id, &wide_font_id, &ox, &oy, &m00, &m01,
+               &m10, &m11, &tx, &ty);
   const dvi_font_t *font = dvi_graphics_get_font(font_id);
-  if (!font)
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown font");
+  if (!font) mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown font");
   const dvi_font_t *wide_font = NULL;
   if (wide_font_id >= 0) {
     wide_font = dvi_graphics_get_font(wide_font_id);
-    if (!wide_font)
-      mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown wide font");
+    if (!wide_font) mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown wide font");
   }
-  dvi_graphics_draw_text_affine(dvi_get_framebuffer(),
-                                dvi_graphics_get_width(), dvi_graphics_get_height(),
-                                text, (uint8_t)color, font, wide_font,
-                                ox, oy,
-                                (float)m00, (float)m01, (float)m10, (float)m11,
-                                (float)tx, (float)ty);
+  dvi_graphics_draw_text_affine(dvi_get_framebuffer(), dvi_graphics_get_width(),
+                                dvi_graphics_get_height(), text, (uint8_t)color, font, wide_font,
+                                ox, oy, (float)m00, (float)m01, (float)m10, (float)m11, (float)tx,
+                                (float)ty);
   return mrb_nil_value();
 }
 
@@ -437,15 +433,13 @@ mrb_dvi_draw_image_affine(mrb_state *mrb, mrb_value klass)
   const char *data;
   mrb_int data_len, w, h, ox, oy;
   mrb_float m00, m01, m10, m11, tx, ty;
-  mrb_get_args(mrb, "siiiiffffff", &data, &data_len, &w, &h, &ox, &oy,
-               &m00, &m01, &m10, &m11, &tx, &ty);
-  if (data_len < w * h)
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
-  dvi_graphics_draw_image_affine(dvi_get_framebuffer(),
-                                 dvi_graphics_get_width(), dvi_graphics_get_height(),
-                                 (const uint8_t *)data, w, h, ox, oy,
-                                 (float)m00, (float)m01, (float)m10, (float)m11,
-                                 (float)tx, (float)ty);
+  mrb_get_args(mrb, "siiiiffffff", &data, &data_len, &w, &h, &ox, &oy, &m00, &m01, &m10, &m11, &tx,
+               &ty);
+  if (data_len < w * h) mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
+  dvi_graphics_draw_image_affine(dvi_get_framebuffer(), dvi_graphics_get_width(),
+                                 dvi_graphics_get_height(), (const uint8_t *)data, w, h, ox, oy,
+                                 (float)m00, (float)m01, (float)m10, (float)m11, (float)tx,
+                                 (float)ty);
   return mrb_nil_value();
 }
 
@@ -458,19 +452,14 @@ mrb_dvi_draw_image_masked_affine(mrb_state *mrb, mrb_value klass)
   const char *data, *mask;
   mrb_int data_len, mask_len, w, h, ox, oy;
   mrb_float m00, m01, m10, m11, tx, ty;
-  mrb_get_args(mrb, "ssiiiiffffff", &data, &data_len, &mask, &mask_len,
-               &w, &h, &ox, &oy,
-               &m00, &m01, &m10, &m11, &tx, &ty);
-  if (data_len < w * h)
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
-  if (mask_len < (w * h + 7) / 8)
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "mask too short");
-  dvi_graphics_draw_image_masked_affine(dvi_get_framebuffer(),
-                                        dvi_graphics_get_width(), dvi_graphics_get_height(),
-                                        (const uint8_t *)data, (const uint8_t *)mask,
-                                        w, h, ox, oy,
-                                        (float)m00, (float)m01, (float)m10, (float)m11,
-                                        (float)tx, (float)ty);
+  mrb_get_args(mrb, "ssiiiiffffff", &data, &data_len, &mask, &mask_len, &w, &h, &ox, &oy, &m00,
+               &m01, &m10, &m11, &tx, &ty);
+  if (data_len < w * h) mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
+  if (mask_len < (w * h + 7) / 8) mrb_raise(mrb, E_ARGUMENT_ERROR, "mask too short");
+  dvi_graphics_draw_image_masked_affine(dvi_get_framebuffer(), dvi_graphics_get_width(),
+                                        dvi_graphics_get_height(), (const uint8_t *)data,
+                                        (const uint8_t *)mask, w, h, ox, oy, (float)m00, (float)m01,
+                                        (float)m10, (float)m11, (float)tx, (float)ty);
   return mrb_nil_value();
 }
 
