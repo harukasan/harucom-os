@@ -1,182 +1,151 @@
 /*
- * Initialize the root filesystem on flash.
+ * Initialize the root filesystem on flash using LittleFS.
  *
  * At build time, scripts/gen_ruby_scripts.rb converts rootfs/ files into
  * C byte arrays and a CRC32 hash in ruby_scripts.h.
  *
- * On boot, this module checks ROOTFS_HASH on the FAT volume against
- * the firmware-embedded hash.  If they match, file deployment is
- * skipped (fast boot).  On mismatch (first boot or firmware update),
- * all files are written and the marker is updated.
+ * On boot, this module mounts the LittleFS volume (auto-formatting on
+ * LFS_ERR_CORRUPT), then checks ROOTFS_HASH against the firmware-embedded
+ * hash.  If they match, file deployment is skipped (fast boot).  On
+ * mismatch (first boot or firmware update), all files are rewritten and
+ * the marker is updated last.
  *
  * The marker file is written last so that an interrupted deployment
  * (power loss) is detected as a missing/stale marker on next boot.
  */
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "ff.h"
 #include "init_rootfs.h"
+#include "lfs.h"
+#include "littlefs.h"
 #include "ruby_scripts.h"
 
-#define ROOTFS_MARKER_PATH "flash:ROOTFS_HASH"
+#define ROOTFS_MARKER_PATH "/ROOTFS_HASH"
+#define FORMAT_TRIGGER_PATH "/FORMAT"
 
-/* Ensure parent directories exist for a FatFs path like "flash:lib/foo.rb". */
-static void
-ensure_directories(const char *path)
-{
-  /* Find the start of the relative path after "flash:" */
-  const char *rel = strchr(path, ':');
-  if (!rel) return;
-  rel++; /* skip ':' */
-
-  /* Work buffer: "flash:" + directory components */
-  char buf[128];
-  size_t prefix_len = (size_t)(rel - path);
-  if (prefix_len >= sizeof(buf)) return;
-  memcpy(buf, path, prefix_len);
-
-  const char *p = rel;
+/* Create parent directories for an absolute path like "/lib/foo.rb". */
+static void ensure_directories(lfs_t *lfs, const char *path) {
+  char buf[LFS_NAME_MAX + 1];
+  const char *p = path;
+  if (*p == '/') p++;
   while (*p) {
     const char *slash = strchr(p, '/');
     if (!slash) break;
-    size_t dir_len = (size_t)(slash - rel);
-    if (prefix_len + dir_len >= sizeof(buf)) break;
-    memcpy(buf + prefix_len, rel, dir_len);
-    buf[prefix_len + dir_len] = '\0';
-    f_mkdir(buf); /* ignore errors (already exists is OK) */
+    size_t prefix_len = (size_t)(slash - path);
+    if (prefix_len >= sizeof(buf)) {
+      printf("rootfs: path too long, skipping mkdir: %s\n", path);
+      return;
+    }
+    memcpy(buf, path, prefix_len);
+    buf[prefix_len] = '\0';
+    lfs_mkdir(lfs, buf); /* ignore errors (EXIST is OK) */
     p = slash + 1;
   }
 }
 
-static FRESULT
-format_and_mount(FATFS *fatfs)
-{
-  printf("rootfs: formatting...\n");
-  f_mount(NULL, "flash:", 0);
-  static uint8_t work[FF_MAX_SS];
-  const MKFS_PARM opt = {FM_FAT, 1, 0, 0, 0};
-  FRESULT res = f_mkfs("flash:", &opt, work, sizeof(work));
-  if (res != FR_OK) {
-    printf("rootfs: f_mkfs failed (%d)\n", res);
-    return res;
+static bool read_rootfs_marker(lfs_t *lfs, uint32_t *hash) {
+  lfs_file_t fp;
+  if (lfs_file_open(lfs, &fp, ROOTFS_MARKER_PATH, LFS_O_RDONLY) !=
+      LFS_ERR_OK) {
+    return false;
   }
-  return f_mount(fatfs, "flash:", 1);
+  lfs_ssize_t br = lfs_file_read(lfs, &fp, hash, sizeof(*hash));
+  lfs_file_close(lfs, &fp);
+  return br == (lfs_ssize_t)sizeof(*hash);
 }
 
-/* Read the rootfs hash marker from the FAT volume. */
-static bool
-read_rootfs_marker(uint32_t *hash)
-{
-  FIL fp;
-  if (f_open(&fp, ROOTFS_MARKER_PATH, FA_READ) != FR_OK) return false;
-  UINT br;
-  FRESULT res = f_read(&fp, hash, sizeof(*hash), &br);
-  f_close(&fp);
-  return res == FR_OK && br == sizeof(*hash);
-}
-
-/* Write the rootfs hash marker to the FAT volume. */
-static void
-write_rootfs_marker(void)
-{
-  FIL fp;
-  if (f_open(&fp, ROOTFS_MARKER_PATH, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) return;
+static void write_rootfs_marker(lfs_t *lfs) {
+  lfs_file_t fp;
+  if (lfs_file_open(lfs, &fp, ROOTFS_MARKER_PATH,
+                    LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC) != LFS_ERR_OK) {
+    return;
+  }
   uint32_t hash = rootfs_hash;
-  UINT bw;
-  f_write(&fp, &hash, sizeof(hash), &bw);
-  f_close(&fp);
+  lfs_file_write(lfs, &fp, &hash, sizeof(hash));
+  lfs_file_close(lfs, &fp);
 }
 
-/* Write all scripts to flash. Returns true if all writes succeeded. */
-static bool
-write_scripts(void)
-{
+static bool write_scripts(lfs_t *lfs) {
   bool ok = true;
   for (int i = 0; i < ruby_scripts_count; i++) {
     const ruby_script_entry_t *entry = &ruby_scripts[i];
+    ensure_directories(lfs, entry->path);
 
-    ensure_directories(entry->path);
-
-    FIL fp;
-    UINT bw;
-    FRESULT res = f_open(&fp, entry->path, FA_CREATE_ALWAYS | FA_WRITE);
-    if (res != FR_OK) {
-      printf("rootfs: f_open(%s) failed (%d)\n", entry->path, res);
+    lfs_file_t fp;
+    int err = lfs_file_open(lfs, &fp, entry->path,
+                            LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC);
+    if (err != LFS_ERR_OK) {
+      printf("rootfs: lfs_file_open(%s) failed (%d)\n", entry->path, err);
       ok = false;
       continue;
     }
-    res = f_write(&fp, entry->data, entry->size, &bw);
-    if (res != FR_OK || bw != entry->size) {
-      printf("rootfs: f_write(%s) failed (%d, wrote %u/%u)\n", entry->path, res, bw, entry->size);
+    lfs_ssize_t bw = lfs_file_write(lfs, &fp, entry->data, entry->size);
+    if (bw != (lfs_ssize_t)entry->size) {
+      printf("rootfs: lfs_file_write(%s) failed (wrote %ld/%u)\n",
+             entry->path, (long)bw, entry->size);
       ok = false;
     }
-    f_close(&fp);
+    lfs_file_close(lfs, &fp);
     printf("rootfs: %s (%u bytes)\n", entry->path, entry->size);
   }
   return ok;
 }
 
-/* Deploy all rootfs files and write the marker last. */
-static void
-deploy_all(FATFS *fatfs)
-{
-  if (!write_scripts()) {
-    printf("rootfs: write errors, reformatting...\n");
-    if (format_and_mount(fatfs) != FR_OK) return;
-    write_scripts();
+static int reformat(lfs_t *lfs, struct lfs_config *cfg) {
+  printf("rootfs: formatting...\n");
+  lfs_unmount(lfs);
+  int err = lfs_format(lfs, cfg);
+  if (err != LFS_ERR_OK) {
+    printf("rootfs: lfs_format failed (%d)\n", err);
+    return err;
   }
-  write_rootfs_marker();
+  err = lfs_mount(lfs, cfg);
+  if (err != LFS_ERR_OK) {
+    printf("rootfs: lfs_mount after format failed (%d)\n", err);
+  }
+  return err;
+}
+
+static void deploy_all(lfs_t *lfs, struct lfs_config *cfg) {
+  if (!write_scripts(lfs)) {
+    printf("rootfs: write errors, reformatting...\n");
+    if (reformat(lfs, cfg) != LFS_ERR_OK) return;
+    write_scripts(lfs);
+  }
+  write_rootfs_marker(lfs);
   printf("rootfs: deployed (%d files, hash %08lx)\n", ruby_scripts_count,
          (unsigned long)rootfs_hash);
 }
 
-void
-init_rootfs(void)
-{
-  FATFS fatfs;
-  FRESULT res;
-
-  /* Mount the flash volume */
-  res = f_mount(&fatfs, "flash:", 1);
-  if (res == FR_NO_FILESYSTEM) {
-    res = format_and_mount(&fatfs);
-    if (res != FR_OK) {
-      printf("rootfs: format_and_mount failed (%d)\n", res);
-      return;
-    }
-    deploy_all(&fatfs);
-    goto done;
-  }
-  if (res != FR_OK) {
-    printf("rootfs: f_mount failed (%d)\n", res);
+void init_rootfs(void) {
+  int err = littlefs_ensure_mounted();
+  if (err != LFS_ERR_OK) {
+    printf("rootfs: mount failed (%d)\n", err);
     return;
   }
 
+  lfs_t *lfs = littlefs_get_lfs();
+  struct lfs_config *cfg = littlefs_get_config();
+
   /* Reformat if trigger file exists (created by user via "touch /FORMAT") */
-  FILINFO fno;
-  if (f_stat("flash:FORMAT", &fno) == FR_OK) {
+  struct lfs_info info;
+  if (lfs_stat(lfs, FORMAT_TRIGGER_PATH, &info) == LFS_ERR_OK) {
     printf("rootfs: format trigger found, reformatting...\n");
-    res = format_and_mount(&fatfs);
-    if (res != FR_OK) {
-      printf("rootfs: reformat failed (%d)\n", res);
-      return;
-    }
-    deploy_all(&fatfs);
-    goto done;
+    if (reformat(lfs, cfg) != LFS_ERR_OK) return;
+    deploy_all(lfs, cfg);
+    return;
   }
 
   /* Check rootfs hash marker */
   uint32_t stored_hash;
-  if (read_rootfs_marker(&stored_hash) && stored_hash == rootfs_hash) {
+  if (read_rootfs_marker(lfs, &stored_hash) && stored_hash == rootfs_hash) {
     printf("rootfs: up to date (%08lx)\n", (unsigned long)rootfs_hash);
   } else {
     printf("rootfs: updating...\n");
-    deploy_all(&fatfs);
+    deploy_all(lfs, cfg);
   }
-
-done:
-  f_mount(NULL, "flash:", 0);
 }

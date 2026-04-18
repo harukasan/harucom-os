@@ -154,8 +154,8 @@ add_executable(harucom_os
     src/hal_task.c
     src/hal_machine.c
     src/psram.c
-    src/flash_disk.c
     src/init_rootfs.c
+    ports/picoruby-littlefs/flash_hal.c
     src/platform.c
     src/env.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-rng/ports/rp2040/rng.c
@@ -189,7 +189,6 @@ target_compile_definitions(harucom_os PRIVATE
     MRB_TIMESLICE_TICK_COUNT=10
     MRB_USE_TASK_SCHEDULER=1
     NO_CLOCK_GETTIME=1
-    USE_FAT_FLASH_DISK=1
     NDEBUG=1
     BOARD_TUH_RHPORT=1
 )
@@ -214,9 +213,8 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/mrbgems/picoruby-require/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-env/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-time/include
-    ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/include
-    ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/lib/ff14b/source
-    ${PICORUBY_ROOT}/mrbgems/picoruby-filesystem-fat/src/hal
+    ${PICORUBY_ROOT}/mrbgems/picoruby-littlefs/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-littlefs/lib/littlefs
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems
     ${PICORUBY_ROOT}/mrbgems/picoruby-adc/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include

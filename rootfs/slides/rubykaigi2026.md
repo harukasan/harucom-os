@@ -554,18 +554,18 @@ Flight: "Launch control, this is Houston. We are go for launch."
 
 ```
 Power on
-  -> Initialize PSRAM
-  -> Install system files to flash
-  -> Start DVI output on Core 1
-  -> Initialize USB host
-  -> Start mruby VM on Core 0
+  -> Mount LittleFS filesystem
+  -> Initialize PSRAM (mruby heap)
+  -> Start Core 1 (DVI output)
+  -> Start mruby VM (Core 0)
+  -> Load /system.rb
 ```
 
 {::wait/}
 Bootstrap code embedded in main.c:
 ```ruby
-fat = FAT.new(:flash, label: "HARUCOM")
-VFS.mount(fat, "/")
+lfs = Littlefs.new(:flash, label: "HARUCOM")
+VFS.mount(lfs, "/")
 $LOAD_PATH = ["/lib"]
 load "/system.rb"
 ```

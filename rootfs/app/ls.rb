@@ -35,9 +35,9 @@ begin
   Dir.open(path) do |dir|
     if options[:l]
       begin
-        puts "\e[36m#{FAT::Stat::LABEL}\e[0m"
+        puts "\e[36m#{Littlefs::Stat::LABEL}\e[0m"
       rescue NameError
-        # Not a FAT filesystem
+        # Not a LittleFS filesystem
       end
       while entry = dir.read
         stat = File::Stat.new("#{path}/#{entry}")

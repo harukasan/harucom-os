@@ -14,16 +14,16 @@ rootfs_dir.glob("**/*").sort.each do |path|
   next unless path.file?
   rel = path.relative_path_from(rootfs_dir).to_s
   var_name = "ruby_script_" + rel.gsub(/[\/.]/, "_")
-  fatfs_path = "flash:" + rel
+  abs_path = "/" + rel
   data = path.binread
-  entries << { var_name: var_name, fatfs_path: fatfs_path, data: data }
+  entries << { var_name: var_name, path: abs_path, data: data }
 end
 
 # Compute CRC32 over (path + data) for each file, in sorted path order
 # for reproducibility across build environments.
 crc = 0
 entries.each do |e|
-  crc = Zlib.crc32(e[:fatfs_path], crc)
+  crc = Zlib.crc32(e[:path], crc)
   crc = Zlib.crc32(e[:data], crc)
 end
 
@@ -52,7 +52,7 @@ File.open(output_path, "w") do |f|
 
   f.puts "static const ruby_script_entry_t ruby_scripts[] = {"
   entries.each do |e|
-    f.puts "    { \"#{e[:fatfs_path]}\", #{e[:var_name]}, sizeof(#{e[:var_name]}) },"
+    f.puts "    { \"#{e[:path]}\", #{e[:var_name]}, sizeof(#{e[:var_name]}) },"
   end
   f.puts "};"
   f.puts

@@ -8,7 +8,8 @@ extern "C" {
 #endif
 
 /*
- * Dictionary region: 2 MB at the end of the firmware area, just before FAT.
+ * Dictionary region: 2 MB at the end of the firmware area, just before the
+ * LittleFS filesystem.
  *
  *   0x00600000 - 0x007FFFFF: dictionary data (separate UF2)
  *

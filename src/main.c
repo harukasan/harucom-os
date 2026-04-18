@@ -41,16 +41,8 @@
 /* Minimal Ruby bootstrap: mount filesystem, set load path, load system.rb. */
 // clang-format off
 static const char ruby_bootstrap[] =
-    "fat = FAT.new(:flash, label: \"HARUCOM\")\n"
-    "retry_count = 0\n"
-    "begin\n"
-    "  VFS.mount(fat, \"/\")\n"
-    "rescue => e\n"
-    "  fat._mkfs(\"flash:\")\n"
-    "  retry_count = retry_count + 1\n"
-    "  retry if retry_count == 1\n"
-    "  raise e\n"
-    "end\n"
+    "lfs = Littlefs.new(:flash, label: \"HARUCOM\")\n"
+    "VFS.mount(lfs, \"/\")\n"
     "$LOAD_PATH = [\"/lib\"]\n"
     "\n"
     "load \"/system.rb\"\n";
@@ -100,13 +92,13 @@ static uint32_t __attribute__((aligned(512)))
  * BASEPRI blocks all interrupts with priority >= 0x20.  DMA_IRQ_1 is at
  * priority 0x00 and passes through.
  *
- * Flash write safety relies on three mechanisms:
- *   1. DVI blanking: flash_disk.c enables blanking before flash ops,
- *      so the DMA IRQ handler outputs blank lines (no .rodata access).
- *   2. VTOR in SRAM: interrupt dispatch reads handler addresses from
+ * Flash write safety relies on two mechanisms:
+ *   1. VTOR in SRAM: interrupt dispatch reads handler addresses from
  *      SRAM, not flash.
- *   3. __not_in_flash_func: this function (including the WFI loop)
- *      runs from SRAM.
+ *   2. __not_in_flash_func: this function (including the WFI loop)
+ *      runs from SRAM.  The text-mode scanline renderer reads only
+ *      SRAM-resident VRAM and font cache, so it stays alive while XIP
+ *      is disabled for flash erase/program.
  */
 static void __not_in_flash_func(core1_dvi_entry)(void) {
     dvi_start_mode(DVI_MODE_TEXT);
