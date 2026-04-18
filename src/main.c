@@ -168,6 +168,7 @@ static bool dvi_diagnostic_callback(struct repeating_timer *t) {
  * then run the mruby task scheduler.
  */
 static void run_mruby(void) {
+    uint64_t t0 = time_us_64();
     printf("Starting PicoRuby...\n");
     mrb_state *mrb = mrb_open_with_custom_alloc(heap_pool_g, heap_size_g);
     if (!mrb) {
@@ -175,6 +176,8 @@ static void run_mruby(void) {
         return;
     }
     global_mrb = mrb;
+    uint64_t t1 = time_us_64();
+    printf("mrb_open: %llu us\n", (unsigned long long)(t1 - t0));
 
     mrb_define_global_const(mrb, "HARUCOM_VERSION",
                             mrb_str_new_cstr(mrb, HARUCOM_VERSION));
@@ -183,12 +186,14 @@ static void run_mruby(void) {
 
     mrc_ccontext *cc = mrc_ccontext_new(mrb);
     const uint8_t *src = (const uint8_t *)ruby_bootstrap;
+    uint64_t t2 = time_us_64();
     mrc_irep *irep = mrc_load_string_cxt(cc, &src, strlen(ruby_bootstrap));
+    uint64_t t3 = time_us_64();
     if (!irep) {
         printf("compile failed\n");
         return;
     }
-    printf("compile OK\n");
+    printf("bootstrap compile: %llu us\n", (unsigned long long)(t3 - t2));
 
     mrb_value name = mrb_str_new_cstr(mrb, "main");
     mrb_value task = mrc_create_task(cc, irep, name, mrb_nil_value(),
@@ -262,7 +267,11 @@ static void harucom_main(void) {
     /* Initialize root filesystem before launching DVI on core 1.
      * Flash programming requires exclusive XIP access, which conflicts
      * with DVI scanline rendering on core 1. */
+    uint64_t rootfs_t0 = time_us_64();
     init_rootfs();
+    uint64_t rootfs_t1 = time_us_64();
+    printf("init_rootfs: %llu us\n",
+           (unsigned long long)(rootfs_t1 - rootfs_t0));
 
     /* Set up text mode fonts before launching DVI on core 1.
      * Font data must be configured before dvi_start_mode() because the

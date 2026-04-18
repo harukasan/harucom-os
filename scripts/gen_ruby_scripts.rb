@@ -4,6 +4,7 @@
 # Usage: ruby scripts/gen_ruby_scripts.rb <rootfs_dir> <output_header>
 
 require "pathname"
+require "zlib"
 
 rootfs_dir = Pathname.new(ARGV[0] || "rootfs")
 output_path = ARGV[1] || "ruby_scripts.h"
@@ -16,6 +17,14 @@ rootfs_dir.glob("**/*").sort.each do |path|
   fatfs_path = "flash:" + rel
   data = path.binread
   entries << { var_name: var_name, fatfs_path: fatfs_path, data: data }
+end
+
+# Compute CRC32 over (path + data) for each file, in sorted path order
+# for reproducibility across build environments.
+crc = 0
+entries.each do |e|
+  crc = Zlib.crc32(e[:fatfs_path], crc)
+  crc = Zlib.crc32(e[:data], crc)
 end
 
 File.open(output_path, "w") do |f|
@@ -48,6 +57,9 @@ File.open(output_path, "w") do |f|
   f.puts "};"
   f.puts
   f.puts "static const int ruby_scripts_count = sizeof(ruby_scripts) / sizeof(ruby_scripts[0]);"
+  f.puts
+
+  f.puts "static const uint32_t rootfs_hash = 0x%08x;" % crc
 end
 
-puts "Generated #{output_path} with #{entries.size} script(s)"
+puts "Generated #{output_path} with #{entries.size} script(s) (hash: %08x)" % crc
