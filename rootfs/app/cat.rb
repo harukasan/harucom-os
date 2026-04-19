@@ -19,13 +19,16 @@ if ARGV.empty?
 end
 
 lineno = 0
+had_error = false
 ARGV.each do |path|
   unless File.exist?(path)
     puts "cat: #{path}: No such file or directory"
+    had_error = true
     next
   end
   if File.directory?(path)
     puts "cat: #{path}: Is a directory"
+    had_error = true
     next
   end
   begin
@@ -41,5 +44,8 @@ ARGV.each do |path|
     end
   rescue => e
     puts "cat: #{path}: #{e.message}"
+    had_error = true
   end
 end
+
+exit 1 if had_error

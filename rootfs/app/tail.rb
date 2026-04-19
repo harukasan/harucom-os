@@ -19,14 +19,17 @@ if ARGV.empty?
 end
 
 multi = ARGV.size > 1
+had_error = false
 
 ARGV.each do |path|
   unless File.exist?(path)
     puts "tail: #{path}: No such file or directory"
+    had_error = true
     next
   end
   if File.directory?(path)
     puts "tail: #{path}: Is a directory"
+    had_error = true
     next
   end
   puts "==> #{path} <==" if multi
@@ -42,5 +45,8 @@ ARGV.each do |path|
     buf.each { |line| print line }
   rescue => e
     puts "tail: #{path}: #{e.message}"
+    had_error = true
   end
 end
+
+exit 1 if had_error
