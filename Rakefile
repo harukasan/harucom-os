@@ -13,17 +13,25 @@ def nproc
   Etc.nprocessors
 end
 
+# Run a child process without the parent Bundler's environment. Nested
+# rake invocations (PicoRuby, harucom-os-dict) have their own Gemfile
+# setup and must not inherit BUNDLE_GEMFILE / RUBYOPT from this rake,
+# or they try to load this project's Gemfile and fail.
+def sh_unbundled(*cmd, **opts)
+  Bundler.with_unbundled_env { sh(*cmd, **opts) }
+end
+
 desc "Configure, build and produce combined UF2 (default)"
 task default: :full_uf2
 
 desc "Run cmake configure"
 task :configure do
-  sh "cmake -B #{BUILD_DIR} -G Ninja"
+  sh_unbundled "cmake -B #{BUILD_DIR} -G Ninja"
 end
 
 desc "Build firmware"
 task build: :configure do
-  sh "cmake --build #{BUILD_DIR} -j#{nproc}"
+  sh_unbundled "cmake --build #{BUILD_DIR} -j#{nproc}"
 end
 
 desc "Build UF2 (harucom-os only)"
@@ -38,7 +46,7 @@ end
 
 desc "Build dictionary UF2 (vendor/harucom-os-dict)"
 task dict_uf2: :dict_submodule do
-  sh "rake uf2", chdir: DICT_DIR
+  sh_unbundled "rake uf2", chdir: DICT_DIR
 end
 
 desc "Build combined UF2 (harucom-os + dict)"
@@ -78,7 +86,7 @@ end
 desc "Clean dictionary build"
 task :clean_dict do
   if File.exist?(File.join(DICT_DIR, "Rakefile"))
-    sh "rake clean", chdir: DICT_DIR
+    sh_unbundled "rake clean", chdir: DICT_DIR
   end
 end
 
