@@ -570,6 +570,10 @@ class InputMethod
         end
         @user_dict[reading] = candidates if candidates.length > 0
       end
+    rescue => e
+      # Corrupt or unreadable dictionary should not break IME startup;
+      # fall back to an empty user dictionary and let the user rebuild it.
+      puts "SKK: failed to load user dictionary: #{e.message}"
     end
 
     def save_user_dict
@@ -578,6 +582,10 @@ class InputMethod
         content += reading + " /" + candidates.join("/") + "/\n"
       end
       File.open(USER_DICT_PATH, "w") { |f| f.write(content) }
+    rescue => e
+      # Flash write can fail (read-only FS, full device). Keep the new
+      # registration in memory for this session and warn the user.
+      puts "SKK: failed to save user dictionary: #{e.message}"
     end
 
     # Convert hiragana string to katakana
