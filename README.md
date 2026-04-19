@@ -18,7 +18,7 @@ Harucom OS is the firmware for [Harucom Board](https://github.com/harukasan/haru
 git clone --recursive https://github.com/harukasan/harucom-os.git
 cd harucom-os
 
-git sumodule update --init --recursive
+git submodule update --init --recursive
 bundle install
 rake
 ```

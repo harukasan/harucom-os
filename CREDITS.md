@@ -2,7 +2,7 @@
 
 ## Author
 
-- Shunuke Michii ([@harukasan](https://github.com/harukasan))
+- Shunsuke Michii ([@harukasan](https://github.com/harukasan))
 
 ## Raspberry Pi Pico SDK
 
