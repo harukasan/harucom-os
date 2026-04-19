@@ -46,6 +46,7 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.gem core: 'picoruby-gpio'
   conf.gem core: 'picoruby-adc'
   conf.gem core: 'picoruby-env'
+  conf.gem core: 'picoruby-yaml'
   conf.gem core: 'picoruby-io-console'
   conf.gem core: 'picoruby-editor'
   conf.gem core: 'picoruby-sandbox'

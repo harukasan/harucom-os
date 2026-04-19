@@ -40,79 +40,20 @@ class Keyboard
     i += 1
   end
 
-  # HID keycode -> character (unshifted), US layout
-  # Derived from TinyUSB HID_KEYCODE_TO_ASCII
-  # Index 0x00..0x67 (104 entries)
-  KEYCODE_TO_CHAR = [
-    #0x00  0x01  0x02  0x03
-    nil,  nil,  nil,  nil,
-    #0x04  0x05  0x06  0x07  0x08  0x09  0x0A  0x0B  0x0C  0x0D
-    "a",  "b",  "c",  "d",  "e",  "f",  "g",  "h",  "i",  "j",
-    #0x0E  0x0F  0x10  0x11  0x12  0x13  0x14  0x15  0x16  0x17
-    "k",  "l",  "m",  "n",  "o",  "p",  "q",  "r",  "s",  "t",
-    #0x18  0x19  0x1A  0x1B  0x1C  0x1D
-    "u",  "v",  "w",  "x",  "y",  "z",
-    #0x1E  0x1F  0x20  0x21  0x22  0x23  0x24  0x25  0x26  0x27
-    "1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "0",
-    #0x28  0x29  0x2A  0x2B  (special keys, handled by KEYCODE_TO_SYMBOL)
-    nil,  nil,  nil,  nil,
-    #0x2C  0x2D  0x2E  0x2F  0x30  0x31
-    " ",  "-",  "=",  "[",  "]",  "\\",
-    #0x32  0x33  0x34  0x35  0x36  0x37  0x38
-    "#",  ";",  "'",  "`",  ",",  ".",  "/",
-    #0x39..0x53 (CapsLock, F1-F12, PrintScreen, ScrollLock, Pause,
-    #            Insert, Home, PageUp, Delete, End, PageDown,
-    #            Right, Left, Down, Up, NumLock)
-    nil, nil, nil, nil, nil, nil, nil, nil,  # 0x39-0x40
-    nil, nil, nil, nil, nil, nil, nil, nil,  # 0x41-0x48
-    nil, nil, nil, nil, nil, nil, nil, nil,  # 0x49-0x50
-    nil, nil, nil,                            # 0x51-0x53
-    #0x54  0x55  0x56  0x57 (numpad operators)
-    "/",  "*",  "-",  "+",
-    #0x58 (numpad Enter, handled as :ENTER)
-    nil,
-    #0x59..0x63 (numpad digits)
-    "1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "0",
-    #0x63 numpad dot
-    ".",
-    #0x64  0x65  0x66  0x67
-    nil,  nil,  nil,  "=",
-  ]
+  # HID keycode -> character tables, loaded at boot from /lib/keymap/*.rb.
+  # Empty until Keyboard.set_keymap is called.
+  @@normal_map = []
+  @@shifted_map = []
 
-  # HID keycode -> character (shifted), US layout
-  KEYCODE_TO_CHAR_SHIFTED = [
-    #0x00  0x01  0x02  0x03
-    nil,  nil,  nil,  nil,
-    #0x04  0x05  0x06  0x07  0x08  0x09  0x0A  0x0B  0x0C  0x0D
-    "A",  "B",  "C",  "D",  "E",  "F",  "G",  "H",  "I",  "J",
-    #0x0E  0x0F  0x10  0x11  0x12  0x13  0x14  0x15  0x16  0x17
-    "K",  "L",  "M",  "N",  "O",  "P",  "Q",  "R",  "S",  "T",
-    #0x18  0x19  0x1A  0x1B  0x1C  0x1D
-    "U",  "V",  "W",  "X",  "Y",  "Z",
-    #0x1E  0x1F  0x20  0x21  0x22  0x23  0x24  0x25  0x26  0x27
-    "!",  "@",  "#",  "$",  "%",  "^",  "&",  "*",  "(",  ")",
-    #0x28  0x29  0x2A  0x2B  (special keys)
-    nil,  nil,  nil,  nil,
-    #0x2C  0x2D  0x2E  0x2F  0x30  0x31
-    " ",  "_",  "+",  "{",  "}",  "|",
-    #0x32  0x33  0x34  0x35  0x36  0x37  0x38
-    "~",  ":",  "\"", "~",  "<",  ">",  "?",
-    #0x39..0x53
-    nil, nil, nil, nil, nil, nil, nil, nil,  # 0x39-0x40
-    nil, nil, nil, nil, nil, nil, nil, nil,  # 0x41-0x48
-    nil, nil, nil, nil, nil, nil, nil, nil,  # 0x49-0x50
-    nil, nil, nil,                            # 0x51-0x53
-    #0x54  0x55  0x56  0x57 (numpad operators)
-    "/",  "*",  "-",  "+",
-    #0x58 (numpad Enter)
-    nil,
-    #0x59..0x63 (numpad digits, shifted = nil per TinyUSB)
-    nil,  nil,  nil,  nil,  "5",  nil,  nil,  nil,  nil,  nil,
-    #0x63 numpad dot shifted
-    nil,
-    #0x64  0x65  0x66  0x67
-    nil,  nil,  nil,  "=",
-  ]
+  # Install keymap tables (layout-specific). Each argument is an Array indexed
+  # by HID keycode; entries outside the array bound are treated as unmapped.
+  def self.set_keymap(normal:, shifted:)
+    @@normal_map = normal
+    @@shifted_map = shifted
+  end
+
+  def self.normal_map;  @@normal_map;  end
+  def self.shifted_map; @@shifted_map; end
 
   # Flyweight cache for Key instances (shared across all Keyboard instances).
   # Ensures object identity for case/when matching.
@@ -253,19 +194,19 @@ class Keyboard
       return Key.new(name, nil, ctrl: is_ctrl, shift: is_shift, alt: is_alt, super_key: is_super)
     end
 
-    # Letter keys (A-Z: keycodes 0x04-0x1D)
+    # Letter keys (A-Z: keycodes 0x04-0x1D). Name is layout-independent.
     if keycode >= 0x04 && keycode <= 0x1D
-      letter_name = KEYCODE_TO_CHAR[keycode].to_sym
+      letter_name = (0x61 + keycode - 0x04).chr.to_sym
       if is_ctrl
         return Key.new(letter_name, nil, ctrl: true, shift: is_shift, alt: is_alt, super_key: is_super)
       end
-      char = is_shift ? KEYCODE_TO_CHAR_SHIFTED[keycode] : KEYCODE_TO_CHAR[keycode]
+      char = is_shift ? @@shifted_map[keycode] : @@normal_map[keycode]
       return Key.new(letter_name, char, shift: is_shift, alt: is_alt, super_key: is_super)
     end
 
     # Other printable characters
-    if keycode < KEYCODE_TO_CHAR.length
-      char = is_shift ? KEYCODE_TO_CHAR_SHIFTED[keycode] : KEYCODE_TO_CHAR[keycode]
+    if keycode < @@normal_map.length
+      char = is_shift ? @@shifted_map[keycode] : @@normal_map[keycode]
       return Key.new(char.to_sym, char, ctrl: is_ctrl, shift: is_shift, alt: is_alt, super_key: is_super) if char
     end
 

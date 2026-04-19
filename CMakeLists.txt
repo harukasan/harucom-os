@@ -137,13 +137,15 @@ target_include_directories(picoruby-pwm-audio PUBLIC
 target_link_libraries(picoruby-pwm-audio pico_stdlib hardware_pwm pico_time)
 
 # --- Ruby scripts (rootfs/ -> ruby_scripts.h) ---
-file(GLOB_RECURSE RUBY_SCRIPTS ${CMAKE_SOURCE_DIR}/rootfs/*.rb)
+# Track all rootfs files (Ruby, YAML, images, etc.) so that edits
+# retrigger gen_ruby_scripts.rb.
+file(GLOB_RECURSE ROOTFS_FILES ${CMAKE_SOURCE_DIR}/rootfs/*)
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/ruby_scripts.h
     COMMAND ${Ruby_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/gen_ruby_scripts.rb
             ${CMAKE_SOURCE_DIR}/rootfs
             ${CMAKE_BINARY_DIR}/ruby_scripts.h
-    DEPENDS ${RUBY_SCRIPTS} ${CMAKE_SOURCE_DIR}/scripts/gen_ruby_scripts.rb
+    DEPENDS ${ROOTFS_FILES} ${CMAKE_SOURCE_DIR}/scripts/gen_ruby_scripts.rb
     COMMENT "Generating ruby_scripts.h from rootfs/"
 )
 add_custom_target(ruby_scripts_gen DEPENDS ${CMAKE_BINARY_DIR}/ruby_scripts.h)

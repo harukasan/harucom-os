@@ -18,6 +18,7 @@ Class: `Keyboard`
 - [Keyboard#poll](#keyboardpoll)
 - [Keyboard#read\_char](#keyboardread_char---keyboardkey--nil)
 - [Keyboard.key](#keyboardkeyname-ctrl-shift-alt-super_key---keyboardkey)
+- [Keyboard.set\_keymap](#keyboardset_keymapnormal-shifted)
 
 A Keyboard instance tracks per-key state for press detection and repeat.
 A background Task calls `poll` to detect key events and queue them.
@@ -76,6 +77,14 @@ when Keyboard.key(:f, ctrl: true)
   find
 end
 ```
+
+#### Keyboard.set\_keymap(normal:, shifted:)
+
+Installs the HID keycode to character translation tables used by
+`poll`. Both `normal:` and `shifted:` are Arrays indexed by HID
+keycode; entries outside the array bound are treated as unmapped
+(equivalent to `nil`). Called once at boot from a layout file under
+`/lib/keymap/` and is how layout selection is implemented.
 
 ### Keyboard::Key
 
@@ -197,6 +206,32 @@ Common key patterns are defined as constants on the Keyboard class:
 | `Keyboard::PAGEUP` | PageUp |
 | `Keyboard::PAGEDOWN` | PageDown |
 
+## Keyboard Layout
+
+Layout selection is driven by the `KEYBOARD_LAYOUT` environment
+variable, loaded at boot from [/etc/env.yml](../rootfs/etc/env.yml):
+
+```yaml
+KEYBOARD_LAYOUT: us
+```
+
+Supported values correspond to files in
+[/lib/keymap/](../rootfs/lib/keymap/):
+
+| Layout | File |
+|---|---|
+| `us` | [/lib/keymap/us.rb](../rootfs/lib/keymap/us.rb) |
+| `jis` | [/lib/keymap/jis.rb](../rootfs/lib/keymap/jis.rb) |
+
+Each layout file calls `Keyboard.set_keymap` with two arrays indexed by
+HID keycode: one for unshifted characters and one for shifted. The
+arrays may be edited in place on flash to customize a layout. A missing
+or unknown `KEYBOARD_LAYOUT` value falls back to `us`.
+
+Layout files define only printable character mappings. Letter key
+identity (`:a` through `:z`) and special keys (Enter, Escape, arrows,
+etc.) are layout-independent and handled by `Keyboard` itself.
+
 ## Architecture
 
 ### Data Flow
@@ -293,9 +328,8 @@ Conversion follows this priority:
    Delete, Insert, PageUp, PageDown): looked up in `KEYCODE_TO_NAME`.
 2. **Ctrl + letter** (keycodes 0x04..0x1D with Ctrl modifier): Key with
    `ctrl: true` and `char: nil`.
-3. **Printable characters**: looked up in `KEYCODE_TO_CHAR` and
-   `KEYCODE_TO_CHAR_SHIFTED`. US keyboard layout. The tables can be
-   replaced for other layouts (e.g. JIS).
+3. **Printable characters**: looked up in the layout tables installed
+   via `Keyboard.set_keymap`. See [Keyboard Layout](#keyboard-layout).
 
 ### Key Repeat
 
@@ -319,9 +353,12 @@ scheduler.
 ## File Layout
 
 - [mrbgems/picoruby-keyboard-input/](../mrbgems/picoruby-keyboard-input/)
-  - [mrblib/key.rb](../mrbgems/picoruby-keyboard-input/mrblib/key.rb) -- Keyboard::Key class
-  - [mrblib/keyboard.rb](../mrbgems/picoruby-keyboard-input/mrblib/keyboard.rb) -- Keyboard class (lookup tables, poll, read_char, key constants)
-  - [mrbgem.rake](../mrbgems/picoruby-keyboard-input/mrbgem.rake) -- Gem specification
+  - [mrblib/key.rb](../mrbgems/picoruby-keyboard-input/mrblib/key.rb) (Keyboard::Key class)
+  - [mrblib/keyboard.rb](../mrbgems/picoruby-keyboard-input/mrblib/keyboard.rb) (Keyboard class, poll, read_char, key constants, set_keymap)
+  - [mrbgem.rake](../mrbgems/picoruby-keyboard-input/mrbgem.rake) (gem specification)
+- [rootfs/etc/env.yml](../rootfs/etc/env.yml) (layout selection via `KEYBOARD_LAYOUT`)
+- [rootfs/lib/keymap/us.rb](../rootfs/lib/keymap/us.rb) (US ANSI layout tables)
+- [rootfs/lib/keymap/jis.rb](../rootfs/lib/keymap/jis.rb) (JIS Japanese layout tables)
 
 ## References
 
