@@ -348,6 +348,29 @@ __no_inline_not_in_flash_func(setup_psram)(void)
   xip_ctrl_hw->ctrl |= XIP_CTRL_WRITABLE_M1_BITS;
 
   restore_interrupts(save);
+
+  /*
+   * Hide CS1 from the bootrom now that ATRANS and pads are programmed.
+   *
+   * pico-sdk's flash_range_program / flash_range_erase check
+   * FLASH_DEVINFO.CS1_SIZE to decide how to restore QMI window 1 after
+   * the flash op (see flash_rp2350_restore_qmi_cs1 in pico-sdk's
+   * hardware_flash/flash.c).  When CS1_SIZE is nonzero the ROM issues
+   * an XIP exit sequence to the PSRAM (returning it to serial command
+   * state) and the SDK only restores wfmt/wcmd to 02h single-SPI
+   * defaults, leaving timing/rcmd/rfmt at whatever the ROM wrote.  At
+   * this project's 372 MHz sys_clk, that results in under-delayed SPI
+   * reads and corrupts the mruby heap.
+   *
+   * Switching CS1_SIZE back to NONE after bringup routes future flash
+   * ops through the SDK's Case 1 path, which restores timing/rcmd/rfmt
+   * exactly and does not touch wfmt/wcmd or the PSRAM device itself.
+   * The ATRANS registers and GPIO 0 pad configuration the bootrom
+   * already applied above survive because the ROM only touches CS1
+   * when CS1_SIZE is nonzero.  This matches how SparkFun's sfe_psram
+   * and CircuitPython's rp2 port run (they simply never set CS1_SIZE).
+   */
+  flash_devinfo_set_cs_size(1, FLASH_DEVINFO_SIZE_NONE);
 }
 
 void *
