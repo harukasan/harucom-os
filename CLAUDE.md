@@ -12,10 +12,20 @@ It runs Ruby scripts on mruby VM with DVI output, USB keyboard input, and a file
 ## Build commands
 
 ```sh
-rake          # configure + build (default)
+rake          # configure + build + combined UF2 (default)
+rake uf2      # firmware UF2 only (no dictionary)
+rake dict_uf2 # dictionary UF2 only (vendor/harucom-os-dict)
+rake flash    # flash combined UF2 via picotool
 rake clean    # remove build/
-rake distclean # remove build/ and PicoRuby build
+rake distclean # remove build/, PicoRuby build, and dictionary build
 ```
+
+The default `rake` produces `build/harucom_os_full.uf2`, a single UF2 that
+concatenates the firmware (`harucom_os.uf2`) and the IME dictionary
+(`vendor/harucom-os-dict/build/dict.uf2`) so BOOTSEL can flash both in one
+drag-and-drop. The dictionary is built from the
+[harucom-os-dict](vendor/harucom-os-dict) submodule; `rake` auto-initializes
+it on first run.
 
 **When changing `build_config/*.rb` (adding/removing gems, changing defines)
 or adding new `MRB_SYM()` identifiers in C code, you must run
