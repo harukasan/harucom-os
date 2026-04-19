@@ -1,4 +1,11 @@
-require "bundler/setup"
+# Bundler is convenient for local development (ensures the Gemfile gems
+# are on the load path) but not required — CI may install gems globally
+# via `gem install`. Treat its absence as a no-op so the Rakefile works
+# either way.
+begin
+  require "bundler/setup"
+rescue LoadError
+end
 
 PROJECT_DIR = __dir__
 BUILD_DIR   = File.join(PROJECT_DIR, "build")
@@ -18,7 +25,11 @@ end
 # setup and must not inherit BUNDLE_GEMFILE / RUBYOPT from this rake,
 # or they try to load this project's Gemfile and fail.
 def sh_unbundled(*cmd, **opts)
-  Bundler.with_unbundled_env { sh(*cmd, **opts) }
+  if defined?(Bundler)
+    Bundler.with_unbundled_env { sh(*cmd, **opts) }
+  else
+    sh(*cmd, **opts)
+  end
 end
 
 desc "Configure, build and produce combined UF2 (default)"

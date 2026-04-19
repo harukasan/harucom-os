@@ -30,7 +30,9 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '4.0.1'
-          bundler-cache: true
+
+      - name: Install Ruby gems
+        run: gem install rake freetype
 
       - name: Build combined UF2 (firmware + dictionary)
         run: rake
