@@ -12,6 +12,7 @@ end
 
 # Load environment variables from /etc/env.yml into ENV. Missing or
 # malformed file is non-fatal; ENV simply stays unpopulated.
+require "env"
 require "yaml"
 begin
   env = YAML.load_file("/etc/env.yml")

@@ -364,7 +364,7 @@ in by the `core` gembox and [harucom-os-pico2.rb](../build_config/harucom-os-pic
 | [flash_hal.c](../ports/picoruby-littlefs/flash_hal.c) | LittleFS HAL (read/prog/erase/sync) for flash |
 | [init_rootfs.c](../src/init_rootfs.c) | Initialize root filesystem (mount, auto-format, deploy scripts) |
 | [platform.c](../src/platform.c) | `Platform_name()` returning "RP2350" |
-| [env.c](../src/env.c) | `ENV_setenv` / `ENV_unsetenv` / `ENV_get_key_value` stubs |
+| [env.c](../src/env.c) | `ENV_setenv` / `ENV_unsetenv` / `ENV_get_key_value` no-op stubs for picoruby-env |
 | [disk.h](../include/disk.h) | Flash layout constants |
 
 ### Build Tools

@@ -1,12 +1,14 @@
 /*
- * ENV HAL for Harucom OS.
+ * picoruby-env POSIX bridge stubs.
  *
- * Minimal stub: environment variables are not persistent on this platform.
- * setenv/unsetenv from newlib are used for in-memory key-value storage.
+ * ENV[]= / ENV.delete on mruby store into an internal Hash before
+ * calling these hooks to sync with POSIX environ.  On bare-metal
+ * RP2350 + newlib that sync path malloc-grows an environ array from
+ * the C heap and corrupts unrelated memory, so we stub it out.
+ * ENV[] / ENV[]= / ENV.delete stay fully functional via the Hash.
  */
 
 #include <stddef.h>
-#include <stdlib.h>
 
 void
 ENV_get_key_value(char **key, size_t *key_len, char **value, size_t *value_len)
@@ -20,11 +22,15 @@ ENV_get_key_value(char **key, size_t *key_len, char **value, size_t *value_len)
 int
 ENV_unsetenv(const char *name)
 {
-  return unsetenv(name);
+  (void)name;
+  return 0;
 }
 
 int
 ENV_setenv(const char *name, const char *value, int override)
 {
-  return setenv(name, value, override);
+  (void)name;
+  (void)value;
+  (void)override;
+  return 0;
 }
