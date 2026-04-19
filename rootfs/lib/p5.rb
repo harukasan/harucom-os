@@ -1,6 +1,10 @@
 class P5
   G = DVI::Graphics
 
+  # Cap push_matrix depth so runaway code (missing pop_matrix in a loop)
+  # cannot exhaust the mruby heap. Normal nesting rarely exceeds 5.
+  MATRIX_STACK_MAX = 32
+
   def initialize
     DVI.set_mode(DVI::GRAPHICS_MODE)
     @fill_color = 0xFF
@@ -57,6 +61,7 @@ class P5
   end
 
   def stroke_weight(w)
+    w = 0 if w < 0
     @stroke_weight = w
   end
 
@@ -72,6 +77,8 @@ class P5
   end
 
   def alpha(value)
+    value = 0 if value < 0
+    value = 255 if value > 255
     G.set_blend_mode(G::BLEND_ALPHA)
     G.set_alpha(value)
   end
@@ -130,6 +137,9 @@ class P5
   end
 
   def push_matrix
+    if @matrix_stack.length >= MATRIX_STACK_MAX
+      raise "P5: matrix stack overflow (max depth #{MATRIX_STACK_MAX})"
+    end
     @matrix_stack.push(@matrix.dup)
   end
 
