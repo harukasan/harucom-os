@@ -36,7 +36,7 @@ class IRB
 
       Powered by PicoRuby #{PICORUBY_VERSION} on #{RUBY_PLATFORM}
 
-      くわしい使い方は https://harucom.github.io/ をごらんください
+      くわしい使い方は https://harucom.org/ をごらんください
 
     PROMPT
     @console.commit
