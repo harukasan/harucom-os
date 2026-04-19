@@ -42,10 +42,8 @@ require "keyboard_input"
 require "ruby_syntax"
 
 # Install keyboard layout selected via ENV["KEYBOARD_LAYOUT"]. Layouts are
-# bundled in the picoruby-keyboard-input mrbgem as pre-compiled bytecode;
-# loading them at runtime from /lib/keymap/*.rb parsed ~140 string
-# literals inline with USB enumeration, which raced the mruby allocator
-# and intermittently corrupted the heap.
+# bundled in the picoruby-keyboard-input mrbgem as pre-compiled bytecode
+# so boot does not pay for a literal-heavy runtime parse.
 layout = ENV["KEYBOARD_LAYOUT"] || "us"
 unless Keyboard.use_layout(layout)
   puts "unknown keyboard layout '#{layout}', falling back to us"
