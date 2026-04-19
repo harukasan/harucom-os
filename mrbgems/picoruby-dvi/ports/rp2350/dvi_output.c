@@ -760,10 +760,15 @@ void __scratch_x("") dma_irq_handler(void)
       active_mode = (dvi_mode_t)pending;
     }
 
-    // Apply pending graphics scale change
+    // Apply pending graphics scale change. Both the variable that other
+    // code reads (graphics_scale) and the HSTX reconfiguration below
+    // happen here in the same VSync window, so DMA descriptor builds
+    // and pixel output stay consistent with each other.
     int pending_scale = next_graphics_scale;
     if (pending_scale > 0) {
+      graphics_scale = pending_scale;
       next_graphics_scale = -1;
+      __asm volatile("sev");
     }
 
     // Reconfigure HSTX ENC_N_SHIFTS based on mode and scale.
@@ -952,8 +957,14 @@ void
 dvi_set_graphics_scale(int scale)
 {
   if (scale != 1 && scale != 2) return;
-  graphics_scale = scale;
+  if (graphics_scale == scale) return;
   next_graphics_scale = scale;
+  // Block until the VSync IRQ has applied the change, so callers that
+  // read width()/height() or draw into the framebuffer immediately
+  // after see a consistent state. Worst case blocks one frame (~16.6 ms).
+  while (next_graphics_scale > 0) {
+    __asm volatile("wfe" ::: "memory");
+  }
 }
 
 uint8_t *
