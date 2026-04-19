@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]*.[0-9]*.[0-9]*'
+
+env:
+  BUILD_TYPE: Release
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install ARM toolchain and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi libfreetype-dev ninja-build
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0.1'
+          bundler-cache: true
+
+      - name: Build combined UF2 (firmware + dictionary)
+        run: rake
+
+      - name: Package release archives
+        run: |
+          mkdir -p release staging
+          cp build/harucom_os_full.uf2 staging/harucom_os_full-${{ github.ref_name }}.uf2
+          cp build/harucom_os.uf2      staging/harucom_os-${{ github.ref_name }}.uf2
+          (cd staging && zip     ../release/harucom_os-${{ github.ref_name }}.zip    *.uf2)
+          (cd staging && tar czf ../release/harucom_os-${{ github.ref_name }}.tar.gz *.uf2)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
