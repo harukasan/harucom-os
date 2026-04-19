@@ -307,6 +307,28 @@ static void harucom_main(void) {
     /* Initialize USB host (PIO-USB on RHPORT 1) */
     usb_host_init();
 
+    /* Pump the USB host stack until enumeration (reset, set address,
+     * descriptor reads, SET_IDLE, HID report setup) settles before we
+     * hand control to mruby. When a keyboard connects mid-bootstrap,
+     * tuh_task allocations and callbacks race with literal-heavy
+     * requires and intermittently corrupt the mruby heap. Pump for up
+     * to 1 s; exit early once a keyboard is mounted and then give its
+     * follow-up transactions another 200 ms to complete. */
+    {
+        absolute_time_t hard_deadline = make_timeout_time_ms(1000);
+        absolute_time_t settle_deadline = nil_time;
+        while (absolute_time_diff_us(get_absolute_time(), hard_deadline) > 0) {
+            usb_host_task();
+            if (usb_host_keyboard_connected() && is_nil_time(settle_deadline)) {
+                settle_deadline = make_timeout_time_ms(200);
+            }
+            if (!is_nil_time(settle_deadline) &&
+                absolute_time_diff_us(get_absolute_time(), settle_deadline) <= 0) {
+                break;
+            }
+        }
+    }
+
     /* Run mruby on core 0 (has default alarm pool, stdio, timers) */
     run_mruby();
 
