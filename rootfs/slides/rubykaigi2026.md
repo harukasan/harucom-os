@@ -106,6 +106,10 @@ end
 - No complex OS, just connect a display and a keyboard
 - Fully hackable and open source
 
+GitHub:
+- harukasan/harucom-os
+- harukasan/harucom-board
+
 # Dive deep into the architecture
 
 # Problem 1: 640x480 @ 60Hz DVI output
@@ -505,6 +509,17 @@ mruby and DVI accessing one region causes contention
   - Font data pre-cached in SRAM by Core 0
   - No flash reads during text rendering
 
+# PSRAM and Flash share one QMI
+
+QMI multiplexes Flash (CS0) and PSRAM (CS1)
+
+- Flash writes block all PSRAM access
+- mruby heap on PSRAM would fault if accessed
+
+**Solution: stage via SRAM before writing to flash**
+- Copy source buffer from PSRAM to SRAM
+- Disable interrupts: flash-resident IRQ handlers can't run
+
 # Bus priority
 
 RP2350 bus fabric has configurable priority (**BUSCTRL**)
@@ -522,9 +537,12 @@ Core 0/1 stacks moved to main SRAM to make room
 
 # Summary: Resolving bus contention
 
-- Move mruby heap to PSRAM, confine DVI to SRAM
-- Prioritize DMA via BUSCTRL to keep HSTX fed
-- Use dedicated SCRATCH_X/Y for hot path and LUT
+**A Few Hardfaults Later...**
+
+mruby VM runs stably on Harucom!
+
+- **PSRAM** provides a generous heap for the mruby VM
+- **Separating mruby and DVI** eliminates bus contention
 
 # Boot sequence
 
@@ -587,17 +605,20 @@ end
 
 # Keyboard input
 
-**picoruby-usb-host**: PIO-USB on GPIO 8/9, TinyUSB HID stack
+**picoruby-usb-host**: raw HID state via PIO-USB
 - USB::Host.task: drives TinyUSB from background task
-- USB::Host.keyboard_keycodes / .keyboard_modifier: HID state
+- USB::Host.keyboard_keycodes / .keyboard_modifier
 
 **picoruby-keyboard-input**: keycodes -> Ruby key events
-- `Keyboard::Key`: object holding key state (name, char, modifier flags)
-- `Keyboard.key(name, ...)`: returns cached `Key` for fast matching
+- Keyboard::Key: holds key state (name, char, modifiers)
+- Keyboard.key(...): returns cached Key for fast matching
 - Software key repeat (400 ms initial, 50 ms interval)
 - Ctrl-C flag for synchronous interrupt
 
 # IRB on Harucom
+
+- Multiline input via Reline-like LineEditor
+- Sandbox isolates user code; Ctrl-C safely interrupts
 
 ```ruby
 loop do
@@ -614,60 +635,71 @@ loop do
 end
 ```
 
-# Sandbox and Ctrl-C
+# Drawing API
 
-- IRB reads key queue while sandbox runs
-- Ctrl-C -> sandbox.stop to halt execution
+**DVI::Graphics**: low-level drawing primitives
+- set_pixel / get_pixel, fill, commit
+- set_blend_mode, set_alpha
 
-```ruby
-def wait_sandbox(sandbox)
-  while sandbox.state != :DORMANT
-    c = @keyboard.read_char
-    if c == Keyboard::CTRL_C
-      sandbox.stop
-      return
-    end
-    sleep_ms 5
-  end
-end
-```
-
+**P5**: wraps DVI::Graphics with Processing / p5.rb API
+- Shapes: rect, circle, line, triangle, arc, bezier, text
+- Transforms: translate, rotate, scale, push/pop_matrix
+- State: fill, stroke, stroke_weight, blend_mode
 
 # P5: Processing-like API
 
 ```ruby
-p5 = P5.new
-p5.background(0x00)
-p5.fill(0xE0)
-p5.circle(320, 240, 100)
-p5.commit
+p5.background(0x24)
+p5.stroke(0xE0)
+p5.no_fill
+p5.push_matrix
+p5.translate(320, 200)
+t = DVI.frame_count * 0.02
+i = 0
+while i < 20
+  p5.rotate(0.2 + Math.sin(t) * 0.1)
+  p5.scale(0.9, 0.9)
+  p5.rect(-80, -80, 160, 160)
+  i += 1
+end
+p5.pop_matrix
 ```
 
-{::wait/}
+# demo
 
-- rect, circle, line, text
-- Affine transforms, blend modes
-- 640x480 double-buffered rendering
+```p5
+p5.background(0x24)
+p5.stroke(0xE0)
+p5.no_fill
+p5.push_matrix
+p5.translate(320, 200)
+t = DVI.frame_count * 0.02
+i = 0
+while i < 20
+  p5.rotate(0.2 + Math.sin(t) * 0.1)
+  p5.scale(0.9, 0.9)
+  p5.rect(-80, -80, 160, 160)
+  i += 1
+end
+p5.pop_matrix
+```
 
 # Everything is Ruby
 
-- Keyboard input: Ruby
-- Console: Ruby
-- IRB: Ruby
-- Editor: Ruby
-- This presentation: Ruby
-
-{::wait/}
-
-**mruby is powerful enough to build
-a complete computing experience**
+- Console and LineEditor with Ruby syntax highlight
+- Japanese input (SKK, T-Code)
+- IRB
+- Text editor
+- Graphics library
+- And this presentation
 
 # Future plans
 
-- Reduce hardware cost for mass podcution
-- MIPI DSI display support
-- HD (720p) での出力をサポートする
--
+- Reduce hardware cost for mass production
+- MIPI DSI support for mobile display panels
+- HD (720p) output
+- Keep PicoRuby in sync with upstream
+- Contribute back to mruby
 
 **Open source hardware and software**
 GitHub:
@@ -679,6 +711,11 @@ GitHub:
 More details:
 - https://harucom.org/
 
+GitHub:
+- harukasan/harucom-os
+- harukasan/harucom-board
 
-- GitHub: harukasan/harucom-os
-- @harukasan
+Social networks:
+- X (formerly Twitter): @harukasan
+- Discord: @harukasan
+- Blog: https://harukasan.dev/

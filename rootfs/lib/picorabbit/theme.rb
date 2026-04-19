@@ -344,7 +344,7 @@ module PicoRabbit
     def bold_font; G::FONT_INTER_BOLD_18; end
     def inline_code_font; G::FONT_SOURCE_CODE_PRO_18; end
     def inline_code_font_ascent; 12; end
-    def code_font; G::FONT_SOURCE_CODE_PRO_18; end
+    def code_font; G::FONT_SOURCE_CODE_PRO_14; end
     def code_font_height; G.font_height(code_font); end
     def footer_font; G::FONT_FIXED_5X7; end
     def footer_font_height; G.font_height(footer_font); end
