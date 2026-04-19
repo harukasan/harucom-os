@@ -14,6 +14,13 @@ end
 # malformed file is non-fatal; ENV simply stays unpopulated.
 require "env"
 require "yaml"
+
+# VFS.sanitize resolves relative paths against ENV["PWD"]. VFS.mount sets
+# PWD only when it is already non-empty, so on fresh boot PWD is unset and
+# Dir.pwd falls back to ENV_DEFAULT_HOME ("/home") which does not exist.
+# Anchor PWD to root here so relative paths work from the first command.
+ENV["PWD"] = "/"
+
 begin
   env = YAML.load_file("/etc/env.yml")
   if env.is_a?(Hash)
