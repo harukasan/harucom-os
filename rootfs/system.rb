@@ -73,8 +73,14 @@ Task.new(name: "keyboard") do
 end
 
 require "irb"
-begin
-  IRB.new(console: $console, keyboard: $keyboard, line_editor: line_editor).start
-rescue Exception => e
-  puts "IRB error: #{e.message} (#{e.class})"
+# IRB is the board's single long-running foreground session. Exit and any
+# unhandled error should leave the user at a fresh prompt rather than a
+# dead console, so restart IRB in a loop.
+loop do
+  begin
+    IRB.new(console: $console, keyboard: $keyboard, line_editor: line_editor).start
+  rescue Exception => e
+    puts "IRB error: #{e.message} (#{e.class})"
+    sleep_ms 1000
+  end
 end
