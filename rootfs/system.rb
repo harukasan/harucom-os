@@ -41,14 +41,15 @@ require "line_editor"
 require "keyboard_input"
 require "ruby_syntax"
 
-# Install keyboard layout selected via ENV["KEYBOARD_LAYOUT"]. Fall back to
-# US on unknown/missing values so input still works.
+# Install keyboard layout selected via ENV["KEYBOARD_LAYOUT"]. Layouts are
+# bundled in the picoruby-keyboard-input mrbgem as pre-compiled bytecode;
+# loading them at runtime from /lib/keymap/*.rb parsed ~140 string
+# literals inline with USB enumeration, which raced the mruby allocator
+# and intermittently corrupted the heap.
 layout = ENV["KEYBOARD_LAYOUT"] || "us"
-begin
-  require "keymap/#{layout}"
-rescue LoadError
+unless Keyboard.use_layout(layout)
   puts "unknown keyboard layout '#{layout}', falling back to us"
-  require "keymap/us"
+  Keyboard.use_layout("us")
 end
 
 # Set up DVI as standard output (mirrored to UART internally)

@@ -40,16 +40,152 @@ class Keyboard
     i += 1
   end
 
-  # HID keycode -> character tables, loaded at boot from /lib/keymap/*.rb.
-  # Empty until Keyboard.set_keymap is called.
+  # HID keycode -> character tables. Populated by Keyboard.use_layout or
+  # Keyboard.set_keymap at boot. The built-in tables below live in mrblib
+  # (pre-compiled to bytecode) so boot does not pay for a literal-heavy
+  # runtime parse, which can race with USB enumeration and corrupt the
+  # mruby heap.
   @@normal_map = []
   @@shifted_map = []
+
+  # Built-in US ANSI layout
+  LAYOUT_US_NORMAL = [
+    #0x00  0x01  0x02  0x03
+    nil,  nil,  nil,  nil,
+    #0x04  0x05  0x06  0x07  0x08  0x09  0x0A  0x0B  0x0C  0x0D
+    "a",  "b",  "c",  "d",  "e",  "f",  "g",  "h",  "i",  "j",
+    #0x0E  0x0F  0x10  0x11  0x12  0x13  0x14  0x15  0x16  0x17
+    "k",  "l",  "m",  "n",  "o",  "p",  "q",  "r",  "s",  "t",
+    #0x18  0x19  0x1A  0x1B  0x1C  0x1D
+    "u",  "v",  "w",  "x",  "y",  "z",
+    #0x1E  0x1F  0x20  0x21  0x22  0x23  0x24  0x25  0x26  0x27
+    "1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "0",
+    #0x28  0x29  0x2A  0x2B  (special keys, handled by KEYCODE_TO_NAME)
+    nil,  nil,  nil,  nil,
+    #0x2C  0x2D  0x2E  0x2F  0x30  0x31
+    " ",  "-",  "=",  "[",  "]",  "\\",
+    #0x32  0x33  0x34  0x35  0x36  0x37  0x38
+    "#",  ";",  "'",  "`",  ",",  ".",  "/",
+    #0x39..0x53
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil,
+    #0x54  0x55  0x56  0x57 (numpad operators)
+    "/",  "*",  "-",  "+",
+    #0x58 (numpad Enter)
+    nil,
+    #0x59..0x62 (numpad digits)
+    "1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "0",
+    #0x63 numpad dot
+    ".",
+    #0x64  0x65  0x66  0x67
+    nil,  nil,  nil,  "=",
+  ]
+
+  LAYOUT_US_SHIFTED = [
+    nil,  nil,  nil,  nil,
+    "A",  "B",  "C",  "D",  "E",  "F",  "G",  "H",  "I",  "J",
+    "K",  "L",  "M",  "N",  "O",  "P",  "Q",  "R",  "S",  "T",
+    "U",  "V",  "W",  "X",  "Y",  "Z",
+    "!",  "@",  "#",  "$",  "%",  "^",  "&",  "*",  "(",  ")",
+    nil,  nil,  nil,  nil,
+    " ",  "_",  "+",  "{",  "}",  "|",
+    "~",  ":",  "\"", "~",  "<",  ">",  "?",
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil,
+    "/",  "*",  "-",  "+",
+    nil,
+    nil,  nil,  nil,  nil,  "5",  nil,  nil,  nil,  nil,  nil,
+    nil,
+    nil,  nil,  nil,  "=",
+  ]
+
+  # Built-in JIS layout. Differs from US in the symbol row, bracket/backslash
+  # keys, and adds JIS-specific 0x87 (ろ/\_) and 0x89 (¥/|). 0x35, 0x88, 0x8A,
+  # 0x8B are IME/toggle keys with no character.
+  LAYOUT_JIS_NORMAL = [
+    nil,  nil,  nil,  nil,
+    "a",  "b",  "c",  "d",  "e",  "f",  "g",  "h",  "i",  "j",
+    "k",  "l",  "m",  "n",  "o",  "p",  "q",  "r",  "s",  "t",
+    "u",  "v",  "w",  "x",  "y",  "z",
+    "1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "0",
+    nil,  nil,  nil,  nil,
+    " ",  "-",  "^",  "@",  "[",  "]",
+    nil,
+    ";",  ":",  nil,  ",",  ".",  "/",
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil,
+    "/",  "*",  "-",  "+",
+    nil,
+    "1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "0",
+    ".",
+    nil,  nil,  nil,  "=",
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil,
+    "\\",  # 0x87 ろ / \_
+    nil,   # 0x88 カタカナ/ひらがな
+    "\\",  # 0x89 ¥ / |
+    nil,   # 0x8A 変換
+    nil,   # 0x8B 無変換
+  ]
+
+  LAYOUT_JIS_SHIFTED = [
+    nil,  nil,  nil,  nil,
+    "A",  "B",  "C",  "D",  "E",  "F",  "G",  "H",  "I",  "J",
+    "K",  "L",  "M",  "N",  "O",  "P",  "Q",  "R",  "S",  "T",
+    "U",  "V",  "W",  "X",  "Y",  "Z",
+    "!",  "\"", "#",  "$",  "%",  "&",  "'",  "(",  ")",  nil,
+    nil,  nil,  nil,  nil,
+    " ",  "=",  "~",  "`",  "{",  "}",
+    nil,
+    "+",  "*",  nil,  "<",  ">",  "?",
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil,
+    "/",  "*",  "-",  "+",
+    nil,
+    nil,  nil,  nil,  nil,  "5",  nil,  nil,  nil,  nil,  nil,
+    nil,
+    nil,  nil,  nil,  "=",
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil, nil,
+    nil, nil, nil, nil, nil, nil, nil,
+    "_",   # 0x87
+    nil,
+    "|",   # 0x89
+    nil,
+    nil,
+  ]
 
   # Install keymap tables (layout-specific). Each argument is an Array indexed
   # by HID keycode; entries outside the array bound are treated as unmapped.
   def self.set_keymap(normal:, shifted:)
     @@normal_map = normal
     @@shifted_map = shifted
+  end
+
+  # Select a built-in layout by name. Returns true on success, false if the
+  # layout is unknown (caller can fall back).
+  def self.use_layout(name)
+    case name.to_s
+    when "us"
+      set_keymap(normal: LAYOUT_US_NORMAL, shifted: LAYOUT_US_SHIFTED)
+      true
+    when "jis"
+      set_keymap(normal: LAYOUT_JIS_NORMAL, shifted: LAYOUT_JIS_SHIFTED)
+      true
+    else
+      false
+    end
   end
 
   def self.normal_map;  @@normal_map;  end
