@@ -197,52 +197,20 @@ XIP memory window 1 is **read-only by default** (RP2350 datasheet §4.4.5,
 XIP_CTRL.WRITABLE_M1). Without this bit set, writes to PSRAM are silently
 dropped and the XIP cache may return stale data.
 
-### Step 6: Hide CS1 from the bootrom
+## Initialization order
 
-After ATRANS and pads are programmed, `setup_psram` sets
-`flash_devinfo.CS1_SIZE` back to `FLASH_DEVINFO_SIZE_NONE`. This routes
-all subsequent `flash_range_program` / `flash_range_erase` calls through
-pico-sdk's Case 1 restore path. See [Interaction with flash
-program/erase](#interaction-with-flash-programerase) for why.
-
-## Interaction with flash program/erase
-
-`pico-sdk`'s flash functions read `flash_devinfo.CS1_SIZE` to decide how
-to restore QMI window 1 after the ROM XIP exit sequence. The relevant
-function is `flash_rp2350_restore_qmi_cs1` in
-[pico-sdk hardware_flash/flash.c](../lib/pico-sdk/src/rp2_common/hardware_flash/flash.c)
-(added in [pico-sdk PR
-\#2082](https://github.com/raspberrypi/pico-sdk/pull/2082)).
-
-- **Case 1 — `CS1_SIZE == NONE`**: the ROM does not issue an XIP exit
-  sequence to CS1, so the PSRAM device stays in QPI mode. The SDK
-  restores `m[1].timing`, `rcmd`, and `rfmt` verbatim from the saved
-  state; `wfmt` and `wcmd` are untouched. PSRAM stays fully usable.
-- **Case 2 — `CS1_SIZE != NONE`**: the ROM issues an XIP exit sequence
-  to CS1 and returns the PSRAM to serial command state. The SDK only
-  resets `wfmt`/`wcmd` to 02h single-SPI defaults and does not restore
-  `timing`, `rcmd`, or `rfmt`. On this board (372 MHz sys_clk) the ROM's
-  default timing is too aggressive and PSRAM reads return garbage,
-  which is fatal to the mruby heap that lives there. [pico-sdk PR
-  \#2082](https://github.com/raspberrypi/pico-sdk/pull/2082) notes that
-  users in Case 2 must reinitialise CS1 in their boot2 XIP setup
-  function, which the default boot2 does not do.
-
-This driver therefore advertises CS1 only long enough for
-`rom_connect_internal_flash` to set up ATRANS and the GPIO 0 pad, then
-hides it again. [SparkFun's sfe_psram](https://github.com/sparkfun/sparkfun-pico/blob/main/sparkfun_pico/sfe_psram.c)
-and CircuitPython's RP2 port run permanently in Case 1 for the same
-reason.
-
-Pico-sdk 2.2 already handles the other two RP2350 PSRAM pitfalls:
-
-- RP2350-E11 XIP cache tag corruption during clean-by-set/way. The
-  `xip_cache_clean_all` called by `flash_range_program` uses the
-  tag-poison workaround at an address outside the QMI range (see
-  [xip_cache.c](../lib/pico-sdk/src/rp2_common/hardware_xip_cache/xip_cache.c)).
-- QSPI pad state clobbering ([pico-sdk issue
-  \#2333](https://github.com/raspberrypi/pico-sdk/issues/2333)). The
-  flash functions save and restore all of `pads_qspi_hw->io[0..5]`.
+[init_rootfs](../src/init_rootfs.c) runs before `psram_init` in
+[src/main.c](../src/main.c). `pico-sdk`'s `flash_range_program` /
+`flash_range_erase` send an XIP exit sequence to every chip select
+advertised via `flash_devinfo`, which puts an already-initialized PSRAM
+back into serial command state and clobbers QMI M1 write registers (see
+`flash_rp2350_restore_qmi_cs1` "Case 2" in
+[pico-sdk flash.c](../lib/pico-sdk/src/rp2_common/hardware_flash/flash.c)).
+Running `init_rootfs` first keeps CS1 unadvertised during the deployment
+flash writes, so the ROM does not disturb the PSRAM interface that
+`psram_init` configures immediately afterwards. Runtime flash writes
+(for example when Ruby code writes files through LittleFS) re-enter that
+hazard and would need separate handling.
 
 ## Permanent configuration via OTP
 

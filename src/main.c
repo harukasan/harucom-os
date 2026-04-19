@@ -239,6 +239,23 @@ static void harucom_main(void) {
 
     printf("Harucom OS %s (built %s)\n", HARUCOM_VERSION, HARUCOM_BUILD_DATE);
 
+    /* Initialize root filesystem before PSRAM.
+     * pico-sdk's flash_range_program issues an XIP exit sequence to every
+     * chip select declared in flash_devinfo; once psram_init advertises
+     * CS1, the ROM puts the PSRAM device back into serial command state
+     * on every subsequent flash write and leaves QMI M1 write registers
+     * on single-SPI defaults, corrupting the mruby heap. Deploying the
+     * rootfs first keeps CS1 unadvertised during the initial burst of
+     * flash writes.
+     * Also note: flash programming requires exclusive XIP access, which
+     * conflicts with DVI scanline rendering on core 1, so this must also
+     * complete before core 1 is launched. */
+    uint64_t rootfs_t0 = time_us_64();
+    init_rootfs();
+    uint64_t rootfs_t1 = time_us_64();
+    printf("init_rootfs: %llu us\n",
+           (unsigned long long)(rootfs_t1 - rootfs_t0));
+
     /* Initialize PSRAM */
     size_t heap_size;
     void *heap_pool = psram_init(&heap_size);
@@ -256,15 +273,6 @@ static void harucom_main(void) {
     heap_size_g = heap_size - fb_size;
     printf("Graphics back buffer: %u bytes at %p\n", (unsigned)fb_size, heap_pool);
     printf("mruby heap: %u bytes at %p\n", (unsigned)heap_size_g, heap_pool_g);
-
-    /* Initialize root filesystem before launching DVI on core 1.
-     * Flash programming requires exclusive XIP access, which conflicts
-     * with DVI scanline rendering on core 1. */
-    uint64_t rootfs_t0 = time_us_64();
-    init_rootfs();
-    uint64_t rootfs_t1 = time_us_64();
-    printf("init_rootfs: %llu us\n",
-           (unsigned long long)(rootfs_t1 - rootfs_t0));
 
     /* Set up text mode fonts before launching DVI on core 1.
      * Font data must be configured before dvi_start_mode() because the
