@@ -167,9 +167,15 @@ module PicoRabbit
         current_elements << Element.new(:text, line.strip)
       end
 
-      # Close any unclosed code block
-      if in_code_block && code_lines.length > 0
-        current_elements << Element.new(code_block_type, code_lines)
+      # Surface an unterminated code block instead of silently swallowing
+      # the rest of the file. The error element renders via the theme's
+      # render_error path so it is visible during the presentation.
+      if in_code_block
+        lang = code_block_type == :p5_code ? "p5" : (code_block_type == :p5_setup ? "p5_setup" : "code")
+        current_elements << Element.new(:error, "[parse] unclosed ```#{lang} code block at end of file")
+        if code_lines.length > 0
+          current_elements << Element.new(code_block_type, code_lines)
+        end
       end
 
       # Save last slide

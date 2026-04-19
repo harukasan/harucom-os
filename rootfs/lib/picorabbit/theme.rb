@@ -138,10 +138,18 @@ module PicoRabbit
       when :blockquote
         render_blockquote(p5, element.text, x, y)
       when :image
-        bmp = load_image(element.text)
-        ix = align_image_x(element, bmp.width, x)
-        p5.image_masked(bmp.data, bmp.mask, ix, y, bmp.width, bmp.height)
-        y + bmp.height + leading
+        begin
+          bmp = load_image(element.text)
+          ix = align_image_x(element, bmp.width, x)
+          p5.image_masked(bmp.data, bmp.mask, ix, y, bmp.width, bmp.height)
+          y + bmp.height + leading
+        rescue => e
+          render_error(p5, "[image] #{element.text}: #{e.class}: #{e.message}", y)
+          y + body_font_height + leading
+        end
+      when :error
+        render_error(p5, element.text, y)
+        y + body_font_height + leading
       when :code_block
         render_code_block(p5, element.text, x, y)
       when :p5_setup
@@ -286,11 +294,10 @@ module PicoRabbit
       RUBY
       if @p5_last_code != code
         @p5_last_code = code
+        @p5_sandbox&.terminate
         @p5_sandbox = Sandbox.new("p5_draw")
         unless @p5_sandbox.compile(code)
-          msg = "[p5] compile error"
-          puts msg
-          render_p5_error(p5, msg, y)
+          render_error(p5, "[p5] compile error (check syntax in the code block)", y)
           return y
         end
         @p5_sandbox.execute
@@ -299,15 +306,13 @@ module PicoRabbit
       end
       @p5_sandbox.wait
       if (err = @p5_sandbox.error)
-        msg = "[p5] #{err.class}: #{err.message}"
-        puts msg
-        render_p5_error(p5, msg, y)
+        render_error(p5, "[p5] #{err.class}: #{err.message}", y)
       end
       @p5_setup_lines = nil
       y
     end
 
-    def render_p5_error(p5, msg, y)
+    def render_error(p5, msg, y)
       p5.text_font(G::FONT_MPLUS_12)
       p5.text_color(0xE0)
       p5.text_align(:left)
