@@ -12,7 +12,14 @@ COLS = T::COLS
 def wait_key(kb)
   loop do
     c = kb.read_char
-    return c if c
+    if c
+      if c == Keyboard::CTRL_C || c == Keyboard::ESCAPE
+        T.clear(0xF0)
+        T.commit
+        exit
+      end
+      return c
+    end
     T.commit
   end
 end

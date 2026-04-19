@@ -73,6 +73,7 @@ loop do
   if key == Keyboard::CTRL_C || key == Keyboard::ESCAPE
     audio.deinit
     DVI::Text.clear(0xF0)
+    DVI::Text.commit
     return
   end
 

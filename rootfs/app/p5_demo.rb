@@ -1,8 +1,7 @@
-# P5 drawing library test
+# P5 drawing library demo
 #
-# Exercises: P5 API (background, fill, stroke, no_fill, no_stroke,
-#            rect, line, point, text, color, set_pixel, commit)
-#
+# Walks through the P5 API (background, fill, stroke, no_fill, no_stroke,
+# rect, line, point, text, color, set_pixel, commit, transforms, ...).
 # Each step waits for a keypress so you can visually verify the result.
 
 require "p5"
@@ -12,7 +11,10 @@ keyboard = $keyboard
 def wait_key(kb)
   loop do
     c = kb.read_char
-    return c if c
+    if c
+      exit if c == Keyboard::CTRL_C || c == Keyboard::ESCAPE
+      return c
+    end
     DVI::Graphics.commit
   end
 end
@@ -32,7 +34,7 @@ end
 p5.background(0x00)
 p5.text_font(G::FONT_MPLUS_12)
 p5.text_color(0xFF)
-p5.text("P5 Drawing Library Test", 10, 10)
+p5.text("P5 Drawing Library Demo", 10, 10)
 p5.text_color(0xE0)
 p5.text("Hello, Harucom!", 10, 26)
 p5.text_font(G::FONT_MPLUS_12, G::FONT_MPLUS_J12)
@@ -454,7 +456,7 @@ p5.stroke(p5.color(255, 255, 0))
 p5.rect(340, 280, 260, 140)
 p5.text_font(G::FONT_SPLEEN_12X24)
 p5.text_color(0xFF)
-p5.text("P5 Combined Test", 10, 10)
+p5.text("P5 Combined Demo", 10, 10)
 p5.text_font(G::FONT_MPLUS_12, G::FONT_MPLUS_J12)
 p5.text_color(0xFF)
 p5.text("fill+stroke", 50, 140)
@@ -466,5 +468,5 @@ show_step(p5, "combined scene", 23, keyboard)
 # Restore text mode
 DVI.set_mode(DVI::TEXT_MODE)
 DVI::Text.clear(0xF0)
-DVI::Text.put_string(0, 0, "P5 test complete!", 0x2F)
+DVI::Text.put_string(0, 0, "P5 demo complete!", 0x2F)
 DVI::Text.commit

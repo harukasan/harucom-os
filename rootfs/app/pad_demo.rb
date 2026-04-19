@@ -50,8 +50,8 @@ loop do
   # Check for quit
   key = keyboard.read_char
   if key == Keyboard::CTRL_C || key == Keyboard::ESCAPE
-    DVI.set_mode(DVI::TEXT_MODE)
     DVI::Text.clear(0xF0)
+    DVI::Text.commit
     return
   end
 
