@@ -197,6 +197,21 @@ XIP memory window 1 is **read-only by default** (RP2350 datasheet §4.4.5,
 XIP_CTRL.WRITABLE_M1). Without this bit set, writes to PSRAM are silently
 dropped and the XIP cache may return stale data.
 
+## Initialization order
+
+[init_rootfs](../src/init_rootfs.c) runs before `psram_init` in
+[src/main.c](../src/main.c). `pico-sdk`'s `flash_range_program` /
+`flash_range_erase` send an XIP exit sequence to every chip select
+advertised via `flash_devinfo`, which puts an already-initialized PSRAM
+back into serial command state and clobbers QMI M1 write registers (see
+`flash_rp2350_restore_qmi_cs1` "Case 2" in
+[pico-sdk flash.c](../lib/pico-sdk/src/rp2_common/hardware_flash/flash.c)).
+Running `init_rootfs` first keeps CS1 unadvertised during the deployment
+flash writes, so the ROM does not disturb the PSRAM interface that
+`psram_init` configures immediately afterwards. Runtime flash writes
+(for example when Ruby code writes files through LittleFS) re-enter that
+hazard and would need separate handling.
+
 ## Permanent configuration via OTP
 
 As an alternative to the runtime API, OTP can be programmed so the bootrom
