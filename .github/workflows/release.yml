@@ -34,8 +34,22 @@ jobs:
       - name: Install Ruby gems
         run: gem install rake freetype
 
-      - name: Build combined UF2 (firmware + dictionary)
-        run: rake
+      - name: Configure CMake
+        run: cmake -B ${{ github.workspace }}/build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build firmware
+        run: cmake --build ${{ github.workspace }}/build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Build dictionary UF2
+        run: rake uf2
+        working-directory: vendor/harucom-os-dict
+
+      - name: Merge firmware and dictionary UF2
+        run: |
+          ruby scripts/merge_uf2.rb \
+            -o build/harucom_os_full.uf2 \
+            build/harucom_os.uf2 \
+            vendor/harucom-os-dict/build/dict.uf2
 
       - name: Package release archives
         run: |
