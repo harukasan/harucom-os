@@ -1,10 +1,11 @@
 # Bundler is convenient for local development (ensures the Gemfile gems
 # are on the load path) but not required — CI may install gems globally
-# via `gem install`. Treat its absence as a no-op so the Rakefile works
-# either way.
+# via `gem install`. LoadError covers "bundler not installed", and
+# StandardError covers Bundler::GemNotFound when the Gemfile.lock refers
+# to a gem that isn't in the bundle (e.g. ffi on a gem-install-only CI).
 begin
   require "bundler/setup"
-rescue LoadError
+rescue LoadError, StandardError
 end
 
 PROJECT_DIR = __dir__
