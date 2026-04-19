@@ -37,13 +37,15 @@ DVI::Graphics.set_resolution(640, 480)
 
 renderer = PicoRabbit::Renderer.new(p5, theme, timer: timer, metadata: result.metadata)
 
-PicoRabbit::Presenter.new(
-  slides: result.slides,
-  renderer: renderer,
-  keyboard: $keyboard,
-  timer: timer
-).start
-
-DVI.set_mode(DVI::TEXT_MODE)
-DVI::Text.clear(0xF0)
-DVI::Text.commit
+begin
+  PicoRabbit::Presenter.new(
+    slides: result.slides,
+    renderer: renderer,
+    keyboard: $keyboard,
+    timer: timer
+  ).start
+ensure
+  DVI.set_mode(DVI::TEXT_MODE)
+  DVI::Text.clear(0xF0)
+  DVI::Text.commit
+end
