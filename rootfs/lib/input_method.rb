@@ -80,6 +80,30 @@ class InputMethod
       return :consumed
     end
 
+    # JIS 半角/全角: toggle the active IME between off and SKK hiragana.
+    # Follows the conventional behavior of the key on a JIS keyboard.
+    if key.match?(:zenkaku)
+      if @engine
+        set_engine(nil) unless @registering
+      else
+        set_engine(:skk)
+      end
+      return :consumed
+    end
+
+    # JIS カタカナ/ひらがな: cycle SKK base modes
+    # (ひらがな → カタカナ → 全角英字 → ひらがな). If SKK is not yet
+    # active, activate it in hiragana so the key also doubles as a soft
+    # enable.
+    if key.match?(:katakana_hiragana)
+      if @engine_name == :skk
+        @engine.cycle_mode(self)
+      else
+        set_engine(:skk)
+      end
+      return :consumed
+    end
+
     # Ctrl-\: cycle input methods (nil -> :skk -> :tcode -> nil)
     if key.ctrl? && key.name.to_s == "\\"
       cycle_engine

@@ -48,6 +48,19 @@ class Keyboard
   @@normal_map = []
   @@shifted_map = []
 
+  # Layout-specific name overrides for keycodes that differ from the global
+  # KEYCODE_TO_NAME mapping. Used by JIS for 半角/全角, 変換, 無変換, etc.,
+  # which share HID codes with US grave/backtick but produce no character.
+  @@special_names = {}
+
+  # JIS IME-related keys. Not part of the US layout.
+  LAYOUT_JIS_SPECIAL_NAMES = {
+    0x35 => :zenkaku,           # 半角/全角
+    0x88 => :katakana_hiragana, # カタカナ/ひらがな
+    0x8A => :henkan,            # 変換
+    0x8B => :muhenkan,          # 無変換
+  }
+
   # Built-in US ANSI layout
   LAYOUT_US_NORMAL = [
     #0x00  0x01  0x02  0x03
@@ -168,9 +181,12 @@ class Keyboard
 
   # Install keymap tables (layout-specific). Each argument is an Array indexed
   # by HID keycode; entries outside the array bound are treated as unmapped.
-  def self.set_keymap(normal:, shifted:)
+  # `special_names` is an optional Hash mapping keycodes to Symbol names for
+  # layout-specific keys that produce no character (e.g., JIS 半角/全角).
+  def self.set_keymap(normal:, shifted:, special_names: {})
     @@normal_map = normal
     @@shifted_map = shifted
+    @@special_names = special_names
   end
 
   # Select a built-in layout by name. Returns true on success, false if the
@@ -181,15 +197,17 @@ class Keyboard
       set_keymap(normal: LAYOUT_US_NORMAL, shifted: LAYOUT_US_SHIFTED)
       true
     when "jis"
-      set_keymap(normal: LAYOUT_JIS_NORMAL, shifted: LAYOUT_JIS_SHIFTED)
+      set_keymap(normal: LAYOUT_JIS_NORMAL, shifted: LAYOUT_JIS_SHIFTED,
+                 special_names: LAYOUT_JIS_SPECIAL_NAMES)
       true
     else
       false
     end
   end
 
-  def self.normal_map;  @@normal_map;  end
-  def self.shifted_map; @@shifted_map; end
+  def self.normal_map;    @@normal_map;    end
+  def self.shifted_map;   @@shifted_map;   end
+  def self.special_names; @@special_names; end
 
   # Flyweight cache for Key instances (shared across all Keyboard instances).
   # Ensures object identity for case/when matching.
@@ -322,6 +340,13 @@ class Keyboard
     # Numpad Enter
     if keycode == 0x58
       return Key.new(:enter, nil, ctrl: is_ctrl, shift: is_shift, alt: is_alt, super_key: is_super)
+    end
+
+    # Layout-specific special keys (e.g., JIS 半角/全角). Checked before the
+    # global KEYCODE_TO_NAME so a layout can override the default name.
+    name = Keyboard.special_names[keycode]
+    if name
+      return Key.new(name, nil, ctrl: is_ctrl, shift: is_shift, alt: is_alt, super_key: is_super)
     end
 
     # Special keys

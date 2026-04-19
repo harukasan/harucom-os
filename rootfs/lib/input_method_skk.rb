@@ -114,6 +114,21 @@ class InputMethod
       true
     end
 
+    # Cycle base input modes: ひらがな → カタカナ → 全角英字 → ひらがな.
+    # When in a conversion state (:kanji, :candidate), first commits the
+    # pending reading so the mode change is not silently destructive.
+    def cycle_mode(im)
+      reset(im) if @mode == :kanji || @mode == :candidate
+      flush_n(im) if @mode == :hiragana || @mode == :katakana
+      @mode = case @mode
+              when :hiragana then :katakana
+              when :katakana then :zenkaku
+              when :zenkaku  then :hiragana
+              else :hiragana
+              end
+      im.set_preedit("")
+    end
+
     def reset(im)
       if @romaji.bytesize > 0
         im.commit(@romaji)

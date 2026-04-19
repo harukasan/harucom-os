@@ -78,13 +78,22 @@ when Keyboard.key(:f, ctrl: true)
 end
 ```
 
-#### Keyboard.set\_keymap(normal:, shifted:)
+#### Keyboard.use\_layout(name) -> bool
+
+Selects a built-in keyboard layout by name. Supported values are `"us"`
+(US ANSI) and `"jis"` (Japanese). Returns `true` if the layout was
+installed, `false` for an unknown name so the caller can fall back.
+`/system.rb` calls this at boot with `ENV["KEYBOARD_LAYOUT"]`.
+
+#### Keyboard.set\_keymap(normal:, shifted:, special\_names: {})
 
 Installs the HID keycode to character translation tables used by
 `poll`. Both `normal:` and `shifted:` are Arrays indexed by HID
 keycode; entries outside the array bound are treated as unmapped
-(equivalent to `nil`). Called once at boot from a layout file under
-`/lib/keymap/` and is how layout selection is implemented.
+(equivalent to `nil`). `special_names:` is an optional Hash mapping
+keycodes to Symbol names for layout-specific keys that produce no
+character (see JIS). Called indirectly from `use_layout`, or directly
+by user code that wants to override the built-in layouts.
 
 ### Keyboard::Key
 
@@ -215,22 +224,38 @@ variable, loaded at boot from [/etc/env.yml](../rootfs/etc/env.yml):
 KEYBOARD_LAYOUT: us
 ```
 
-Supported values correspond to files in
-[/lib/keymap/](../rootfs/lib/keymap/):
+`/system.rb` passes the value to `Keyboard.use_layout`, which installs
+one of the built-in layouts bundled with the mrbgem:
 
-| Layout | File |
+| Layout | Description |
 |---|---|
-| `us` | [/lib/keymap/us.rb](../rootfs/lib/keymap/us.rb) |
-| `jis` | [/lib/keymap/jis.rb](../rootfs/lib/keymap/jis.rb) |
+| `us` | US ANSI |
+| `jis` | Japanese JIS |
 
-Each layout file calls `Keyboard.set_keymap` with two arrays indexed by
-HID keycode: one for unshifted characters and one for shifted. The
-arrays may be edited in place on flash to customize a layout. A missing
-or unknown `KEYBOARD_LAYOUT` value falls back to `us`.
+The layout tables live in the mrbgem's mrblib (pre-compiled to mruby
+bytecode) so that boot does not pay for a literal-heavy runtime parse.
+A missing or unknown `KEYBOARD_LAYOUT` value falls back to `us`.
 
-Layout files define only printable character mappings. Letter key
-identity (`:a` through `:z`) and special keys (Enter, Escape, arrows,
-etc.) are layout-independent and handled by `Keyboard` itself.
+Layout tables define only printable character mappings. Letter key
+identity (`:a` through `:z`) and common special keys (Enter, Escape,
+arrows, etc.) are layout-independent.
+
+### JIS-specific keys
+
+The JIS layout exposes the following keycodes as named keys that
+produce no character. They surface via `Key#name` so input methods and
+applications can bind behavior to them.
+
+| Keycode | Key | Name (Symbol) |
+|---|---|---|
+| 0x35 | 半角/全角 | `:zenkaku` |
+| 0x88 | カタカナ/ひらがな | `:katakana_hiragana` |
+| 0x8A | 変換 | `:henkan` |
+| 0x8B | 無変換 | `:muhenkan` |
+
+[rootfs/lib/input_method.rb](../rootfs/lib/input_method.rb) uses
+`:zenkaku` to toggle SKK on and off, and `:katakana_hiragana` to cycle
+SKK base modes (ひらがな → カタカナ → 全角英字 → ひらがな).
 
 ## Architecture
 
@@ -354,11 +379,9 @@ scheduler.
 
 - [mrbgems/picoruby-keyboard-input/](../mrbgems/picoruby-keyboard-input/)
   - [mrblib/key.rb](../mrbgems/picoruby-keyboard-input/mrblib/key.rb) (Keyboard::Key class)
-  - [mrblib/keyboard.rb](../mrbgems/picoruby-keyboard-input/mrblib/keyboard.rb) (Keyboard class, poll, read_char, key constants, set_keymap)
+  - [mrblib/keyboard.rb](../mrbgems/picoruby-keyboard-input/mrblib/keyboard.rb) (Keyboard class, poll, read_char, key constants, built-in US and JIS layout tables, set_keymap, use_layout)
   - [mrbgem.rake](../mrbgems/picoruby-keyboard-input/mrbgem.rake) (gem specification)
 - [rootfs/etc/env.yml](../rootfs/etc/env.yml) (layout selection via `KEYBOARD_LAYOUT`)
-- [rootfs/lib/keymap/us.rb](../rootfs/lib/keymap/us.rb) (US ANSI layout tables)
-- [rootfs/lib/keymap/jis.rb](../rootfs/lib/keymap/jis.rb) (JIS Japanese layout tables)
 
 ## References
 
