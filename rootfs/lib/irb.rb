@@ -48,7 +48,7 @@ class IRB
         elsif find_app(input.split[0])
           true
         else
-          @sandbox.compile("begin; _ = (#{input}\n); rescue => _; end; _")
+          @sandbox.compile("begin; _ = (#{input}\n); rescue Exception => _; end; _")
         end
       end
 
