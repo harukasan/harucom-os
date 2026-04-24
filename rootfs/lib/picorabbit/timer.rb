@@ -32,18 +32,18 @@ module PicoRabbit
       p5.rect(track_left, TRACK_Y, track_right - track_left, TRACK_HEIGHT)
       p5.no_fill
 
-      # Turtle position = slide progress
-      if @total_slides > 1
-        turtle_progress = slide_index.to_f / (@total_slides - 1)
-      else
-        turtle_progress = 0.0
-      end
+      # Turtle position = time progress
+      elapsed = Machine.board_millis - @start_ms
+      turtle_progress = elapsed.to_f / @allotted_ms
+      turtle_progress = 1.0 if turtle_progress > 1.0
       turtle_x = track_left + (turtle_progress * track_width).to_i
 
-      # Rabbit position = time progress
-      elapsed = Machine.board_millis - @start_ms
-      rabbit_progress = elapsed.to_f / @allotted_ms
-      rabbit_progress = 1.0 if rabbit_progress > 1.0
+      # Rabbit position = slide progress
+      if @total_slides > 1
+        rabbit_progress = slide_index.to_f / (@total_slides - 1)
+      else
+        rabbit_progress = 0.0
+      end
       rabbit_x = track_left + (rabbit_progress * track_width).to_i
 
       # Jump physics
