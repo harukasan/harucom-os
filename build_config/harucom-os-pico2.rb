@@ -50,6 +50,10 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.gem core: 'picoruby-io-console'
   conf.gem core: 'picoruby-editor'
   conf.gem core: 'picoruby-sandbox'
+  conf.gem core: 'picoruby-i2c'
+  conf.gem core: 'picoruby-vram'
+  conf.gem core: 'picoruby-terminus'
+  conf.gem core: 'picoruby-shinonome'
 
   conf.gem File.expand_path('../../mrbgems/picoruby-pwm-audio', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-dvi', __FILE__)

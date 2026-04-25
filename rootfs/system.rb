@@ -72,6 +72,53 @@ Task.new(name: "keyboard") do
   end
 end
 
+# --- Autoexec ---
+# Run /autoexec.rb at boot unless Ctrl-C is held during the grace window.
+# Lets the board boot directly into an app (e.g. a game) while keeping
+# Ctrl-C as the escape hatch back to IRB.
+AUTOEXEC_PATH = "/autoexec.rb"
+AUTOEXEC_DELAY_MS = 2000
+
+if File.exist?(AUTOEXEC_PATH)
+  puts
+  puts "Auto-running #{AUTOEXEC_PATH} in #{AUTOEXEC_DELAY_MS / 1000}s (Ctrl-C to cancel)..."
+  # Discard any Ctrl-C queued before the grace window opens.
+  $keyboard.ctrl_c_pressed?
+  cancelled = false
+  deadline = Machine.board_millis + AUTOEXEC_DELAY_MS
+  while Machine.board_millis < deadline
+    if $keyboard.ctrl_c_pressed?
+      cancelled = true
+      break
+    end
+    sleep_ms 20
+  end
+  if cancelled
+    puts "^C autoexec cancelled"
+  else
+    sandbox = Sandbox.new("autoexec")
+    begin
+      sandbox.load_file(AUTOEXEC_PATH, join: false)
+      # Mirror IRB#wait_app: poll the keyboard flag so Ctrl-C from USB
+      # stops autoexec. Machine.check_signal only sees UART/POSIX signals.
+      while sandbox.state != :DORMANT && sandbox.state != :SUSPENDED
+        if $keyboard.ctrl_c_pressed?
+          sandbox.stop
+          puts "^C"
+          break
+        end
+        sleep_ms 5
+      end
+      if (err = sandbox.error) && !err.is_a?(SystemExit)
+        puts "#{AUTOEXEC_PATH}: #{err.message} (#{err.class})"
+      end
+    ensure
+      sandbox.terminate
+      DVI.set_mode(DVI::TEXT_MODE) if defined?(DVI)
+    end
+  end
+end
+
 require "irb"
 # IRB is the board's single long-running foreground session. Exit and any
 # unhandled error should leave the user at a fresh prompt rather than a
