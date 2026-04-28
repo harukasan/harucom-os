@@ -44,6 +44,9 @@ a.k.a **Harukasan**
 BOOTH: a marketplace for creative endeavors
 Powered by Ruby on Rails
 
+![BOOTH QR code](/data/booth_qrcode.bmp)
+{:.center}
+
 {::wait/}
 
 We're hiring!
