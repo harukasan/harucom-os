@@ -21,20 +21,7 @@ DVI::Graphics.set_resolution(320, 240)
 p5 = P5.new
 keyboard = $keyboard
 
-if defined?(Board::PWMAudio)
-  audio = Board::PWMAudio.new
-else
-  class NullAudio
-    SQUARE = 0; SINE = 1; TRIANGLE = 2; SAWTOOTH = 3
-    def initialize(*); end
-    def tone(*); end
-    def stop(*); end
-    def stop_all; end
-    def update; end
-    def deinit; end
-  end
-  audio = NullAudio.new
-end
+audio = Board::PWMAudio.new
 
 W = p5.width
 H = p5.height
@@ -97,14 +84,6 @@ TOWER_RED  = p5.color(224,  64,   0)
 FUJI_NAVY  = p5.color( 64,  96, 128)
 RUBY_RED   = p5.color(224,   0,   0)
 RUBY_BLUSH = p5.color(240, 128, 128)
-# Shinkansen N700S palette
-SHIN_WHITE = p5.color(255, 255, 255)
-SHIN_BLUE  = p5.color( 32,  64, 192)
-SHIN_LBLUE = p5.color( 96, 128, 192)
-SHIN_DARK  = p5.color( 32,  32,  64)
-SHIN_GRAY  = p5.color(128, 128, 128)
-SHIN_SKIRT = p5.color( 96,  96, 128)
-SHIN_GLASS = p5.color( 32,  64, 128)
 
 # ===== Layout (320x240) =====
 LOCO_X    = 178
@@ -114,21 +93,6 @@ RAIL_Y    = 196
 HUD_H     = 18
 HORIZON_Y = 150
 GROUND_Y  = 156
-
-# ===== Shinkansen nose curve (precomputed quadratic taper) =====
-# Long aerodynamic nose: gradual taper at the body junction, steep near
-# the tip. Body height = 26 (roof_y = by-22, body_bot_y = by+4), so the
-# top/bottom offsets sum to 25 at the tip for a 1px point.
-SHIN_NOSE_LEN = 46
-SHIN_NOSE_TOP = []
-SHIN_NOSE_BOT = []
-sn_n = 0
-while sn_n < SHIN_NOSE_LEN
-  sn_t = (sn_n * 100) / (SHIN_NOSE_LEN - 1)
-  SHIN_NOSE_TOP << (sn_t * sn_t * 22) / 10000
-  SHIN_NOSE_BOT << (sn_t * sn_t * 3) / 10000
-  sn_n += 1
-end
 
 PHASE_COUNTDOWN_MS = 3_000
 PHASE_START_MS     = 1_500
@@ -1138,227 +1102,6 @@ def draw_locomotive(p5, base_x, base_y, wheel_phase, frame)
   draw_tender(p5, TENDER_X, by, wheel_phase)
 end
 
-# ===== Shinkansen (high-speed electric train, N700S-inspired) =====
-#
-# Long aerodynamic nose, white body with blue waist stripe, dark window
-# strip, pantograph on the roof, two bogies under the lead car plus a
-# glimpse of the next car behind.
-def draw_shinkansen_pantograph(p5, pan_x, roof_y)
-  pan_top_y = roof_y - 10
-  # Insulator bases on the roof
-  p5.fill(LOCO_LITE)
-  p5.rect(pan_x + 1, roof_y - 2, 1, 2)
-  p5.rect(pan_x + 8, roof_y - 2, 1, 2)
-  # Z-fold arms (lower / upper)
-  p5.rect(pan_x + 2, pan_top_y + 3, 1, 5)
-  p5.rect(pan_x + 7, pan_top_y + 3, 1, 5)
-  p5.rect(pan_x + 3, pan_top_y + 1, 1, 3)
-  p5.rect(pan_x + 6, pan_top_y + 1, 1, 3)
-  # Collector shoe (top bar)
-  p5.rect(pan_x, pan_top_y, 10, 1)
-  # Overhead contact wire
-  p5.fill(LOCO_DARKRED)
-  p5.rect(pan_x - 4, pan_top_y - 1, 18, 1)
-end
-
-def draw_shinkansen(p5, base_x, base_y, wheel_phase, frame)
-  bx = base_x
-  by = base_y
-
-  # The bullet train is long: the body extends off-screen to the left so
-  # it suggests a multi-car formation, and the aerodynamic nose stretches
-  # well to the right before tapering to a point near the rail level.
-  train_left = -32
-  body_right = bx + 0
-  nose_tip   = body_right + SHIN_NOSE_LEN
-
-  roof_y      = by - 22
-  win_top_y   = by - 14
-  win_bot_y   = by - 4
-  body_bot_y  = by + 4
-  skirt_bot_y = by + 18
-  car_w       = 56
-
-  p5.no_stroke
-
-  # === White main body extending across all visible cars ===
-  p5.fill(SHIN_WHITE)
-  p5.rect(train_left, roof_y, body_right - train_left, body_bot_y - roof_y)
-
-  # === Roof seam (thin darker top edge) ===
-  p5.fill(LOCO_LITE)
-  p5.rect(train_left, roof_y, body_right - train_left, 1)
-
-  # === Window strip background (dark band at window level) ===
-  p5.fill(SHIN_DARK)
-  p5.rect(train_left, win_top_y, body_right - train_left, win_bot_y - win_top_y)
-
-  # === Side windows and doors along all cars ===
-  # Doors are taller than windows and break the rhythm every ~6 windows.
-  wx = train_left + 4
-  idx = 0
-  while wx < body_right - 6
-    is_door = (idx % 6) == 5
-    if wx > -12 && wx < W + 12
-      if is_door
-        # Door frame (full body height)
-        p5.fill(SHIN_GRAY)
-        p5.rect(wx - 1, roof_y + 1, 1, body_bot_y - roof_y - 1)
-        p5.rect(wx + 4, roof_y + 1, 1, body_bot_y - roof_y - 1)
-        # Small door window at the top
-        p5.fill(SHIN_LBLUE)
-        p5.rect(wx, win_top_y + 2, 4, 4)
-      else
-        # Side window with thin frame on the right edge
-        p5.fill(SHIN_LBLUE)
-        p5.rect(wx, win_top_y + 1, 5, win_bot_y - win_top_y - 2)
-        p5.fill(SHIN_DARK)
-        p5.rect(wx + 5, win_top_y + 1, 1, win_bot_y - win_top_y - 2)
-      end
-    end
-    wx += is_door ? 6 : 7
-    idx += 1
-  end
-
-  # === Blue waist stripes (above and below the window band) ===
-  p5.fill(SHIN_BLUE)
-  p5.rect(train_left, win_top_y - 1, body_right - train_left, 1)
-  p5.rect(train_left, win_bot_y,     body_right - train_left, 1)
-
-  # === Inter-car seams (subtle gray vertical lines marking car edges) ===
-  cx = body_right - 36
-  while cx > train_left + 8
-    if cx > -2 && cx < W + 2
-      p5.fill(SHIN_GRAY)
-      p5.rect(cx, roof_y + 1, 1, body_bot_y - roof_y - 1)
-    end
-    cx -= car_w
-  end
-
-  # === Nose - long aerodynamic taper ===
-  i = 0
-  while i < SHIN_NOSE_LEN
-    top_off = SHIN_NOSE_TOP[i]
-    bot_off = SHIN_NOSE_BOT[i]
-    nx = body_right + i
-    nty = roof_y + top_off
-    nby = body_bot_y - bot_off
-    if nty < nby
-      p5.fill(SHIN_WHITE)
-      p5.rect(nx, nty, 1, nby - nty)
-      p5.fill(LOCO_LITE)
-      p5.rect(nx, nty, 1, 1)
-    end
-    i += 1
-  end
-
-  # === Blue stripe trails down the nose following the curve ===
-  i = 0
-  while i < SHIN_NOSE_LEN
-    top_off = SHIN_NOSE_TOP[i]
-    nx = body_right + i
-    sy = win_top_y - 1 + top_off * 5 / 6
-    if sy > roof_y + top_off + 1 && sy < body_bot_y - SHIN_NOSE_BOT[i] - 2
-      p5.fill(SHIN_BLUE)
-      p5.rect(nx, sy, 1, 1)
-    end
-    i += 1
-  end
-
-  # === Windshield (driver window in the nose) ===
-  p5.fill(SHIN_DARK)
-  p5.triangle(body_right, win_top_y, body_right + 18, win_top_y + 4, body_right, win_bot_y)
-  p5.fill(SHIN_GLASS)
-  p5.triangle(body_right + 1, win_top_y + 1, body_right + 14, win_top_y + 5, body_right + 1, win_bot_y - 1)
-
-  # === Headlights set into the lower nose where it still has room ===
-  hl_idx = SHIN_NOSE_LEN - 18
-  if hl_idx > 0 && hl_idx < SHIN_NOSE_LEN
-    hl_x = body_right + hl_idx
-    hl_y = body_bot_y - SHIN_NOSE_BOT[hl_idx] - 3
-    p5.fill(SHIN_DARK)
-    p5.rect(hl_x, hl_y - 1, 6, 3)
-    p5.fill(SUN_CORE)
-    p5.rect(hl_x, hl_y, 6, 1)
-    p5.fill(WINDOW_LIT)
-    p5.rect(hl_x + 1, hl_y, 4, 1)
-  end
-
-  # === Pantographs on every other car ===
-  pan_x = bx - 24
-  pcount = 0
-  while pan_x > train_left + 14 && pcount < 4
-    draw_shinkansen_pantograph(p5, pan_x, roof_y)
-    pan_x -= car_w * 2
-    pcount += 1
-  end
-
-  # === Skirt (full length under the body, hides the wheels) ===
-  p5.fill(SHIN_SKIRT)
-  p5.rect(train_left, body_bot_y, body_right - train_left, skirt_bot_y - body_bot_y)
-  # Skirt top edge (subtle darker line separating from the body)
-  p5.fill(SHIN_DARK)
-  p5.rect(train_left, body_bot_y, body_right - train_left, 1)
-  # Skirt continues into the nose, following the rising lower curve
-  i = 0
-  while i < SHIN_NOSE_LEN
-    bot_off = SHIN_NOSE_BOT[i]
-    nx = body_right + i
-    sk_top = body_bot_y - bot_off
-    sk_bot = skirt_bot_y - bot_off * 5
-    if sk_bot > sk_top
-      p5.fill(SHIN_SKIRT)
-      p5.rect(nx, sk_top, 1, sk_bot - sk_top)
-      p5.fill(SHIN_DARK)
-      p5.rect(nx, sk_top, 1, 1)
-    end
-    i += 1
-  end
-
-  # === Bogies and wheels (embedded behind the skirt) ===
-  # Bogies are positioned in pairs - one near each end of every car. The
-  # skirt above hides most of the wheel; only the bottom 3-4 px peek out.
-  bogie_y       = skirt_bot_y - 4    # wheel top sits inside the skirt
-  wheel_hint_y  = skirt_bot_y - 1    # where the visible wheel "shoe" starts
-  wheel_hint_h  = 4
-
-  spin = wheel_phase
-  # Bogie x positions: 2 per car, near the ends of each car
-  bog_x = body_right - 12
-  bp_i = 0
-  while bog_x > train_left + 4
-    if bog_x > -14 && bog_x < W + 14
-      # Wheel housing - small dark rectangle above the visible wheel bottom
-      p5.fill(LOCO_BLACK)
-      p5.rect(bog_x - 9, wheel_hint_y, 8, wheel_hint_h)
-      p5.rect(bog_x + 1, wheel_hint_y, 8, wheel_hint_h)
-      # Tiny spoke pixel to show rotation
-      spokes = WHEEL_SPOKES[(spin + bp_i * 3) & 7]
-      sx0 = spokes[0] / 2
-      sx1 = spokes[2] / 2
-      p5.fill(LOCO_LITE)
-      p5.rect(bog_x - 5 + sx0, wheel_hint_y + 2, 1, 1)
-      p5.rect(bog_x + 5 + sx1, wheel_hint_y + 2, 1, 1)
-    end
-    bp_i += 1
-    # Alternate spacing: short gap within a car, longer between cars
-    bog_x -= (bp_i & 1 == 1) ? (car_w - 24) : 24
-  end
-
-  # === Bottom shadow line under the whole train ===
-  p5.fill(LOCO_BLACK)
-  p5.rect(train_left, skirt_bot_y + wheel_hint_h - 1, body_right - train_left, 1)
-end
-
-# ===== Train dispatcher: pick locomotive or shinkansen based on $train_mode =====
-def draw_train(p5, x, y, wheel_phase, frame)
-  if $train_mode == :shinkansen
-    draw_shinkansen(p5, x, y, wheel_phase, frame)
-  else
-    draw_locomotive(p5, x, y, wheel_phase, frame)
-  end
-end
-
 # ===== Ruby-chan (the runner chasing the locomotive) =====
 #
 # 16x16 sprite, one character per pixel:
@@ -1511,7 +1254,7 @@ end
 
 def draw_opening_screen(p5, frame, bg_offset, wheel_phase)
   draw_scene(p5, bg_offset, frame)
-  draw_train(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+  draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
 
   # Title overlay
   p5.no_stroke
@@ -1550,7 +1293,7 @@ end
 
 def draw_ending_announcement(p5, elapsed_ms, bg_offset, frame, wheel_phase)
   draw_scene(p5, bg_offset, frame)
-  draw_train(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+  draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
   p5.no_stroke
   p5.fill(BLACK)
   p5.rect(24, 36, W - 48, 110)
@@ -1636,52 +1379,25 @@ def update_bgm(audio, state, frame, speed, prev)
       audio.tone(0, BGM_NOTES[note_step], waveform: 0, volume: 8)
       prev[:melody_step] = note_step
     end
-    if $train_mode == :shinkansen
-      # Electric motor whine: continuous high tone whose pitch rises with
-      # speed, retriggered only when the target frequency changes.
-      whine = 320 + (speed * 60).to_i
-      if prev[:whine] != whine
-        audio.tone(1, whine, waveform: 2, volume: 5)
-        prev[:whine] = whine
-      end
-    else
-      # Steam chug: rhythmic low sawtooth that gets faster with speed.
-      chug_period = (60.0 / speed).to_i
-      chug_period = 6 if chug_period < 6
-      if frame % chug_period == 0
-        audio.tone(1, 110, waveform: 3, volume: 9)
-      elsif frame % chug_period == (chug_period / 2)
-        audio.stop(1)
-      end
+    # Steam chug: rhythmic low sawtooth that gets faster with speed.
+    chug_period = (60.0 / speed).to_i
+    chug_period = 6 if chug_period < 6
+    if frame % chug_period == 0
+      audio.tone(1, 110, waveform: 3, volume: 9)
+    elsif frame % chug_period == (chug_period / 2)
+      audio.stop(1)
     end
   else
     audio.stop(0)
     audio.stop(1)
     prev[:melody_step] = -1
-    prev[:whine] = -1
   end
 end
 
 # ===== Main loop =====
 
-# Parse arguments. Accepts a number (seconds) and an optional train mode
-# token in any order: "shinkansen" / "n700s" select the bullet-train mode,
-# "locomotive" / "sl" select the steam locomotive (default).
-$train_mode = :locomotive
-total_seconds = 150
-arg_i = 0
-while arg_i < ARGV.length
-  a = ARGV[arg_i]
-  if a == "shinkansen" || a == "n700" || a == "n700s" || a == "bullet"
-    $train_mode = :shinkansen
-  elsif a == "locomotive" || a == "loco" || a == "sl" || a == "steam"
-    $train_mode = :locomotive
-  else
-    n = a.to_i
-    total_seconds = n if n > 0
-  end
-  arg_i += 1
-end
+total_seconds = (ARGV[0] || "150").to_i
+total_seconds = 150 if total_seconds <= 0
 total_ms = total_seconds * 1000
 warmup_ms = total_ms / 5
 warmup_ms = 30_000 if warmup_ms > 30_000
@@ -1735,10 +1451,8 @@ loop do
   wheel_accum -= 65_536 if wheel_accum > 65_536
   wheel_phase = (wheel_accum / 4) & 7
 
-  # Smoke generation (steam locomotive only; the shinkansen is electric
-  # so its chimney doesn't apply).
-  if $train_mode != :shinkansen &&
-     (state == :warmup || state == :running || state == :opening || state == :start)
+  # Smoke generation
+  if state == :warmup || state == :running || state == :opening || state == :start
     smoke_rate = case state
                  when :opening then 1
                  when :start, :warmup then 3
@@ -1752,9 +1466,6 @@ loop do
       smoke_index = (smoke_index + 1) % smoke_particles.length
     end
     update_smoke_particles(smoke_particles, speed > 0.2 ? speed : 0.4)
-  elsif $train_mode == :shinkansen
-    # Update existing particles so they fade out cleanly on mode change.
-    update_smoke_particles(smoke_particles, 0.4)
   end
 
   case state
@@ -1770,7 +1481,7 @@ loop do
 
   when :countdown
     draw_scene(p5, bg_offset, frame)
-    draw_train(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+    draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
     draw_smoke_particles(p5, smoke_particles)
     seconds_left = 3 - (elapsed / 1000)
     seconds_left = 1 if seconds_left < 1
@@ -1789,7 +1500,7 @@ loop do
 
   when :start
     draw_scene(p5, bg_offset, frame)
-    draw_train(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+    draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
     draw_smoke_particles(p5, smoke_particles)
     draw_big_centered(p5, "START!", BRASS_LITE, 2)
     if elapsed >= PHASE_START_MS
@@ -1800,7 +1511,7 @@ loop do
 
   when :warmup
     draw_scene(p5, bg_offset, frame)
-    draw_train(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+    draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
     draw_smoke_particles(p5, smoke_particles)
     remaining = total_ms - elapsed
     draw_hud(p5, remaining, total_ms, "WARM UP")
@@ -1817,7 +1528,7 @@ loop do
 
   when :running
     draw_scene(p5, bg_offset, frame)
-    draw_train(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+    draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
     draw_smoke_particles(p5, smoke_particles)
     remaining = running_ms - elapsed
     draw_hud(p5, remaining, total_ms, "GO!")
@@ -1837,7 +1548,7 @@ loop do
   when :result_goal
     if elapsed < PHASE_RESULT_MS
       draw_scene(p5, bg_offset, frame)
-      draw_train(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+      draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
       draw_smoke_particles(p5, smoke_particles)
       # Goal banner
       p5.no_stroke
