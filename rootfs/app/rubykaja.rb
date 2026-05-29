@@ -1328,10 +1328,11 @@ def draw_hud(p5, remaining_ms, total_ms, phase_text)
   p5.text_color(WHITE)
   p5.text_align(:left, :top)
   p5.text(fmt_time(remaining_ms), 4, 3)
-  # FPS indicator next to the timer. Updated by the main loop into $fps so
-  # this can be removed by clearing the variable.
+  # FPS + render/commit breakdown. R=ms spent drawing the frame, C=ms in
+  # p5.commit (VBlank wait + back-buffer copy). Helps tell whether the
+  # bottleneck is draw calls or the framebuffer pipeline.
   p5.text_color(SUN_CORE)
-  p5.text("#{$fps}fps", 56, 3)
+  p5.text("#{$fps} R#{$render_ms} C#{$commit_ms}", 46, 3)
   if phase_text
     p5.text_color(BRASS_LITE)
     p5.text_align(:right, :top)
@@ -1511,8 +1512,12 @@ last_countdown_sec = -1
 next_frame_ms = Machine.board_millis
 
 # FPS counter for the HUD. $fps is read by draw_hud; window_* track the
-# rolling 1-second window used to recompute it.
+# rolling 1-second window used to recompute it. $render_ms / $commit_ms
+# break the per-frame budget into drawing vs commit so we can see which is
+# the actual bottleneck.
 $fps = 0
+$render_ms = 0
+$commit_ms = 0
 fps_window_start_ms = next_frame_ms
 fps_window_frames = 0
 
@@ -1735,7 +1740,11 @@ loop do
   end
 
   audio.update
+  t_commit_start = Machine.board_millis
   p5.commit
+  t_commit_end = Machine.board_millis
+  $render_ms = t_commit_start - now
+  $commit_ms = t_commit_end - t_commit_start
   # Cap to ~30fps so frame intervals stay consistent rather than oscillating
   # between 16ms and 33ms. `frame += 2` keeps 60fps-tuned `frame / N` divisors
   # animating at the same wall-clock rate.
