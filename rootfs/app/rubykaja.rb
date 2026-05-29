@@ -1254,6 +1254,10 @@ def draw_hud(p5, remaining_ms, total_ms, phase_text)
   p5.text_color(WHITE)
   p5.text_align(:left, :top)
   p5.text(fmt_time(remaining_ms), 4, 3)
+  # FPS indicator next to the timer. Updated by the main loop into $fps so
+  # this can be removed by clearing the variable.
+  p5.text_color(SUN_CORE)
+  p5.text("#{$fps}fps", 56, 3)
   if phase_text
     p5.text_color(BRASS_LITE)
     p5.text_align(:right, :top)
@@ -1428,8 +1432,20 @@ bgm_state = { melody_step: -1 }
 last_countdown_sec = -1
 next_frame_ms = Machine.board_millis
 
+# FPS counter for the HUD. $fps is read by draw_hud; window_* track the
+# rolling 1-second window used to recompute it.
+$fps = 0
+fps_window_start_ms = next_frame_ms
+fps_window_frames = 0
+
 loop do
   now = Machine.board_millis
+  fps_window_frames += 1
+  if now - fps_window_start_ms >= 1000
+    $fps = fps_window_frames
+    fps_window_frames = 0
+    fps_window_start_ms = now
+  end
   elapsed = now - state_start_ms
   enter, quit = drain_input(keyboard)
   break if quit
