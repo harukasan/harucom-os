@@ -374,12 +374,8 @@ def draw_mountain(p5, sx, sy, half_w, body_col, shadow_col, snow_col)
   # Sunlit/shaded sides
   p5.fill(shadow_col)
   p5.triangle(sx, sy, sx + half_w, HORIZON_Y, sx + half_w / 3, HORIZON_Y)
-  if snow_col && HORIZON_Y - sy > 32
-    cap = (HORIZON_Y - sy) / 6
-    cy = sy + cap
-    p5.fill(snow_col)
-    p5.triangle(sx - cap, cy, sx + cap, cy, sx, sy)
-  end
+  # Snow cap omitted for performance. snow_col arg is kept for call-site
+  # compatibility; Fuji draws its own snow separately.
 end
 
 def draw_far_mountains(p5, bg_offset)
