@@ -30,23 +30,6 @@ class P5
     P5.create_graphics(w, h)
   end
 
-  # Blit a sprite onto this target. transparent_color < 0 (the default) is
-  # an opaque memcpy per row; passing a color skips pixels matching it.
-  def image(sprite, x, y, transparent_color = -1)
-    buf = sprite.target_buf
-    return unless buf
-    sw = sprite.target_w
-    sh = sprite.target_h
-    if @target_buf
-      # Compositing onto another sprite buffer is rare; fall back to a per
-      # pixel copy by treating the source as a non-transparent rectangle.
-      # Not implemented yet - assert main target only.
-      raise "image() onto a sprite target is not supported"
-    else
-      G.blit(buf, x, y, sw, sh, transparent_color)
-    end
-  end
-
   attr_reader :target_buf, :target_w, :target_h
 
   def width
@@ -421,13 +404,26 @@ class P5
 
   # Image
 
-  def image(data, x, y, w, h)
+  # Two-mode image(): when the first arg is a P5 sprite (built via
+  # create_graphics), perform a fast blit using its own width/height with
+  # optional color-key transparency. Otherwise treat the first arg as a raw
+  # RGB332 byte string and use the legacy draw_image / draw_image_affine
+  # path with explicit width and height.
+  def image(arg, x, y, w_or_transparent = nil, h = nil)
+    if arg.is_a?(P5)
+      buf = arg.target_buf
+      return unless buf
+      transparent = w_or_transparent.nil? ? -1 : w_or_transparent
+      G.blit(buf, x, y, arg.target_w, arg.target_h, transparent)
+      return
+    end
+    w = w_or_transparent
     if translate_only?
       tx, ty = transform(x, y)
-      G.draw_image(data, tx, ty, w, h)
+      G.draw_image(arg, tx, ty, w, h)
     else
       m = @matrix
-      G.draw_image_affine(data, w, h, x, y,
+      G.draw_image_affine(arg, w, h, x, y,
                           m[0], m[1], m[2], m[3], m[4], m[5])
     end
   end
