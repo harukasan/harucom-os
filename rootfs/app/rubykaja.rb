@@ -318,27 +318,49 @@ def draw_sun(p5)
   p5.circle(286, 44, 8)
 end
 
-def draw_cloud(p5, cx, cy, s)
-  p5.no_stroke
-  p5.fill(CLOUD_SHAD)
-  p5.rect(cx - s * 2, cy + s - 1, s * 4, 2)
-  p5.fill(CLOUD_MID)
-  p5.circle(cx - s, cy, s)
-  p5.circle(cx + s, cy, s)
-  p5.fill(CLOUD_TOP)
-  p5.circle(cx, cy - 1, s + 1)
-  p5.circle(cx - s * 2, cy + 1, s - 1)
-  p5.circle(cx + s * 2, cy + 1, s - 1)
-end
-
 def draw_clouds(p5, bg_offset)
   off = bg_offset / PARALLAX_CLOUD
+  p5.no_stroke
+  # Three color passes share a single p5.fill per pass instead of changing
+  # the fill three times per cloud. Loop is repeated three times but the
+  # body is cheap integer math; the saved fill / draw_cloud dispatches more
+  # than pay for the extra iterations.
+  # Pass 1: shadow band (CLOUD_SHAD)
+  p5.fill(CLOUD_SHAD)
   i = 0
   while i < CLOUDS.length
     c = CLOUDS[i]
     sx = c[0] - off
     if sx > -20 && sx < W + 20
-      draw_cloud(p5, sx, c[1], c[2])
+      s = c[2]
+      p5.rect(sx - s * 2, c[1] + s - 1, s * 4, 2)
+    end
+    i += 1
+  end
+  # Pass 2: mid layer (CLOUD_MID)
+  p5.fill(CLOUD_MID)
+  i = 0
+  while i < CLOUDS.length
+    c = CLOUDS[i]
+    sx = c[0] - off
+    if sx > -20 && sx < W + 20
+      s = c[2]
+      p5.circle(sx - s, c[1], s)
+      p5.circle(sx + s, c[1], s)
+    end
+    i += 1
+  end
+  # Pass 3: highlights (CLOUD_TOP)
+  p5.fill(CLOUD_TOP)
+  i = 0
+  while i < CLOUDS.length
+    c = CLOUDS[i]
+    sx = c[0] - off
+    if sx > -20 && sx < W + 20
+      s = c[2]
+      p5.circle(sx, c[1] - 1, s + 1)
+      p5.circle(sx - s * 2, c[1] + 1, s - 1)
+      p5.circle(sx + s * 2, c[1] + 1, s - 1)
     end
     i += 1
   end
