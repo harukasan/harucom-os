@@ -7,6 +7,72 @@ class P5
 
   def initialize
     DVI.set_mode(DVI::GRAPHICS_MODE)
+    init_state
+    @target_buf = nil
+    @target_w = G.width
+    @target_h = G.height
+  end
+
+  # Allocate an off-screen drawing target (a "sprite") that the same p5 API
+  # can render into. The returned P5 instance has its own buffer; calling
+  # rect / circle / line / triangle on it writes into the sprite rather than
+  # the main framebuffer. Once built, use the main p5's #image to blit it.
+  def self.create_graphics(w, h)
+    sprite = P5.allocate
+    sprite.send(:init_state)
+    sprite.instance_variable_set(:@target_buf, "\x00" * (w * h))
+    sprite.instance_variable_set(:@target_w, w)
+    sprite.instance_variable_set(:@target_h, h)
+    sprite
+  end
+
+  def create_graphics(w, h)
+    P5.create_graphics(w, h)
+  end
+
+  # Blit a sprite onto this target. transparent_color < 0 (the default) is
+  # an opaque memcpy per row; passing a color skips pixels matching it.
+  def image(sprite, x, y, transparent_color = -1)
+    buf = sprite.target_buf
+    return unless buf
+    sw = sprite.target_w
+    sh = sprite.target_h
+    if @target_buf
+      # Compositing onto another sprite buffer is rare; fall back to a per
+      # pixel copy by treating the source as a non-transparent rectangle.
+      # Not implemented yet - assert main target only.
+      raise "image() onto a sprite target is not supported"
+    else
+      G.blit(buf, x, y, sw, sh, transparent_color)
+    end
+  end
+
+  attr_reader :target_buf, :target_w, :target_h
+
+  def width
+    @target_w
+  end
+
+  def height
+    @target_h
+  end
+
+  # Screen management
+
+  def background(color)
+    if @target_buf
+      G.fill_rect_to(@target_buf, @target_w, @target_h, 0, 0, @target_w, @target_h, color)
+    else
+      G.fill(color)
+    end
+  end
+
+  def commit
+    # Sprites are pure buffers; only the main framebuffer commits to DVI.
+    G.commit unless @target_buf
+  end
+
+  private def init_state
     @fill_color = 0xFF
     @fill_enabled = true
     @stroke_color = 0xFF
@@ -22,22 +88,40 @@ class P5
     @matrix_stack = []
   end
 
-  def width
-    G.width
+  # Internal drawing helpers: route to either the main framebuffer or the
+  # current sprite buffer based on @target_buf. Kept private so the public
+  # API (rect/circle/line/triangle) doesn't have to repeat the branch.
+
+  private def _fill_rect(x, y, w, h, color)
+    if @target_buf
+      G.fill_rect_to(@target_buf, @target_w, @target_h, x, y, w, h, color)
+    else
+      G.fill_rect(x, y, w, h, color)
+    end
   end
 
-  def height
-    G.height
+  private def _fill_circle(cx, cy, r, color)
+    if @target_buf
+      G.fill_circle_to(@target_buf, @target_w, @target_h, cx, cy, r, color)
+    else
+      G.fill_circle(cx, cy, r, color)
+    end
   end
 
-  # Screen management
-
-  def background(color)
-    G.fill(color)
+  private def _fill_triangle(x0, y0, x1, y1, x2, y2, color)
+    if @target_buf
+      G.fill_triangle_to(@target_buf, @target_w, @target_h, x0, y0, x1, y1, x2, y2, color)
+    else
+      G.fill_triangle(x0, y0, x1, y1, x2, y2, color)
+    end
   end
 
-  def commit
-    G.commit
+  private def _draw_line(x0, y0, x1, y1, color)
+    if @target_buf
+      G.draw_line_to(@target_buf, @target_w, @target_h, x0, y0, x1, y1, color)
+    else
+      G.draw_line(x0, y0, x1, y1, color)
+    end
   end
 
   # State setters
@@ -163,10 +247,10 @@ class P5
     return unless @stroke_enabled
     ax, ay = transform(x0, y0)
     bx, by = transform(x1, y1)
-    if @stroke_weight > 1
+    if @stroke_weight > 1 && !@target_buf
       G.draw_thick_line(ax, ay, bx, by, @stroke_weight, @stroke_color)
     else
-      G.draw_line(ax, ay, bx, by, @stroke_color)
+      _draw_line(ax, ay, bx, by, @stroke_color)
     end
   end
 
@@ -174,16 +258,28 @@ class P5
     if translate_only?
       tx = @matrix[4].round
       ty = @matrix[5].round
-      G.fill_rect(x + tx, y + ty, w, h, @fill_color) if @fill_enabled
-      G.draw_rect(x + tx, y + ty, w, h, @stroke_color) if @stroke_enabled
+      _fill_rect(x + tx, y + ty, w, h, @fill_color) if @fill_enabled
+      if @stroke_enabled
+        if @target_buf
+          # Sprite target: emulate draw_rect with four lines
+          rx = x + tx
+          ry = y + ty
+          _draw_line(rx, ry, rx + w - 1, ry, @stroke_color)
+          _draw_line(rx, ry + h - 1, rx + w - 1, ry + h - 1, @stroke_color)
+          _draw_line(rx, ry, rx, ry + h - 1, @stroke_color)
+          _draw_line(rx + w - 1, ry, rx + w - 1, ry + h - 1, @stroke_color)
+        else
+          G.draw_rect(x + tx, y + ty, w, h, @stroke_color)
+        end
+      end
     else
       x0, y0 = transform(x, y)
       x1, y1 = transform(x + w, y)
       x2, y2 = transform(x + w, y + h)
       x3, y3 = transform(x, y + h)
       if @fill_enabled
-        G.fill_triangle(x0, y0, x1, y1, x2, y2, @fill_color)
-        G.fill_triangle(x0, y0, x2, y2, x3, y3, @fill_color)
+        _fill_triangle(x0, y0, x1, y1, x2, y2, @fill_color)
+        _fill_triangle(x0, y0, x2, y2, x3, y3, @fill_color)
       end
       if @stroke_enabled
         draw_edge(x0, y0, x1, y1)
@@ -197,8 +293,13 @@ class P5
   def circle(cx, cy, r)
     tcx, tcy = transform(cx, cy)
     if translate_only?
-      G.fill_circle(tcx, tcy, r, @fill_color) if @fill_enabled
-      G.draw_circle(tcx, tcy, r, @stroke_color) if @stroke_enabled
+      _fill_circle(tcx, tcy, r, @fill_color) if @fill_enabled
+      if @stroke_enabled
+        # draw_circle is only available on the main framebuffer; for sprite
+        # targets we currently skip the outline. draw_locomotive uses
+        # filled circles only, so this is fine for the rubykaja workload.
+        G.draw_circle(tcx, tcy, r, @stroke_color) unless @target_buf
+      end
     else
       sx = Math.sqrt(@matrix[0] * @matrix[0] + @matrix[2] * @matrix[2])
       sy = Math.sqrt(@matrix[1] * @matrix[1] + @matrix[3] * @matrix[3])
@@ -228,7 +329,7 @@ class P5
     ax, ay = transform(x0, y0)
     bx, by = transform(x1, y1)
     cx, cy = transform(x2, y2)
-    G.fill_triangle(ax, ay, bx, by, cx, cy, @fill_color) if @fill_enabled
+    _fill_triangle(ax, ay, bx, by, cx, cy, @fill_color) if @fill_enabled
     if @stroke_enabled
       draw_edge(ax, ay, bx, by)
       draw_edge(bx, by, cx, cy)
@@ -382,10 +483,10 @@ class P5
   end
 
   def draw_edge(x0, y0, x1, y1)
-    if @stroke_weight > 1
+    if @stroke_weight > 1 && !@target_buf
       G.draw_thick_line(x0, y0, x1, y1, @stroke_weight, @stroke_color)
     else
-      G.draw_line(x0, y0, x1, y1, @stroke_color)
+      _draw_line(x0, y0, x1, y1, @stroke_color)
     end
   end
 end

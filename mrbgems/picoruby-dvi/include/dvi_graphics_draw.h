@@ -52,6 +52,13 @@ void dvi_graphics_draw_image_masked(uint8_t *framebuffer, int width, int height,
                                     const uint8_t *data, const uint8_t *mask, int x, int y,
                                     int image_width, int image_height);
 
+// Blit an RGB332 image with a single color-key transparent color.
+// Pixels matching transparent_color are skipped. If transparent_color is
+// negative, the function falls back to a plain opaque blit (memcpy per row).
+void dvi_graphics_blit_keyed(uint8_t *framebuffer, int width, int height, const uint8_t *data,
+                             int x, int y, int image_width, int image_height,
+                             int transparent_color);
+
 // Fill an axis-aligned rectangle at (x, y) with size (w, h).
 // Clips to framebuffer bounds. Respects current blend mode.
 void dvi_graphics_fill_rect(uint8_t *framebuffer, int width, int height, int x, int y, int w, int h,

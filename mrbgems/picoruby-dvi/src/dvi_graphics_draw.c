@@ -671,6 +671,50 @@ dvi_graphics_draw_image(uint8_t *framebuffer, int width, int height, const uint8
   }
 }
 
+// Color-key blit: same as draw_image but pixels matching transparent_color
+// are skipped. transparent_color < 0 falls back to a plain opaque blit
+// (memcpy per row). This is the fast path used by Sprite#blit / P5#image.
+void
+dvi_graphics_blit_keyed(uint8_t *framebuffer, int width, int height, const uint8_t *data, int x,
+                        int y, int image_width, int image_height, int transparent_color)
+{
+  int src_x = 0, src_y = 0;
+  int dst_x = x, dst_y = y;
+  int draw_w = image_width, draw_h = image_height;
+
+  if (dst_x < 0) {
+    src_x = -dst_x;
+    draw_w += dst_x;
+    dst_x = 0;
+  }
+  if (dst_y < 0) {
+    src_y = -dst_y;
+    draw_h += dst_y;
+    dst_y = 0;
+  }
+  if (dst_x + draw_w > width) draw_w = width - dst_x;
+  if (dst_y + draw_h > height) draw_h = height - dst_y;
+  if (draw_w <= 0 || draw_h <= 0) return;
+
+  if (transparent_color < 0) {
+    for (int row = 0; row < draw_h; row++) {
+      memcpy(&framebuffer[(dst_y + row) * width + dst_x],
+             &data[(src_y + row) * image_width + src_x], draw_w);
+    }
+    return;
+  }
+
+  uint8_t tc = (uint8_t)transparent_color;
+  for (int row = 0; row < draw_h; row++) {
+    uint8_t *dst_row = &framebuffer[(dst_y + row) * width + dst_x];
+    const uint8_t *src_row = &data[(src_y + row) * image_width + src_x];
+    for (int col = 0; col < draw_w; col++) {
+      uint8_t c = src_row[col];
+      if (c != tc) dst_row[col] = c;
+    }
+  }
+}
+
 void
 dvi_graphics_draw_image_masked(uint8_t *framebuffer, int width, int height, const uint8_t *data,
                                const uint8_t *mask, int x, int y, int image_width, int image_height)

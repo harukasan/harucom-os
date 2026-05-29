@@ -399,6 +399,81 @@ mrb_dvi_draw_image_masked(mrb_state *mrb, mrb_value klass)
 }
 
 /*
+ * DVI::Graphics.blit(data, x, y, w, h, transparent_color)
+ *   transparent_color < 0 for opaque (memcpy per row).
+ */
+static mrb_value
+mrb_dvi_blit(mrb_state *mrb, mrb_value klass)
+{
+  const char *data;
+  mrb_int data_len, x, y, w, h, transparent;
+  mrb_get_args(mrb, "siiiii", &data, &data_len, &x, &y, &w, &h, &transparent);
+  if (data_len < w * h) mrb_raise(mrb, E_ARGUMENT_ERROR, "data too short");
+  dvi_graphics_blit_keyed(dvi_get_framebuffer(), dvi_graphics_get_width(),
+                          dvi_graphics_get_height(), (const uint8_t *)data, x, y, w, h,
+                          (int)transparent);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.fill_rect_to(buffer, bw, bh, x, y, w, h, color)
+ *   Same as fill_rect but targets an arbitrary buffer (a mruby String used
+ *   as a byte array). Used by P5::Sprite drawing.
+ */
+static mrb_value
+mrb_dvi_fill_rect_to(mrb_state *mrb, mrb_value klass)
+{
+  char *buf;
+  mrb_int buf_len, bw, bh, x, y, w, h, color;
+  mrb_get_args(mrb, "siiiiiii", &buf, &buf_len, &bw, &bh, &x, &y, &w, &h, &color);
+  if (buf_len < bw * bh) mrb_raise(mrb, E_ARGUMENT_ERROR, "buffer too short");
+  dvi_graphics_fill_rect((uint8_t *)buf, bw, bh, x, y, w, h, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.fill_circle_to(buffer, bw, bh, cx, cy, r, color)
+ */
+static mrb_value
+mrb_dvi_fill_circle_to(mrb_state *mrb, mrb_value klass)
+{
+  char *buf;
+  mrb_int buf_len, bw, bh, cx, cy, r, color;
+  mrb_get_args(mrb, "siiiiii", &buf, &buf_len, &bw, &bh, &cx, &cy, &r, &color);
+  if (buf_len < bw * bh) mrb_raise(mrb, E_ARGUMENT_ERROR, "buffer too short");
+  dvi_graphics_fill_circle((uint8_t *)buf, bw, bh, cx, cy, r, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.fill_triangle_to(buffer, bw, bh, x0, y0, x1, y1, x2, y2, color)
+ */
+static mrb_value
+mrb_dvi_fill_triangle_to(mrb_state *mrb, mrb_value klass)
+{
+  char *buf;
+  mrb_int buf_len, bw, bh, x0, y0, x1, y1, x2, y2, color;
+  mrb_get_args(mrb, "siiiiiiiii", &buf, &buf_len, &bw, &bh, &x0, &y0, &x1, &y1, &x2, &y2, &color);
+  if (buf_len < bw * bh) mrb_raise(mrb, E_ARGUMENT_ERROR, "buffer too short");
+  dvi_graphics_fill_triangle((uint8_t *)buf, bw, bh, x0, y0, x1, y1, x2, y2, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
+ * DVI::Graphics.draw_line_to(buffer, bw, bh, x0, y0, x1, y1, color)
+ */
+static mrb_value
+mrb_dvi_draw_line_to(mrb_state *mrb, mrb_value klass)
+{
+  char *buf;
+  mrb_int buf_len, bw, bh, x0, y0, x1, y1, color;
+  mrb_get_args(mrb, "siiiiiii", &buf, &buf_len, &bw, &bh, &x0, &y0, &x1, &y1, &color);
+  if (buf_len < bw * bh) mrb_raise(mrb, E_ARGUMENT_ERROR, "buffer too short");
+  dvi_graphics_draw_line((uint8_t *)buf, bw, bh, x0, y0, x1, y1, (uint8_t)color);
+  return mrb_nil_value();
+}
+
+/*
  * DVI::Graphics.draw_text_affine(text, color, font, wide_font, ox, oy, m00, m01, m10, m11, tx, ty)
  *   wide_font: -1 for none
  */
@@ -757,6 +832,15 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
                              MRB_ARGS_REQ(5));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image_masked),
                              mrb_dvi_draw_image_masked, MRB_ARGS_REQ(6));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(blit), mrb_dvi_blit, MRB_ARGS_REQ(6));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_rect_to), mrb_dvi_fill_rect_to,
+                             MRB_ARGS_REQ(8));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_circle_to), mrb_dvi_fill_circle_to,
+                             MRB_ARGS_REQ(7));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(fill_triangle_to),
+                             mrb_dvi_fill_triangle_to, MRB_ARGS_REQ(10));
+  mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_line_to), mrb_dvi_draw_line_to,
+                             MRB_ARGS_REQ(8));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_text_affine),
                              mrb_dvi_draw_text_affine, MRB_ARGS_REQ(12));
   mrb_define_class_method_id(mrb, class_Graphics, MRB_SYM(draw_image_affine),
