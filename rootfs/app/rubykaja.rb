@@ -104,6 +104,10 @@ PHASE_COUNTDOWN_MS = 3_000
 PHASE_START_MS     = 1_500
 PHASE_RESULT_MS    = 2_200
 
+# Target ~30fps. Animations using `frame / N` divisors were tuned for 60fps,
+# so `frame` advances by 2 per iteration to keep the same wall-clock pacing.
+FRAME_INTERVAL_MS = 33
+
 # ===== Parallax per element type =====
 # bg_offset is the global scroll (in screen px). Each element computes its
 # screen position as: screen_x = world_x - bg_offset / parallax. Lower
@@ -1422,6 +1426,7 @@ smoke_timer = 0
 smoke_index = 0
 bgm_state = { melody_step: -1 }
 last_countdown_sec = -1
+next_frame_ms = Machine.board_millis
 
 loop do
   now = Machine.board_millis
@@ -1637,7 +1642,19 @@ loop do
 
   audio.update
   p5.commit
-  frame += 1
+  # Cap to ~30fps so frame intervals stay consistent rather than oscillating
+  # between 16ms and 33ms. `frame += 2` keeps 60fps-tuned `frame / N` divisors
+  # animating at the same wall-clock rate.
+  next_frame_ms += FRAME_INTERVAL_MS
+  remaining = next_frame_ms - Machine.board_millis
+  if remaining > 0
+    sleep_ms(remaining)
+  else
+    # Drawing already exceeded one 30fps slot - reset the deadline so we
+    # don't stack up debt for the next frame.
+    next_frame_ms = Machine.board_millis
+  end
+  frame += 2
 end
 
 audio.stop_all
