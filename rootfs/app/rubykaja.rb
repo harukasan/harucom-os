@@ -17,18 +17,6 @@ DVI::Graphics.set_resolution(320, 240)
 p5 = P5.new
 keyboard = $keyboard
 
-# Audio is disabled for this presentation (no output cable). All audio
-# calls in the main loop run against this no-op object so the BGM/SFX
-# logic can stay in place for future re-enabling.
-class NullAudio
-  def tone(*, **); end
-  def stop(*); end
-  def stop_all; end
-  def update; end
-  def deinit; end
-end
-audio = NullAudio.new
-
 W = p5.width
 H = p5.height
 
@@ -269,8 +257,6 @@ while wx < 16000
   wx += bw + 4 + (seed * 5) % 6
 end
 
-BGM_NOTES = [262, 330, 392, 523, 392, 330, 392, 262]
-
 def fmt_time(ms)
   ms = 0 if ms < 0
   total = ms / 1000
@@ -333,17 +319,17 @@ end
 def draw_clouds(p5, bg_offset)
   off = bg_offset / PARALLAX_CLOUD
   p5.no_stroke
-  # Three color passes share a single p5.fill per pass instead of changing
-  # the fill three times per cloud. Loop is repeated three times but the
-  # body is cheap integer math; the saved fill / draw_cloud dispatches more
-  # than pay for the extra iterations.
+  # CLOUDS are stored in increasing world_x order (n * 56 + small jitter),
+  # so each pass can early-break once world_x is past the right edge.
+  right_limit = W + 20
   # Pass 1: shadow band (CLOUD_SHAD)
   p5.fill(CLOUD_SHAD)
   i = 0
   while i < CLOUDS.length
     c = CLOUDS[i]
     sx = c[0] - off
-    if sx > -20 && sx < W + 20
+    break if sx > right_limit
+    if sx > -20
       s = c[2]
       p5.rect(sx - s * 2, c[1] + s - 1, s * 4, 2)
     end
@@ -355,7 +341,8 @@ def draw_clouds(p5, bg_offset)
   while i < CLOUDS.length
     c = CLOUDS[i]
     sx = c[0] - off
-    if sx > -20 && sx < W + 20
+    break if sx > right_limit
+    if sx > -20
       s = c[2]
       p5.circle(sx - s, c[1], s)
       p5.circle(sx + s, c[1], s)
@@ -368,7 +355,8 @@ def draw_clouds(p5, bg_offset)
   while i < CLOUDS.length
     c = CLOUDS[i]
     sx = c[0] - off
-    if sx > -20 && sx < W + 20
+    break if sx > right_limit
+    if sx > -20
       s = c[2]
       p5.circle(sx, c[1] - 1, s + 1)
       p5.circle(sx - s * 2, c[1] + 1, s - 1)
@@ -390,14 +378,66 @@ def draw_mountain(p5, sx, sy, half_w, body_col, shadow_col, snow_col)
   # compatibility; Fuji draws its own snow separately.
 end
 
+# Mountain sprite buckets: 3 quantized heights per layer. Original heights
+# vary by ~14-18 pixels; bucketing into 3 keeps visual variety while letting
+# each frame just blit instead of issuing 4 ops per mountain.
+FAR_MTN_BUCKETS  = [25, 29, 34]
+MID_MTN_BUCKETS  = [41, 45, 50]
+NEAR_MTN_BUCKETS = [60, 65, 72]
+
+# Render a single mountain (body + right-side shadow triangles) into a
+# transparent-keyed sprite. The sprite is sized exactly to enclose the
+# triangles; its apex sits at sprite (half_w, 0) and base at y=h.
+def render_mountain_to_sprite(sprite, half_w, h, body_col, shadow_col)
+  sprite.background(TRANS_KEY)
+  sprite.no_stroke
+  sprite.fill(body_col)
+  sprite.triangle(0, h, half_w * 2, h, half_w, 0)
+  sprite.fill(shadow_col)
+  sprite.triangle(half_w, 0, half_w * 2, h, half_w + half_w / 3, h)
+end
+
+def build_mountain_sprites(p5, half_w, buckets, body_col, shadow_col)
+  out = []
+  w = half_w * 2 + 1
+  i = 0
+  while i < buckets.length
+    h = buckets[i]
+    sprite = p5.create_graphics(w, h + 1)
+    render_mountain_to_sprite(sprite, half_w, h, body_col, shadow_col)
+    out << sprite
+    i += 1
+  end
+  out
+end
+
+# Pick the bucket index whose sprite height best matches the target height.
+def mountain_bucket_for(buckets, h)
+  if h <= buckets[0]
+    0
+  elsif h <= buckets[1]
+    1
+  else
+    2
+  end
+end
+
+def blit_mountain(p5, sprites, buckets, sx, h, half_w)
+  idx = mountain_bucket_for(buckets, h)
+  sprite_h = buckets[idx]
+  p5.blit(sprites[idx], sx - half_w, HORIZON_Y - sprite_h, TRANS_KEY)
+end
+
 def draw_far_mountains(p5, bg_offset)
   off = bg_offset / PARALLAX_FAR
+  right_limit = W + 40
   i = 0
   while i < SEKI_FAR_PEAKS.length
     pk = SEKI_FAR_PEAKS[i]
     sx = pk[0] - off
-    if sx > -40 && sx < W + 40
-      draw_mountain(p5, sx, HORIZON_Y - pk[1], 26, FAR_MTN, MID_MTN, nil)
+    break if sx > right_limit
+    if sx > -40
+      blit_mountain(p5, FAR_MTN_SPRITES, FAR_MTN_BUCKETS, sx, pk[1], 26)
     end
     i += 1
   end
@@ -405,12 +445,14 @@ end
 
 def draw_mid_mountains(p5, bg_offset)
   off = bg_offset / PARALLAX_MID
+  right_limit = W + 50
   i = 0
   while i < SEKI_MID_PEAKS.length
     pk = SEKI_MID_PEAKS[i]
     sx = pk[0] - off
-    if sx > -50 && sx < W + 50
-      draw_mountain(p5, sx, HORIZON_Y - pk[1], 36, MID_MTN, NEAR_MTN, SNOW_CAP)
+    break if sx > right_limit
+    if sx > -50
+      blit_mountain(p5, MID_MTN_SPRITES, MID_MTN_BUCKETS, sx, pk[1], 36)
     end
     i += 1
   end
@@ -418,12 +460,14 @@ end
 
 def draw_near_mountains(p5, bg_offset)
   off = bg_offset / PARALLAX_NEAR
+  right_limit = W + 60
   i = 0
   while i < SEKI_NEAR_PEAKS.length
     pk = SEKI_NEAR_PEAKS[i]
     sx = pk[0] - off
-    if sx > -60 && sx < W + 60
-      draw_mountain(p5, sx, HORIZON_Y - pk[1], 48, NEAR_MTN, LOCO_BLACK, SNOW_CAP)
+    break if sx > right_limit
+    if sx > -60
+      blit_mountain(p5, NEAR_MTN_SPRITES, NEAR_MTN_BUCKETS, sx, pk[1], 48)
     end
     i += 1
   end
@@ -455,17 +499,43 @@ def draw_round_tree(p5, x, base_y)
   p5.circle(x - 2, base_y - 13, 3)
 end
 
+# Pine/round tree sprite dimensions. (CX, BY) is the sprite-local point
+# corresponding to the world (x, base_y) anchor that draw_pine_tree /
+# draw_round_tree paint around.
+TREE_SPRITE_W   = 13
+PINE_SPRITE_H   = 18
+PINE_SPRITE_CX  = 6
+PINE_SPRITE_BY  = 18
+ROUND_SPRITE_H  = 17
+ROUND_SPRITE_CX = 6
+ROUND_SPRITE_BY = 17
+
+def build_tree_sprites(p5)
+  pine = p5.create_graphics(TREE_SPRITE_W, PINE_SPRITE_H)
+  pine.background(TRANS_KEY)
+  draw_pine_tree(pine, PINE_SPRITE_CX, PINE_SPRITE_BY)
+  round = p5.create_graphics(TREE_SPRITE_W, ROUND_SPRITE_H)
+  round.background(TRANS_KEY)
+  draw_round_tree(round, ROUND_SPRITE_CX, ROUND_SPRITE_BY)
+  [pine, round]
+end
+
 def draw_trees(p5, bg_offset)
   off = bg_offset / PARALLAX_TREE
+  base_y = GROUND_Y + 4
+  pine_y = base_y - PINE_SPRITE_BY
+  round_y = base_y - ROUND_SPRITE_BY
+  right_limit = W + 10
   i = 0
   while i < SEKI_TREES.length
     t = SEKI_TREES[i]
     sx = t[0] - off
-    if sx > -10 && sx < W + 10
+    break if sx > right_limit
+    if sx > -10
       if t[1] == 0
-        draw_pine_tree(p5, sx, GROUND_Y + 4)
+        p5.blit(PINE_SPRITE, sx - PINE_SPRITE_CX, pine_y, TRANS_KEY)
       else
-        draw_round_tree(p5, sx, GROUND_Y + 4)
+        p5.blit(ROUND_SPRITE, sx - ROUND_SPRITE_CX, round_y, TRANS_KEY)
       end
     end
     i += 1
@@ -548,47 +618,101 @@ def draw_flag_motif(p5, fx, top_y, base_w, flag_h, type, motif_col)
   end
 end
 
-def draw_battle_flag(p5, fx, frame, idx, type_idx, size)
-  type = FLAG_TYPES[type_idx]
-  base_w = (size == :large) ? 9 : 7
-  flag_h = (size == :large) ? 30 : 24
-  top_y = GROUND_Y - flag_h - 2
-  pole_bot = GROUND_Y + 10
-  wave = FLAG_WAVE[(frame / 6 + idx) & 3]
+# Sprite dimensions for pre-rendered flags. Both small and large flags
+# share the same sprite layout convention: the pole sits at sprite x=2
+# (base mount extends 2 px left of the pole), top_y in sprite coords is 2
+# (crossbar is at sprite y=0), and the sprite extends down to pole_bot.
+FLAG_SMALL_BASE_W = 7
+FLAG_SMALL_FLAG_H = 24
+FLAG_SMALL_W = FLAG_SMALL_BASE_W + 6
+FLAG_SMALL_H = FLAG_SMALL_FLAG_H + 14
+FLAG_LARGE_BASE_W = 9
+FLAG_LARGE_FLAG_H = 30
+FLAG_LARGE_W = FLAG_LARGE_BASE_W + 6
+FLAG_LARGE_H = FLAG_LARGE_FLAG_H + 14
+
+# Render a flag into a sprite with the wave already baked in. Each call
+# produces one of the four wave-phase variants for a (type, size) pair.
+def render_flag_to_sprite(sprite, type, base_w, flag_h, wave)
+  pole_x = 2           # Sprite-local x of the pole
+  field_x = pole_x + 2 # Field starts 2 px right of the pole
+  top_y = 2            # Banner top (crossbar sits at sprite y=0)
+  pole_bot = top_y + flag_h + 12
   field_col = flag_field_color(type)
   motif_col = flag_motif_color(type)
 
-  p5.no_stroke
-  # Vertical pole - extends only slightly above the crossbar, no finial
-  # (Sengoku nobori didn't have decorative balls on top).
-  p5.fill(TRUNK_DARK)
-  p5.rect(fx, top_y - 2, 1, pole_bot - (top_y - 2))
-  # Horizontal crossbar (chigiri / 横木) that holds the top edge of the
-  # banner against the wind. Sits at the same level as the pole top.
-  p5.fill(TRUNK_DARK)
-  p5.rect(fx + 1, top_y - 2, base_w + 2, 1)
-  # Pole base mount
-  p5.fill(TRUNK)
-  p5.rect(fx - 2, pole_bot - 2, 5, 2)
-  # Banner shadow
-  p5.fill(LOCO_BLACK)
-  p5.rect(fx + 3, top_y + 1, base_w + 1, flag_h + 1)
-  # Field
-  draw_flag_field(p5, fx + 2, top_y, base_w, flag_h, field_col, wave)
-  # Top contrasting trim
-  p5.fill(motif_col)
-  p5.rect(fx + 2, top_y, base_w, 2)
-  # Motif
-  draw_flag_motif(p5, fx + 2, top_y + 3, base_w, flag_h - 4, type, motif_col)
+  sprite.background(TRANS_KEY)
+  sprite.no_stroke
+  sprite.fill(TRUNK_DARK)
+  sprite.rect(pole_x, top_y - 2, 1, pole_bot - (top_y - 2))
+  sprite.rect(pole_x + 1, top_y - 2, base_w + 2, 1)
+  sprite.fill(TRUNK)
+  sprite.rect(pole_x - 2, pole_bot - 2, 5, 2)
+  sprite.fill(LOCO_BLACK)
+  sprite.rect(pole_x + 3, top_y + 1, base_w + 1, flag_h + 1)
+  # Field rows: extend each row by wave[r] pixels (overwriting the shadow
+  # on the right side just like the original per-frame draw did).
+  sprite.fill(field_col)
+  row_h = flag_h / 4
+  r = 0
+  while r < 4
+    sprite.rect(field_x, top_y + r * row_h, base_w + wave[r], row_h + 1)
+    r += 1
+  end
+  sprite.fill(motif_col)
+  sprite.rect(field_x, top_y, base_w, 2)
+  draw_flag_motif(sprite, field_x, top_y + 3, base_w, flag_h - 4, type, motif_col)
+end
+
+# Build all 40 flag sprites (5 types x 2 sizes x 4 wave phases).
+# Index layout: FLAG_SPRITES[type_idx * 8 + size_idx * 4 + wave_idx]
+# where size_idx is 0 for small, 1 for large.
+def build_flag_sprites(p5)
+  sprites = []
+  type_idx = 0
+  while type_idx < FLAG_TYPES.length
+    type = FLAG_TYPES[type_idx]
+    size_idx = 0
+    while size_idx < 2
+      large = (size_idx == 1)
+      base_w = large ? FLAG_LARGE_BASE_W : FLAG_SMALL_BASE_W
+      flag_h = large ? FLAG_LARGE_FLAG_H : FLAG_SMALL_FLAG_H
+      sw     = large ? FLAG_LARGE_W : FLAG_SMALL_W
+      sh     = large ? FLAG_LARGE_H : FLAG_SMALL_H
+      wave_idx = 0
+      while wave_idx < 4
+        sprite = p5.create_graphics(sw, sh)
+        render_flag_to_sprite(sprite, type, base_w, flag_h, FLAG_WAVE[wave_idx])
+        sprites << sprite
+        wave_idx += 1
+      end
+      size_idx += 1
+    end
+    type_idx += 1
+  end
+  sprites
+end
+
+def draw_battle_flag(p5, fx, frame, idx, type_idx, size)
+  large = (size == :large)
+  flag_h = large ? FLAG_LARGE_FLAG_H : FLAG_SMALL_FLAG_H
+  top_y = GROUND_Y - flag_h - 2
+  size_idx = large ? 1 : 0
+  wave_idx = (frame / 6 + idx) & 3
+  sprite = FLAG_SPRITES[type_idx * 8 + size_idx * 4 + wave_idx]
+  # Sprite origin (sprite x=0, y=0) maps to (fx - 2, top_y - 2) on screen.
+  p5.blit(sprite, fx - 2, top_y - 2, TRANS_KEY)
 end
 
 def draw_battle_flags(p5, bg_offset, frame)
   off = bg_offset / PARALLAX_FLAG
+  right_limit = W + 16
   i = 0
   while i < SEKI_FLAGS.length
     f = SEKI_FLAGS[i]
     sx = f[0] - off
-    if sx > -16 && sx < W + 16
+    break if sx > right_limit
+    if sx > -16
       draw_battle_flag(p5, sx, frame, i, f[1], f[2])
     end
     i += 1
@@ -771,11 +895,13 @@ end
 
 def draw_tokyo_buildings(p5, bg_offset)
   off = bg_offset / PARALLAX_BUILD
+  right_limit = W + 40
   i = 0
   while i < TOKYO_BUILDINGS.length
     b = TOKYO_BUILDINGS[i]
     sx = b[0] - off
-    if sx > -40 && sx < W + 40
+    break if sx > right_limit
+    if sx > -40
       draw_building(p5, sx, b[1], b[2], b[3], i)
     end
     i += 1
@@ -801,23 +927,36 @@ def draw_ground(p5)
   p5.rect(0, GROUND_Y + 18, W, H - GROUND_Y - 18)
 end
 
-def draw_rails(p5, bg_offset)
-  p5.no_stroke
-  p5.fill(GRAVEL)
-  p5.rect(0, RAIL_Y - 3, W, 10)
-  p5.fill(TIE)
-  tie_off = bg_offset % 14
-  x = -tie_off
-  while x < W
-    p5.rect(x, RAIL_Y, 9, 5)
-    x += 14
+RAIL_TIE_PERIOD = 14
+RAIL_SPRITE_W = W + RAIL_TIE_PERIOD
+RAIL_SPRITE_H = 10
+
+# Pre-render the rails as a horizontal strip wider than the screen by one
+# tie period, so blitting it shifted by -(bg_offset % 14) covers the visible
+# area without seams. Contains: gravel base, ties, dark+lit rail lines.
+def build_rails_sprite(p5)
+  sprite = p5.create_graphics(RAIL_SPRITE_W, RAIL_SPRITE_H)
+  sprite.no_stroke
+  sprite.fill(GRAVEL)
+  sprite.rect(0, 0, RAIL_SPRITE_W, RAIL_SPRITE_H)
+  sprite.fill(TIE)
+  x = 0
+  while x < RAIL_SPRITE_W
+    sprite.rect(x, 3, 9, 5)
+    x += RAIL_TIE_PERIOD
   end
-  p5.fill(RAIL_DARK)
-  p5.rect(0, RAIL_Y, W, 2)
-  p5.fill(LOCO_LITE)
-  p5.rect(0, RAIL_Y, W, 1)
-  p5.fill(RAIL_DARK)
-  p5.rect(0, RAIL_Y + 5, W, 2)
+  sprite.fill(RAIL_DARK)
+  sprite.rect(0, 3, RAIL_SPRITE_W, 2)
+  sprite.fill(LOCO_LITE)
+  sprite.rect(0, 3, RAIL_SPRITE_W, 1)
+  sprite.fill(RAIL_DARK)
+  sprite.rect(0, 8, RAIL_SPRITE_W, 2)
+  sprite
+end
+
+def draw_rails(p5, bg_offset)
+  tie_off = bg_offset % RAIL_TIE_PERIOD
+  p5.blit(RAILS_SPRITE, -tie_off, RAIL_Y - 3)
 end
 
 # ===== Smoke particles =====
@@ -860,12 +999,14 @@ def draw_smoke_particles(p5, particles)
             else
               SMOKE_LT
             end
-      p5.fill(col)
+      px = pp[0].to_i
+      py = pp[1].to_i
       r = pp[2].to_i
-      p5.circle(pp[0].to_i, pp[1].to_i, r)
+      p5.fill(col)
+      p5.circle(px, py, r)
       if age > 8 && r > 3
         p5.fill(STEAM_LT)
-        p5.circle(pp[0].to_i - 1, pp[1].to_i - 1, r / 2)
+        p5.circle(px - 1, py - 1, r / 2)
       end
     end
     i += 1
@@ -903,6 +1044,30 @@ def draw_wheel(p5, cx, cy, r, phase)
   p5.circle(cx, cy, 2)
   p5.fill(LOCO_BLACK)
   p5.circle(cx, cy, 1)
+end
+
+# Pre-rendered wheel sprites. Each radius gets 8 phase variants (one per
+# WHEEL_SPOKES position). Sprite size is (2r+3) x (2r+3) to enclose the rim
+# circle of radius r+1; the wheel center sits at sprite (r+1, r+1).
+def build_wheel_sprites(p5, r)
+  sprites = []
+  size = 2 * r + 3
+  center = r + 1
+  phase = 0
+  while phase < 8
+    sprite = p5.create_graphics(size, size)
+    sprite.background(TRANS_KEY)
+    draw_wheel(sprite, center, center, r, phase)
+    sprites << sprite
+    phase += 1
+  end
+  sprites
+end
+
+# Blit the pre-rendered wheel sprite for the given (r, phase) at world
+# (cx, cy). Replaces the per-frame draw_wheel call.
+def blit_wheel(p5, sprites, cx, cy, r, phase)
+  p5.blit(sprites[phase & 7], cx - (r + 1), cy - (r + 1), TRANS_KEY)
 end
 
 # ===== Tender (coal car) =====
@@ -961,8 +1126,8 @@ def draw_tender(p5, cx, cy, phase, body_only: false)
 end
 
 def draw_tender_wheels(p5, cx, cy, phase)
-  draw_wheel(p5, cx - 13, cy + 14, 6, phase)
-  draw_wheel(p5, cx + 13, cy + 14, 6, phase + 3)
+  blit_wheel(p5, WHEEL_R6_SPRITES, cx - 13, cy + 14, 6, phase)
+  blit_wheel(p5, WHEEL_R6_SPRITES, cx + 13, cy + 14, 6, phase + 3)
 end
 
 # ===== Locomotive =====
@@ -1153,11 +1318,11 @@ def draw_locomotive_motion(p5, base_x, base_y, wheel_phase)
   by = base_y
   wheel_y = by + 16
   # Drive wheels spaced 20 apart so they don't overlap (radius 9 + 9 = 18 < 20).
-  draw_wheel(p5, bx - 26, wheel_y, 9, wheel_phase)
-  draw_wheel(p5, bx - 6,  wheel_y, 9, wheel_phase + 2)
-  draw_wheel(p5, bx + 14, wheel_y, 9, wheel_phase + 4)
+  blit_wheel(p5, WHEEL_R9_SPRITES, bx - 26, wheel_y, 9, wheel_phase)
+  blit_wheel(p5, WHEEL_R9_SPRITES, bx - 6,  wheel_y, 9, wheel_phase + 2)
+  blit_wheel(p5, WHEEL_R9_SPRITES, bx + 14, wheel_y, 9, wheel_phase + 4)
   # Pilot wheel (smaller, in front under the cylinder)
-  draw_wheel(p5, bx + 30, wheel_y + 2, 5, wheel_phase + 1)
+  blit_wheel(p5, WHEEL_R5_SPRITES, bx + 30, wheel_y + 2, 5, wheel_phase + 1)
   # Side rod connecting drive wheels
   rod_dy = (wheel_phase & 1) == 0 ? 0 : 1
   p5.fill(LOCO_LITE)
@@ -1182,7 +1347,7 @@ end
 # Blit the pre-rendered sprite + draw the wheels/rod on top. Replaces the
 # per-frame draw_locomotive call.
 def draw_train_sprite(p5, sprite, base_x, base_y, wheel_phase)
-  p5.image(sprite, base_x - LOCO_SPRITE_BX, base_y - LOCO_SPRITE_BY, TRANS_KEY)
+  p5.blit(sprite, base_x - LOCO_SPRITE_BX, base_y - LOCO_SPRITE_BY, TRANS_KEY)
   draw_locomotive_motion(p5, base_x, base_y, wheel_phase)
 end
 
@@ -1223,27 +1388,13 @@ def ruby_pixel_color(ch)
   end
 end
 
-def draw_ruby_runner(p5, cx, base_y, frame, speed)
-  # Run cycle: phase 0/2 = one foot lifted (body at peak), phase 1/3 = both
-  # feet planted (body at bottom). bob_div scales the cycle with speed.
-  bob_div = if speed > 3.0
-              3
-            elsif speed > 1.0
-              4
-            else
-              7
-            end
-  bob_phase = (frame / bob_div) & 3
-  bob = (bob_phase & 1 == 0) ? 2 : 0
+RUBY_SPRITE_W = 16
+RUBY_SPRITE_H = RUBY_PIXEL_DATA.length
 
-  # Sprite is 16x16. base_y is where the feet's bottom lands.
-  top_y = base_y - 16 - bob
-  left_x = cx - 8
-
-  p5.no_stroke
-
-  # Body rows (0..13) from pixel data, batching same-color runs per row to
-  # cut down the per-frame rect count.
+def build_ruby_sprite(p5)
+  sprite = p5.create_graphics(RUBY_SPRITE_W, RUBY_SPRITE_H)
+  sprite.background(TRANS_KEY)
+  sprite.no_stroke
   y = 0
   while y < RUBY_PIXEL_DATA.length
     row = RUBY_PIXEL_DATA[y]
@@ -1259,13 +1410,37 @@ def draw_ruby_runner(p5, cx, base_y, frame, speed)
         end
         col = ruby_pixel_color(ch)
         if col
-          p5.fill(col)
-          p5.rect(left_x + run_start, top_y + y, x - run_start, 1)
+          sprite.fill(col)
+          sprite.rect(run_start, y, x - run_start, 1)
         end
       end
     end
     y += 1
   end
+  sprite
+end
+
+def draw_ruby_runner(p5, cx, base_y, frame, speed)
+  # Run cycle: phase 0/2 = one foot lifted (body at peak), phase 1/3 = both
+  # feet planted (body at bottom). bob_div scales the cycle with speed.
+  bob_div = if speed > 3.0
+              3
+            elsif speed > 1.0
+              4
+            else
+              7
+            end
+  bob_phase = (frame / bob_div) & 3
+  bob = (bob_phase & 1 == 0) ? 2 : 0
+
+  # Body sprite is 16 wide x 14 tall (rows 0..13). base_y is where the
+  # feet's bottom lands; feet add 2 more rows below the sprite.
+  top_y = base_y - 16 - bob
+  left_x = cx - 8
+
+  # Blit the pre-rendered body sprite (saves ~38 rect calls per frame).
+  p5.blit(RUBY_SPRITE, left_x, top_y, TRANS_KEY)
+  p5.no_stroke
 
   # Feet at rows 14..15 of the sprite. Left foot at cols 4..6, right at
   # cols 9..11. Alternate which foot is fully planted (2 tall) vs lifted
@@ -1458,34 +1633,39 @@ def draw_explosion(p5, elapsed_ms, bg_offset)
   draw_big_centered(p5, "BOOM!", FIRE_RED, 2)
 end
 
-def update_bgm(audio, state, frame, speed, prev)
-  case state
-  when :warmup, :running
-    interval = (480.0 / (0.5 + speed)).to_i
-    interval = 80 if interval < 80
-    note_step = (Machine.board_millis / interval) & 7
-    if note_step != prev[:melody_step]
-      audio.tone(0, BGM_NOTES[note_step], waveform: 0, volume: 8)
-      prev[:melody_step] = note_step
-    end
-    # Steam chug: rhythmic low sawtooth that gets faster with speed.
-    chug_period = (60.0 / speed).to_i
-    chug_period = 6 if chug_period < 6
-    if frame % chug_period == 0
-      audio.tone(1, 110, waveform: 3, volume: 9)
-    elsif frame % chug_period == (chug_period / 2)
-      audio.stop(1)
-    end
-  else
-    audio.stop(0)
-    audio.stop(1)
-    prev[:melody_step] = -1
-  end
-end
-
 # Pre-render the static parts of the locomotive into a sprite. The result is
 # blitted each frame, with only the wheels and side rod redrawn dynamically.
 LOCO_SPRITE = build_locomotive_sprite(p5)
+
+# Pre-render the 10 battle flag sprites (5 types x 2 sizes). Each flag is
+# blitted once per frame; only the wave trailing-edge rects are drawn live.
+FLAG_SPRITES = build_flag_sprites(p5)
+
+# Pre-render the two tree variants (pine, round) into sprites.
+TREE_SPRITES = build_tree_sprites(p5)
+PINE_SPRITE  = TREE_SPRITES[0]
+ROUND_SPRITE = TREE_SPRITES[1]
+
+# Pre-render Ruby-chan's body (rows 0..13). Feet rows are drawn live for the
+# run-cycle animation.
+RUBY_SPRITE = build_ruby_sprite(p5)
+
+# Pre-render the entire rail strip as a sprite that's one tie-period wider
+# than the screen. Each frame just blits it once at a scrolled offset.
+RAILS_SPRITE = build_rails_sprite(p5)
+
+# Pre-render 3 height buckets per mountain layer (9 sprites total). Each
+# layer's sprites use the layer's half_w and body/shadow color pair.
+FAR_MTN_SPRITES  = build_mountain_sprites(p5, 26, FAR_MTN_BUCKETS,  FAR_MTN,  MID_MTN)
+MID_MTN_SPRITES  = build_mountain_sprites(p5, 36, MID_MTN_BUCKETS,  MID_MTN,  NEAR_MTN)
+NEAR_MTN_SPRITES = build_mountain_sprites(p5, 48, NEAR_MTN_BUCKETS, NEAR_MTN, LOCO_BLACK)
+
+# Pre-rendered wheel sprites: 8 phase variants per radius. Drive wheels use
+# r=9, pilot uses r=5, tender uses r=6. Each blit_wheel call becomes a
+# single image() instead of ~17 draw calls.
+WHEEL_R5_SPRITES = build_wheel_sprites(p5, 5)
+WHEEL_R6_SPRITES = build_wheel_sprites(p5, 6)
+WHEEL_R9_SPRITES = build_wheel_sprites(p5, 9)
 
 # ===== Main loop =====
 
@@ -1507,8 +1687,6 @@ frame = 0
 smoke_particles = Array.new(14, nil)
 smoke_timer = 0
 smoke_index = 0
-bgm_state = { melody_step: -1 }
-last_countdown_sec = -1
 next_frame_ms = Machine.board_millis
 
 # FPS counter for the HUD. $fps is read by draw_hud; window_* track the
@@ -1520,6 +1698,7 @@ $render_ms = 0
 $commit_ms = 0
 fps_window_start_ms = next_frame_ms
 fps_window_frames = 0
+prev_loop_ms = next_frame_ms
 
 loop do
   now = Machine.board_millis
@@ -1530,6 +1709,15 @@ loop do
     fps_window_start_ms = now
   end
   elapsed = now - state_start_ms
+  # Wall-clock delta scaled to target-frame units. At 30fps this is ~1.0;
+  # at 10fps it's ~3.0. Per-frame counters (bg_offset, frame, wheel_accum,
+  # smoke_timer) multiply by this so wall-clock pacing stays the same even
+  # when the render rate drops. Clamp to 1 so an unexpectedly fast frame
+  # never advances less than one target-frame's worth.
+  dt_ms = now - prev_loop_ms
+  prev_loop_ms = now
+  dt_frames = dt_ms.to_f / FRAME_INTERVAL_MS
+  dt_frames = 1.0 if dt_frames < 1.0
   enter, quit = drain_input(keyboard)
   break if quit
 
@@ -1538,12 +1726,12 @@ loop do
   # Background scroll: bg_offset only advances during warmup/running.
   # Opening uses a tiny drift to keep the locomotive idle but alive.
   if state == :warmup || state == :running
-    bg_offset += (speed * 2.5 + 1.0).to_i
+    bg_offset += ((speed * 2.5 + 1.0) * dt_frames).to_i
   elsif state == :opening
-    bg_offset += 1
+    bg_offset += (1 * dt_frames).to_i
   elsif state == :result_goal && elapsed > PHASE_RESULT_MS
     # Keep the train idling at Tokyo during the announcement
-    bg_offset += 1
+    bg_offset += (1 * dt_frames).to_i
   end
 
   # Wheel rotation: advance by an integer amount each frame so wheels spin
@@ -1557,7 +1745,7 @@ loop do
              else
                0
              end
-  wheel_accum += spin_inc
+  wheel_accum += (spin_inc * dt_frames).to_i
   wheel_accum -= 65_536 if wheel_accum > 65_536
   wheel_phase = (wheel_accum / 4) & 7
 
@@ -1568,7 +1756,7 @@ loop do
                  when :start, :warmup then 3
                  else (3 + (speed * 2).to_i)
                  end
-    smoke_timer += smoke_rate
+    smoke_timer += (smoke_rate * dt_frames).to_i
     if smoke_timer >= 60
       smoke_timer = 0
       hot = state == :running && (frame & 3) == 0
@@ -1585,8 +1773,6 @@ loop do
     if enter
       state = :countdown
       state_start_ms = now
-      last_countdown_sec = -1
-      audio.stop_all
     end
 
   when :countdown
@@ -1596,16 +1782,9 @@ loop do
     seconds_left = 3 - (elapsed / 1000)
     seconds_left = 1 if seconds_left < 1
     draw_big_centered(p5, seconds_left.to_s, LOCO_RED, 3)
-    sec = elapsed / 1000
-    if sec != last_countdown_sec && sec < 3
-      audio.tone(2, 880, waveform: 0, volume: 12)
-      last_countdown_sec = sec
-    end
     if elapsed >= PHASE_COUNTDOWN_MS
-      audio.stop(2)
       state = :start
       state_start_ms = now
-      audio.tone(2, 523, waveform: 0, volume: 13)
     end
 
   when :start
@@ -1614,7 +1793,6 @@ loop do
     draw_smoke_particles(p5, smoke_particles)
     draw_big_centered(p5, "START!", BRASS_LITE, 2)
     if elapsed >= PHASE_START_MS
-      audio.stop(2)
       state = :warmup
       state_start_ms = now
     end
@@ -1625,13 +1803,11 @@ loop do
     draw_smoke_particles(p5, smoke_particles)
     remaining = total_ms - elapsed
     draw_hud(p5, remaining, total_ms, "WARM UP")
-    update_bgm(audio, :warmup, frame, speed, bgm_state)
     if elapsed >= warmup_ms
       state = :running
       state_start_ms = now
     end
     if enter
-      audio.stop_all
       state = :result_goal
       state_start_ms = now
     end
@@ -1642,17 +1818,12 @@ loop do
     draw_smoke_particles(p5, smoke_particles)
     remaining = running_ms - elapsed
     draw_hud(p5, remaining, total_ms, "GO!")
-    update_bgm(audio, :running, frame, speed, bgm_state)
     if enter
-      audio.stop_all
       state = :result_goal
       state_start_ms = now
-      audio.tone(2, 523, waveform: 0, volume: 13)
     elsif elapsed >= running_ms
-      audio.stop_all
       state = :result_explode
       state_start_ms = now
-      audio.tone(2, 110, waveform: 3, volume: 14)
     end
 
   when :result_goal
@@ -1673,7 +1844,6 @@ loop do
     else
       draw_ending_announcement(p5, elapsed - PHASE_RESULT_MS, bg_offset, frame, wheel_phase)
       if enter
-        audio.stop_all
         state = :opening
         state_start_ms = now
         bg_offset = 0
@@ -1684,17 +1854,6 @@ loop do
           i += 1
         end
       end
-    end
-    if elapsed < 200
-      audio.tone(2, 523, waveform: 0, volume: 13)
-    elsif elapsed < 400
-      audio.tone(2, 659, waveform: 0, volume: 13)
-    elsif elapsed < 600
-      audio.tone(2, 784, waveform: 0, volume: 13)
-    elsif elapsed < 1200
-      audio.tone(2, 1047, waveform: 0, volume: 13)
-    else
-      audio.stop(2)
     end
 
   when :result_explode
@@ -1705,7 +1864,6 @@ loop do
       # so the audience always sees the closing slide.
       draw_ending_announcement(p5, elapsed - PHASE_RESULT_MS, bg_offset, frame, wheel_phase)
       if enter
-        audio.stop_all
         state = :opening
         state_start_ms = now
         bg_offset = 0
@@ -1716,13 +1874,6 @@ loop do
           i += 1
         end
       end
-    end
-    if elapsed < 1500
-      freq = 440 - (elapsed / 4)
-      freq = 55 if freq < 55
-      audio.tone(2, freq, waveform: 3, volume: 14)
-    else
-      audio.stop(2)
     end
   end
 
@@ -1739,15 +1890,14 @@ loop do
     draw_ruby_runner(p5, 42, 232, frame, ruby_speed)
   end
 
-  audio.update
   t_commit_start = Machine.board_millis
   p5.commit
   t_commit_end = Machine.board_millis
   $render_ms = t_commit_start - now
   $commit_ms = t_commit_end - t_commit_start
   # Cap to ~30fps so frame intervals stay consistent rather than oscillating
-  # between 16ms and 33ms. `frame += 2` keeps 60fps-tuned `frame / N` divisors
-  # animating at the same wall-clock rate.
+  # between 16ms and 33ms. When rendering falls behind, frame counter scales
+  # with wall-clock dt so animations stay at the same wall-clock pace.
   next_frame_ms += FRAME_INTERVAL_MS
   remaining = next_frame_ms - Machine.board_millis
   if remaining > 0
@@ -1757,8 +1907,5 @@ loop do
     # don't stack up debt for the next frame.
     next_frame_ms = Machine.board_millis
   end
-  frame += 2
+  frame += (2 * dt_frames).to_i
 end
-
-audio.stop_all
-audio.deinit

@@ -16,13 +16,19 @@ class P5
   # Allocate an off-screen drawing target (a "sprite") that the same p5 API
   # can render into. The returned P5 instance has its own buffer; calling
   # rect / circle / line / triangle on it writes into the sprite rather than
-  # the main framebuffer. Once built, use the main p5's #image to blit it.
+  # the main framebuffer. Once built, use #blit (or #image) to draw it.
+  #
+  # @data is a 3-element [buf, w, h] array kept alongside the attr-reader
+  # fields. #blit reads it instead of calling three attr methods so that
+  # the per-blit Ruby overhead drops from ~6 dispatches to ~2.
   def self.create_graphics(w, h)
     sprite = P5.allocate
     sprite.send(:init_state)
-    sprite.instance_variable_set(:@target_buf, "\x00" * (w * h))
+    buf = "\x00" * (w * h)
+    sprite.instance_variable_set(:@target_buf, buf)
     sprite.instance_variable_set(:@target_w, w)
     sprite.instance_variable_set(:@target_h, h)
+    sprite.instance_variable_set(:@data, [buf, w, h])
     sprite
   end
 
@@ -30,7 +36,16 @@ class P5
     P5.create_graphics(w, h)
   end
 
-  attr_reader :target_buf, :target_w, :target_h
+  attr_reader :target_buf, :target_w, :target_h, :data
+
+  # Blit a pre-rendered sprite onto the current target. Faster path than
+  # #image: takes only the sprite, x, y, transparent_color. Reads the
+  # sprite's cached [buf, w, h] array (one method call + three array index
+  # ops, vs three attr_reader calls and an is_a? check in #image).
+  def blit(sprite, x, y, transparent = -1)
+    d = sprite.data
+    G.blit(d[0], x, y, d[1], d[2], transparent)
+  end
 
   def width
     @target_w
@@ -69,42 +84,12 @@ class P5
     @text_leading = 0
     @matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
     @matrix_stack = []
-  end
-
-  # Internal drawing helpers: route to either the main framebuffer or the
-  # current sprite buffer based on @target_buf. Kept private so the public
-  # API (rect/circle/line/triangle) doesn't have to repeat the branch.
-
-  private def _fill_rect(x, y, w, h, color)
-    if @target_buf
-      G.fill_rect_to(@target_buf, @target_w, @target_h, x, y, w, h, color)
-    else
-      G.fill_rect(x, y, w, h, color)
-    end
-  end
-
-  private def _fill_circle(cx, cy, r, color)
-    if @target_buf
-      G.fill_circle_to(@target_buf, @target_w, @target_h, cx, cy, r, color)
-    else
-      G.fill_circle(cx, cy, r, color)
-    end
-  end
-
-  private def _fill_triangle(x0, y0, x1, y1, x2, y2, color)
-    if @target_buf
-      G.fill_triangle_to(@target_buf, @target_w, @target_h, x0, y0, x1, y1, x2, y2, color)
-    else
-      G.fill_triangle(x0, y0, x1, y1, x2, y2, color)
-    end
-  end
-
-  private def _draw_line(x0, y0, x1, y1, color)
-    if @target_buf
-      G.draw_line_to(@target_buf, @target_w, @target_h, x0, y0, x1, y1, color)
-    else
-      G.draw_line(x0, y0, x1, y1, color)
-    end
+    # Cached transform state to avoid the translate_only? method call and
+    # repeated @matrix[4].round in every draw call. Kept in sync by translate
+    # / rotate / scale / reset_matrix / push_matrix / pop_matrix.
+    @translate_only = true
+    @matrix_tx = 0
+    @matrix_ty = 0
   end
 
   # State setters
@@ -186,21 +171,25 @@ class P5
   #   x' = a*x + b*y + tx
   #   y' = c*x + d*y + ty
   #
-  # Drawing functions check translate_only? for a fast path (integer add)
-  # and fall back to full matrix transform for rotation/scale.
+  # @translate_only / @matrix_tx / @matrix_ty are cached fields kept in sync
+  # with @matrix on every mutation. Drawing functions read them directly
+  # instead of going through translate_only? / @matrix[4].round.
 
   def translate(tx, ty)
     @matrix = matrix_multiply(@matrix, [1.0, 0.0, 0.0, 1.0, tx.to_f, ty.to_f])
+    refresh_matrix_cache
   end
 
   def rotate(angle)
     c = Math.cos(angle)
     s = Math.sin(angle)
     @matrix = matrix_multiply(@matrix, [c, -s, s, c, 0.0, 0.0])
+    refresh_matrix_cache
   end
 
   def scale(sx, sy = sx)
     @matrix = matrix_multiply(@matrix, [sx.to_f, 0.0, 0.0, sy.to_f, 0.0, 0.0])
+    refresh_matrix_cache
   end
 
   def push_matrix
@@ -211,48 +200,81 @@ class P5
   end
 
   def pop_matrix
-    @matrix = @matrix_stack.pop if @matrix_stack.length > 0
+    if @matrix_stack.length > 0
+      @matrix = @matrix_stack.pop
+      refresh_matrix_cache
+    end
   end
 
   def reset_matrix
     @matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    @translate_only = true
+    @matrix_tx = 0
+    @matrix_ty = 0
+  end
+
+  private def refresh_matrix_cache
+    m = @matrix
+    @translate_only = (m[0] == 1.0 && m[1] == 0.0 && m[2] == 0.0 && m[3] == 1.0)
+    @matrix_tx = m[4].round
+    @matrix_ty = m[5].round
   end
 
   # Shape drawing
 
   def point(x, y)
     return unless @stroke_enabled
-    px, py = transform(x, y)
-    G.set_pixel(px, py, @stroke_color)
+    if @translate_only
+      G.set_pixel(x + @matrix_tx, y + @matrix_ty, @stroke_color)
+    else
+      px, py = transform(x, y)
+      G.set_pixel(px, py, @stroke_color)
+    end
   end
 
   def line(x0, y0, x1, y1)
     return unless @stroke_enabled
-    ax, ay = transform(x0, y0)
-    bx, by = transform(x1, y1)
+    if @translate_only
+      tx = @matrix_tx
+      ty = @matrix_ty
+      ax = x0 + tx; ay = y0 + ty
+      bx = x1 + tx; by = y1 + ty
+    else
+      ax, ay = transform(x0, y0)
+      bx, by = transform(x1, y1)
+    end
     if @stroke_weight > 1 && !@target_buf
       G.draw_thick_line(ax, ay, bx, by, @stroke_weight, @stroke_color)
+    elsif @target_buf
+      G.draw_line_to(@target_buf, @target_w, @target_h, ax, ay, bx, by, @stroke_color)
     else
-      _draw_line(ax, ay, bx, by, @stroke_color)
+      G.draw_line(ax, ay, bx, by, @stroke_color)
     end
   end
 
   def rect(x, y, w, h)
-    if translate_only?
-      tx = @matrix[4].round
-      ty = @matrix[5].round
-      _fill_rect(x + tx, y + ty, w, h, @fill_color) if @fill_enabled
+    if @translate_only
+      tx = @matrix_tx
+      ty = @matrix_ty
+      rx = x + tx
+      ry = y + ty
+      if @fill_enabled
+        if @target_buf
+          G.fill_rect_to(@target_buf, @target_w, @target_h, rx, ry, w, h, @fill_color)
+        else
+          G.fill_rect(rx, ry, w, h, @fill_color)
+        end
+      end
       if @stroke_enabled
         if @target_buf
           # Sprite target: emulate draw_rect with four lines
-          rx = x + tx
-          ry = y + ty
-          _draw_line(rx, ry, rx + w - 1, ry, @stroke_color)
-          _draw_line(rx, ry + h - 1, rx + w - 1, ry + h - 1, @stroke_color)
-          _draw_line(rx, ry, rx, ry + h - 1, @stroke_color)
-          _draw_line(rx + w - 1, ry, rx + w - 1, ry + h - 1, @stroke_color)
+          tb = @target_buf; tw = @target_w; th = @target_h; sc = @stroke_color
+          G.draw_line_to(tb, tw, th, rx, ry, rx + w - 1, ry, sc)
+          G.draw_line_to(tb, tw, th, rx, ry + h - 1, rx + w - 1, ry + h - 1, sc)
+          G.draw_line_to(tb, tw, th, rx, ry, rx, ry + h - 1, sc)
+          G.draw_line_to(tb, tw, th, rx + w - 1, ry, rx + w - 1, ry + h - 1, sc)
         else
-          G.draw_rect(x + tx, y + ty, w, h, @stroke_color)
+          G.draw_rect(rx, ry, w, h, @stroke_color)
         end
       end
     else
@@ -261,8 +283,15 @@ class P5
       x2, y2 = transform(x + w, y + h)
       x3, y3 = transform(x, y + h)
       if @fill_enabled
-        _fill_triangle(x0, y0, x1, y1, x2, y2, @fill_color)
-        _fill_triangle(x0, y0, x2, y2, x3, y3, @fill_color)
+        fc = @fill_color
+        if @target_buf
+          tb = @target_buf; tw = @target_w; th = @target_h
+          G.fill_triangle_to(tb, tw, th, x0, y0, x1, y1, x2, y2, fc)
+          G.fill_triangle_to(tb, tw, th, x0, y0, x2, y2, x3, y3, fc)
+        else
+          G.fill_triangle(x0, y0, x1, y1, x2, y2, fc)
+          G.fill_triangle(x0, y0, x2, y2, x3, y3, fc)
+        end
       end
       if @stroke_enabled
         draw_edge(x0, y0, x1, y1)
@@ -274,16 +303,24 @@ class P5
   end
 
   def circle(cx, cy, r)
-    tcx, tcy = transform(cx, cy)
-    if translate_only?
-      _fill_circle(tcx, tcy, r, @fill_color) if @fill_enabled
-      if @stroke_enabled
+    if @translate_only
+      tcx = cx + @matrix_tx
+      tcy = cy + @matrix_ty
+      if @fill_enabled
+        if @target_buf
+          G.fill_circle_to(@target_buf, @target_w, @target_h, tcx, tcy, r, @fill_color)
+        else
+          G.fill_circle(tcx, tcy, r, @fill_color)
+        end
+      end
+      if @stroke_enabled && !@target_buf
         # draw_circle is only available on the main framebuffer; for sprite
         # targets we currently skip the outline. draw_locomotive uses
         # filled circles only, so this is fine for the rubykaja workload.
-        G.draw_circle(tcx, tcy, r, @stroke_color) unless @target_buf
+        G.draw_circle(tcx, tcy, r, @stroke_color)
       end
     else
+      tcx, tcy = transform(cx, cy)
       sx = Math.sqrt(@matrix[0] * @matrix[0] + @matrix[2] * @matrix[2])
       sy = Math.sqrt(@matrix[1] * @matrix[1] + @matrix[3] * @matrix[3])
       rx = (r * sx).round
@@ -294,11 +331,13 @@ class P5
   end
 
   def ellipse(cx, cy, rx, ry)
-    tcx, tcy = transform(cx, cy)
-    if translate_only?
+    if @translate_only
+      tcx = cx + @matrix_tx
+      tcy = cy + @matrix_ty
       G.fill_ellipse(tcx, tcy, rx, ry, @fill_color) if @fill_enabled
       G.draw_ellipse(tcx, tcy, rx, ry, @stroke_color) if @stroke_enabled
     else
+      tcx, tcy = transform(cx, cy)
       sx = Math.sqrt(@matrix[0] * @matrix[0] + @matrix[2] * @matrix[2])
       sy = Math.sqrt(@matrix[1] * @matrix[1] + @matrix[3] * @matrix[3])
       trx = (rx * sx).round
@@ -309,10 +348,25 @@ class P5
   end
 
   def triangle(x0, y0, x1, y1, x2, y2)
-    ax, ay = transform(x0, y0)
-    bx, by = transform(x1, y1)
-    cx, cy = transform(x2, y2)
-    _fill_triangle(ax, ay, bx, by, cx, cy, @fill_color) if @fill_enabled
+    if @translate_only
+      tx = @matrix_tx
+      ty = @matrix_ty
+      ax = x0 + tx; ay = y0 + ty
+      bx = x1 + tx; by = y1 + ty
+      cx = x2 + tx; cy = y2 + ty
+    else
+      ax, ay = transform(x0, y0)
+      bx, by = transform(x1, y1)
+      cx, cy = transform(x2, y2)
+    end
+    if @fill_enabled
+      if @target_buf
+        G.fill_triangle_to(@target_buf, @target_w, @target_h,
+                           ax, ay, bx, by, cx, cy, @fill_color)
+      else
+        G.fill_triangle(ax, ay, bx, by, cx, cy, @fill_color)
+      end
+    end
     if @stroke_enabled
       draw_edge(ax, ay, bx, by)
       draw_edge(bx, by, cx, cy)
@@ -387,8 +441,9 @@ class P5
       y -= font_height
     end
 
-    if translate_only?
-      tx, ty = transform(x, y)
+    if @translate_only
+      tx = x + @matrix_tx
+      ty = y + @matrix_ty
       if @wide_font
         G.draw_text(tx, ty, str, @text_color, @font, @wide_font)
       else
@@ -418,9 +473,8 @@ class P5
       return
     end
     w = w_or_transparent
-    if translate_only?
-      tx, ty = transform(x, y)
-      G.draw_image(arg, tx, ty, w, h)
+    if @translate_only
+      G.draw_image(arg, x + @matrix_tx, y + @matrix_ty, w, h)
     else
       m = @matrix
       G.draw_image_affine(arg, w, h, x, y,
@@ -429,9 +483,8 @@ class P5
   end
 
   def image_masked(data, mask, x, y, w, h)
-    if translate_only?
-      tx, ty = transform(x, y)
-      G.draw_image_masked(data, mask, tx, ty, w, h)
+    if @translate_only
+      G.draw_image_masked(data, mask, x + @matrix_tx, y + @matrix_ty, w, h)
     else
       m = @matrix
       G.draw_image_masked_affine(data, mask, w, h, x, y,
@@ -467,22 +520,21 @@ class P5
      (m[2] * x + m[3] * y + m[5]).round]
   end
 
-  def translate_only?
-    m = @matrix
-    m[0] == 1.0 && m[1] == 0.0 && m[2] == 0.0 && m[3] == 1.0
-  end
-
   def matrix_multiply(a, b)
     [a[0]*b[0] + a[1]*b[2], a[0]*b[1] + a[1]*b[3],
      a[2]*b[0] + a[3]*b[2], a[2]*b[1] + a[3]*b[3],
      a[0]*b[4] + a[1]*b[5] + a[4], a[2]*b[4] + a[3]*b[5] + a[5]]
   end
 
+  # Called from rect/triangle stroke paths after the vertices have already
+  # been transformed, so no further translation is needed here.
   def draw_edge(x0, y0, x1, y1)
     if @stroke_weight > 1 && !@target_buf
       G.draw_thick_line(x0, y0, x1, y1, @stroke_weight, @stroke_color)
+    elsif @target_buf
+      G.draw_line_to(@target_buf, @target_w, @target_h, x0, y0, x1, y1, @stroke_color)
     else
-      _draw_line(x0, y0, x1, y1, @stroke_color)
+      G.draw_line(x0, y0, x1, y1, @stroke_color)
     end
   end
 end
