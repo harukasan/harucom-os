@@ -12,16 +12,22 @@
 # Keys: Enter = start / goal / restart, Esc or Ctrl-C = quit
 
 require "p5"
-begin
-  require "board/pwm_audio"
-rescue
-end
 
 DVI::Graphics.set_resolution(320, 240)
 p5 = P5.new
 keyboard = $keyboard
 
-audio = Board::PWMAudio.new
+# Audio is disabled for this presentation (no output cable). All audio
+# calls in the main loop run against this no-op object so the BGM/SFX
+# logic can stay in place for future re-enabling.
+class NullAudio
+  def tone(*, **); end
+  def stop(*); end
+  def stop_all; end
+  def update; end
+  def deinit; end
+end
+audio = NullAudio.new
 
 W = p5.width
 H = p5.height
