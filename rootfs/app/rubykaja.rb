@@ -90,6 +90,9 @@ TOWER_RED  = p5.color(224,  64,   0)
 FUJI_NAVY  = p5.color( 64,  96, 128)
 RUBY_RED   = p5.color(224,   0,   0)
 RUBY_BLUSH = p5.color(240, 128, 128)
+# Magenta marker used as the transparent color key in pre-rendered sprites.
+# Not used anywhere else in the palette.
+TRANS_KEY  = p5.color(255,   0, 255)
 
 # ===== Layout (320x240) =====
 LOCO_X    = 178
@@ -99,6 +102,15 @@ RAIL_Y    = 196
 HUD_H     = 18
 HORIZON_Y = 150
 GROUND_Y  = 156
+
+# Locomotive sprite dimensions. The static parts (boiler / cab / smoke box /
+# tender body etc.) are pre-rendered once into a buffer of this size; each
+# frame blits the buffer and overdraws the wheels and side rod. The (BX, BY)
+# point inside the sprite corresponds to the locomotive's base_x, base_y.
+LOCO_SPRITE_W  = 152
+LOCO_SPRITE_H  = 46
+LOCO_SPRITE_BX = 108
+LOCO_SPRITE_BY = 28
 
 PHASE_COUNTDOWN_MS = 3_000
 PHASE_START_MS     = 1_500
@@ -895,7 +907,7 @@ end
 
 # ===== Tender (coal car) =====
 
-def draw_tender(p5, cx, cy, phase)
+def draw_tender(p5, cx, cy, phase, body_only: false)
   body_top = cy - 12
   body_bot = cy + 8
   left = cx - 22
@@ -935,9 +947,12 @@ def draw_tender(p5, cx, cy, phase)
   p5.rect(left + 6, body_top - 4, 1, 1)
   p5.rect(left + 20, body_top - 5, 1, 1)
   p5.rect(left + 34, body_top - 4, 1, 1)
-  # Wheels (two truck wheels under tender)
-  draw_wheel(p5, cx - 13, cy + 14, 6, phase)
-  draw_wheel(p5, cx + 13, cy + 14, 6, phase + 3)
+  # Wheels (two truck wheels under tender). Skipped in body_only mode so
+  # the sprite version doesn't bake the wheels in.
+  unless body_only
+    draw_wheel(p5, cx - 13, cy + 14, 6, phase)
+    draw_wheel(p5, cx + 13, cy + 14, 6, phase + 3)
+  end
   # Rear-side ladder (on the back / left side of tender)
   p5.fill(LOCO_LITE)
   p5.rect(left + 1, body_top + 2, 1, 14)
@@ -945,9 +960,14 @@ def draw_tender(p5, cx, cy, phase)
   p5.rect(left + 1, body_top + 10, 4, 1)
 end
 
+def draw_tender_wheels(p5, cx, cy, phase)
+  draw_wheel(p5, cx - 13, cy + 14, 6, phase)
+  draw_wheel(p5, cx + 13, cy + 14, 6, phase + 3)
+end
+
 # ===== Locomotive =====
 
-def draw_locomotive(p5, base_x, base_y, wheel_phase, frame)
+def draw_locomotive(p5, base_x, base_y, wheel_phase, frame, body_only: false)
   bx = base_x
   by = base_y
 
@@ -1100,25 +1120,7 @@ def draw_locomotive(p5, base_x, base_y, wheel_phase, frame)
   p5.fill(LOCO_BLACK)
   p5.rect(bx + 35, by + 14, 2, 3)
 
-  # === Wheels (3 drivers + pilot wheel) ===
-  wheel_y = by + 16
-  # Drive wheels spaced 20 apart so they don't overlap (radius 9 + 9 = 18 < 20).
-  draw_wheel(p5, bx - 26, wheel_y, 9, wheel_phase)
-  draw_wheel(p5, bx - 6,  wheel_y, 9, wheel_phase + 2)
-  draw_wheel(p5, bx + 14, wheel_y, 9, wheel_phase + 4)
-  # Pilot wheel (smaller, in front under the cylinder)
-  draw_wheel(p5, bx + 30, wheel_y + 2, 5, wheel_phase + 1)
-
-  # === Side rod connecting drive wheels ===
-  rod_dy = (wheel_phase & 1) == 0 ? 0 : 1
-  p5.fill(LOCO_LITE)
-  p5.rect(bx - 28, wheel_y - 1 + rod_dy, 44, 2)
-  p5.fill(LOCO_BLACK)
-  p5.rect(bx - 26, wheel_y + rod_dy, 1, 1)
-  p5.rect(bx - 6,  wheel_y + rod_dy, 1, 1)
-  p5.rect(bx + 14, wheel_y + rod_dy, 1, 1)
-
-  # === Piston rod from cylinder to driver ===
+  # === Piston rod from cylinder to driver (static position) ===
   p5.fill(LOCO_LITE)
   p5.rect(bx + 14, by + 12, 14, 2)
 
@@ -1126,8 +1128,62 @@ def draw_locomotive(p5, base_x, base_y, wheel_phase, frame)
   p5.fill(LOCO_BLACK)
   p5.rect(bx - 65, by + 8, 15, 3)
 
-  # === Tender ===
-  draw_tender(p5, TENDER_X, by, wheel_phase)
+  # === Tender body (wheels handled by draw_locomotive_motion) ===
+  draw_tender(p5, tender_x_from_loco(base_x), by, wheel_phase, body_only: body_only)
+
+  # === Drive wheels + side rod (dynamic, skipped when prerendering) ===
+  unless body_only
+    draw_locomotive_motion(p5, base_x, base_y, wheel_phase)
+  end
+end
+
+# TENDER_X is a screen-space constant for runtime use, but when prerendering
+# the locomotive into a sprite the tender needs to sit at the same offset
+# relative to the locomotive's base_x as it does at runtime. Computes the
+# tender center given the locomotive base_x.
+TENDER_OFFSET_FROM_LOCO = TENDER_X - LOCO_X
+def tender_x_from_loco(base_x)
+  base_x + TENDER_OFFSET_FROM_LOCO
+end
+
+# Dynamic parts of the locomotive: drive wheels, pilot wheel, side rod, and
+# the tender's wheels. Called every frame on top of the pre-rendered sprite.
+def draw_locomotive_motion(p5, base_x, base_y, wheel_phase)
+  bx = base_x
+  by = base_y
+  wheel_y = by + 16
+  # Drive wheels spaced 20 apart so they don't overlap (radius 9 + 9 = 18 < 20).
+  draw_wheel(p5, bx - 26, wheel_y, 9, wheel_phase)
+  draw_wheel(p5, bx - 6,  wheel_y, 9, wheel_phase + 2)
+  draw_wheel(p5, bx + 14, wheel_y, 9, wheel_phase + 4)
+  # Pilot wheel (smaller, in front under the cylinder)
+  draw_wheel(p5, bx + 30, wheel_y + 2, 5, wheel_phase + 1)
+  # Side rod connecting drive wheels
+  rod_dy = (wheel_phase & 1) == 0 ? 0 : 1
+  p5.fill(LOCO_LITE)
+  p5.rect(bx - 28, wheel_y - 1 + rod_dy, 44, 2)
+  p5.fill(LOCO_BLACK)
+  p5.rect(bx - 26, wheel_y + rod_dy, 1, 1)
+  p5.rect(bx - 6,  wheel_y + rod_dy, 1, 1)
+  p5.rect(bx + 14, wheel_y + rod_dy, 1, 1)
+  # Tender wheels
+  draw_tender_wheels(p5, tender_x_from_loco(bx), by, wheel_phase)
+end
+
+# Build the pre-rendered locomotive + tender body sprite. Done once at
+# startup; the static result is then blitted every frame.
+def build_locomotive_sprite(p5)
+  sprite = p5.create_graphics(LOCO_SPRITE_W, LOCO_SPRITE_H)
+  sprite.background(TRANS_KEY)
+  draw_locomotive(sprite, LOCO_SPRITE_BX, LOCO_SPRITE_BY, 0, 0, body_only: true)
+  sprite
+end
+
+# Blit the pre-rendered sprite + draw the wheels/rod on top. Replaces the
+# per-frame draw_locomotive call.
+def draw_train_sprite(p5, sprite, base_x, base_y, wheel_phase)
+  p5.image(sprite, base_x - LOCO_SPRITE_BX, base_y - LOCO_SPRITE_BY, TRANS_KEY)
+  draw_locomotive_motion(p5, base_x, base_y, wheel_phase)
 end
 
 # ===== Ruby-chan (the runner chasing the locomotive) =====
@@ -1286,7 +1342,7 @@ end
 
 def draw_opening_screen(p5, frame, bg_offset, wheel_phase)
   draw_scene(p5, bg_offset, frame)
-  draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+  draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
 
   # Title overlay
   p5.no_stroke
@@ -1325,7 +1381,7 @@ end
 
 def draw_ending_announcement(p5, elapsed_ms, bg_offset, frame, wheel_phase)
   draw_scene(p5, bg_offset, frame)
-  draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+  draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
   p5.no_stroke
   p5.fill(BLACK)
   p5.rect(24, 36, W - 48, 110)
@@ -1425,6 +1481,10 @@ def update_bgm(audio, state, frame, speed, prev)
     prev[:melody_step] = -1
   end
 end
+
+# Pre-render the static parts of the locomotive into a sprite. The result is
+# blitted each frame, with only the wheels and side rod redrawn dynamically.
+LOCO_SPRITE = build_locomotive_sprite(p5)
 
 # ===== Main loop =====
 
@@ -1526,7 +1586,7 @@ loop do
 
   when :countdown
     draw_scene(p5, bg_offset, frame)
-    draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+    draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
     draw_smoke_particles(p5, smoke_particles)
     seconds_left = 3 - (elapsed / 1000)
     seconds_left = 1 if seconds_left < 1
@@ -1545,7 +1605,7 @@ loop do
 
   when :start
     draw_scene(p5, bg_offset, frame)
-    draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+    draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
     draw_smoke_particles(p5, smoke_particles)
     draw_big_centered(p5, "START!", BRASS_LITE, 2)
     if elapsed >= PHASE_START_MS
@@ -1556,7 +1616,7 @@ loop do
 
   when :warmup
     draw_scene(p5, bg_offset, frame)
-    draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+    draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
     draw_smoke_particles(p5, smoke_particles)
     remaining = total_ms - elapsed
     draw_hud(p5, remaining, total_ms, "WARM UP")
@@ -1573,7 +1633,7 @@ loop do
 
   when :running
     draw_scene(p5, bg_offset, frame)
-    draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+    draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
     draw_smoke_particles(p5, smoke_particles)
     remaining = running_ms - elapsed
     draw_hud(p5, remaining, total_ms, "GO!")
@@ -1593,7 +1653,7 @@ loop do
   when :result_goal
     if elapsed < PHASE_RESULT_MS
       draw_scene(p5, bg_offset, frame)
-      draw_locomotive(p5, LOCO_X, LOCO_Y, wheel_phase, frame)
+      draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
       draw_smoke_particles(p5, smoke_particles)
       # Goal banner
       p5.no_stroke
