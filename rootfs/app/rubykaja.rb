@@ -867,21 +867,15 @@ def draw_building(p5, bx, h, bw, color_id, idx)
   p5.no_stroke
   p5.fill(color)
   p5.rect(bx, by, bw, h)
-  # Window grid
+  # Windows simplified to one horizontal lit strip per floor. From this
+  # viewing distance (320x240 scene), per-window 2x2 rects look like noise;
+  # a line per floor reads naturally as a far-away tower. Cuts ~40-100
+  # rects per building down to ~10-20.
+  p5.fill(WINDOW_DAY)
   wy = by + 4
-  row = 0
   while wy < HORIZON_Y - 4
-    wx = bx + 2
-    col = 0
-    while wx < bx + bw - 3
-      lit = ((row * 3 + col + (idx & 3)) & 7) < 5
-      p5.fill(lit ? WINDOW_DAY : LOCO_BODY)
-      p5.rect(wx, wy, 2, 2)
-      wx += 4
-      col += 1
-    end
+    p5.rect(bx + 2, wy, bw - 4, 1)
     wy += 5
-    row += 1
   end
   # Roof line
   p5.fill(LOCO_BLACK)
