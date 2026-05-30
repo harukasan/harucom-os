@@ -9,7 +9,10 @@
 #
 # Usage:
 #   /app/rubykaja [seconds]   # default 150 seconds (2.5 min)
-# Keys: Enter = start / goal / restart, Esc or Ctrl-C = quit
+# Keys:
+#   Space = start / goal / restart
+#   1 / 2 / 3 = pick timer preset (150 / 60 / 30 seconds)
+#   Esc or Ctrl-C = quit
 
 require "p5"
 
@@ -300,6 +303,27 @@ def speed_for(state, elapsed, warmup_ms, running_ms)
     1.0 + ratio * 4.5
   else
     0.0
+  end
+end
+
+# Derive the timer-dependent values from a total length in seconds. Returns
+# [total_ms, warmup_ms, running_ms, journey_scale]. The journey_scale lets
+# bg_offset advance proportionally faster on shorter runs so Tokyo is still
+# reached within the chosen total time.
+def derive_timer(total_seconds)
+  total_ms = total_seconds * 1000
+  warmup_ms = total_ms / 5
+  warmup_ms = 30_000 if warmup_ms > 30_000
+  running_ms = total_ms - warmup_ms
+  journey_scale = 150.0 / total_seconds
+  [total_ms, warmup_ms, running_ms, journey_scale]
+end
+
+def clear_smoke(particles)
+  i = 0
+  while i < particles.length
+    particles[i] = nil
+    i += 1
   end
 end
 
@@ -1676,15 +1700,7 @@ WHEEL_R9_SPRITES = build_wheel_sprites(p5, 9)
 
 total_seconds = (ARGV[0] || "150").to_i
 total_seconds = 150 if total_seconds <= 0
-total_ms = total_seconds * 1000
-warmup_ms = total_ms / 5
-warmup_ms = 30_000 if warmup_ms > 30_000
-running_ms = total_ms - warmup_ms
-# Scale the per-frame scroll so the destination (Tokyo) is reached within
-# whatever total time the user picked. The base scroll coefficients are
-# tuned for 150 seconds; shorter timers need proportionally faster scroll
-# (e.g. 30s -> 5x faster) so the train still arrives at Akihabara.
-journey_scale = 150.0 / total_seconds
+total_ms, warmup_ms, running_ms, journey_scale = derive_timer(total_seconds)
 
 state = :opening
 state_start_ms = Machine.board_millis
@@ -1720,11 +1736,7 @@ loop do
   # warmup/running split and the journey scroll scale.
   if preset && preset != total_seconds
     total_seconds = preset
-    total_ms = total_seconds * 1000
-    warmup_ms = total_ms / 5
-    warmup_ms = 30_000 if warmup_ms > 30_000
-    running_ms = total_ms - warmup_ms
-    journey_scale = 150.0 / total_seconds
+    total_ms, warmup_ms, running_ms, journey_scale = derive_timer(total_seconds)
   end
 
   speed = speed_for(state, elapsed, warmup_ms, running_ms)
@@ -1854,11 +1866,7 @@ loop do
         state_start_ms = now
         bg_offset = 0
         wheel_accum = 0
-        i = 0
-        while i < smoke_particles.length
-          smoke_particles[i] = nil
-          i += 1
-        end
+        clear_smoke(smoke_particles)
       end
     end
 
@@ -1874,20 +1882,19 @@ loop do
         state_start_ms = now
         bg_offset = 0
         wheel_accum = 0
-        i = 0
-        while i < smoke_particles.length
-          smoke_particles[i] = nil
-          i += 1
-        end
+        clear_smoke(smoke_particles)
       end
     end
   end
 
-  # Ruby-chan running below the rails, chasing the locomotive. Hidden during
-  # explosion / announcement-only states.
-  if state == :opening || state == :countdown || state == :start ||
-     state == :warmup  || state == :running   ||
-     (state == :result_goal && elapsed < PHASE_RESULT_MS)
+  # Ruby-chan runs below the rails chasing the locomotive in every state
+  # except the explosion / standalone announcement screens.
+  ruby_visible = case state
+                 when :opening, :countdown, :start, :warmup, :running then true
+                 when :result_goal then elapsed < PHASE_RESULT_MS
+                 else false
+                 end
+  if ruby_visible
     ruby_speed = case state
                  when :opening, :countdown then 0.3
                  when :start               then 0.6
