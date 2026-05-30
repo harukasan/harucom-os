@@ -268,6 +268,7 @@ end
 def drain_input(keyboard)
   enter = false
   quit = false
+  preset = nil
   loop do
     key = keyboard.read_char
     break unless key
@@ -277,10 +278,16 @@ def drain_input(keyboard)
     else
       # Space advances the state. Enter is intentionally not used because the
       # previous shell may still be listening for it when this app starts.
-      enter = true if key.char == " "
+      # 1 / 2 / 3 pick a total-time preset (150s / 60s / 30s).
+      case key.char
+      when " " then enter = true
+      when "1" then preset = 150
+      when "2" then preset = 60
+      when "3" then preset = 30
+      end
     end
   end
-  [enter, quit]
+  [enter, quit, preset]
 end
 
 def speed_for(state, elapsed, warmup_ms, running_ms)
@@ -1501,7 +1508,7 @@ def draw_hud(p5, remaining_ms, total_ms, phase_text)
   end
 end
 
-def draw_opening_screen(p5, frame, bg_offset, wheel_phase)
+def draw_opening_screen(p5, frame, bg_offset, wheel_phase, total_seconds)
   draw_scene(p5, bg_offset, frame)
   draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
 
@@ -1521,6 +1528,8 @@ def draw_opening_screen(p5, frame, bg_offset, wheel_phase)
   p5.text("RubyKaja 2026 SPECIAL AWARD", W / 2, 50)
   p5.text_color(SUN_CORE)
   p5.text("from PicoPicoRuby", W / 2, 70)
+  p5.text_color(SUN_CORE)
+  p5.text("Timer: #{total_seconds}s  1:150 / 2:60 / 3:30", W / 2, 8)
   p5.text_color(WHITE)
   p5.text("Powered by Harucom", W / 2, 208)
   p5.text("(c) 2026 harukasan", W / 2, 222)
@@ -1671,6 +1680,11 @@ total_ms = total_seconds * 1000
 warmup_ms = total_ms / 5
 warmup_ms = 30_000 if warmup_ms > 30_000
 running_ms = total_ms - warmup_ms
+# Scale the per-frame scroll so the destination (Tokyo) is reached within
+# whatever total time the user picked. The base scroll coefficients are
+# tuned for 150 seconds; shorter timers need proportionally faster scroll
+# (e.g. 30s -> 5x faster) so the train still arrives at Akihabara.
+journey_scale = 150.0 / total_seconds
 
 state = :opening
 state_start_ms = Machine.board_millis
@@ -1699,15 +1713,26 @@ loop do
   prev_loop_ms = now
   dt_frames = dt_ms.to_f / FRAME_INTERVAL_MS
   dt_frames = 1.0 if dt_frames < 1.0
-  enter, quit = drain_input(keyboard)
+  enter, quit, preset = drain_input(keyboard)
   break if quit
+  # Live timer preset (1/2/3). Apply immediately so the user sees the new
+  # remaining time on the HUD; for in-flight races this also recomputes the
+  # warmup/running split and the journey scroll scale.
+  if preset && preset != total_seconds
+    total_seconds = preset
+    total_ms = total_seconds * 1000
+    warmup_ms = total_ms / 5
+    warmup_ms = 30_000 if warmup_ms > 30_000
+    running_ms = total_ms - warmup_ms
+    journey_scale = 150.0 / total_seconds
+  end
 
   speed = speed_for(state, elapsed, warmup_ms, running_ms)
 
   # Background scroll: bg_offset only advances during warmup/running.
   # Opening uses a tiny drift to keep the locomotive idle but alive.
   if state == :warmup || state == :running
-    bg_offset += ((speed * 2.8 + 1.0) * dt_frames).to_i
+    bg_offset += ((speed * 2.8 + 1.0) * dt_frames * journey_scale).to_i
   elsif state == :opening
     bg_offset += (1 * dt_frames).to_i
   elsif state == :result_goal && elapsed > PHASE_RESULT_MS
@@ -1749,7 +1774,7 @@ loop do
 
   case state
   when :opening
-    draw_opening_screen(p5, frame, bg_offset, wheel_phase)
+    draw_opening_screen(p5, frame, bg_offset, wheel_phase, total_seconds)
     draw_smoke_particles(p5, smoke_particles)
     if enter
       state = :countdown
