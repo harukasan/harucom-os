@@ -274,8 +274,10 @@ def drain_input(keyboard)
     case key
     when Keyboard::CTRL_C, Keyboard::ESCAPE
       quit = true
-    when Keyboard::ENTER
-      enter = true
+    else
+      # Space advances the state. Enter is intentionally not used because the
+      # previous shell may still be listening for it when this app starts.
+      enter = true if key.char == " "
     end
   end
   [enter, quit]
@@ -784,12 +786,6 @@ def draw_fuji_at(p5, cx)
   p5.triangle(cx - 5, base_y - 86, cx - 1, base_y - 86, cx - 3, base_y - 74)
   p5.triangle(cx + 4, base_y - 84, cx + 8, base_y - 84, cx + 6, base_y - 72)
   p5.triangle(cx - 11, base_y - 80, cx - 8, base_y - 80, cx - 9, base_y - 70)
-
-  # === Rocky bare patches showing through the snow ===
-  p5.fill(FUJI_BODY)
-  p5.rect(cx - 13, base_y - 78, 2, 4)
-  p5.rect(cx + 7, base_y - 76, 2, 5)
-  p5.rect(cx - 2, base_y - 82, 1, 3)
 
   # === Flat summit highlight ===
   p5.fill(SNOW_CAP)
@@ -1497,11 +1493,6 @@ def draw_hud(p5, remaining_ms, total_ms, phase_text)
   p5.text_color(WHITE)
   p5.text_align(:left, :top)
   p5.text(fmt_time(remaining_ms), 4, 3)
-  # FPS + render/commit breakdown. R=ms spent drawing the frame, C=ms in
-  # p5.commit (VBlank wait + back-buffer copy). Helps tell whether the
-  # bottleneck is draw calls or the framebuffer pipeline.
-  p5.text_color(SUN_CORE)
-  p5.text("#{$fps} R#{$render_ms} C#{$commit_ms}", 46, 3)
   if phase_text
     p5.text_color(BRASS_LITE)
     p5.text_align(:right, :top)
@@ -1530,6 +1521,13 @@ def draw_opening_screen(p5, frame, bg_offset, wheel_phase)
   p5.text("RubyKaja 2026 SPECIAL AWARD", W / 2, 50)
   p5.text_color(SUN_CORE)
   p5.text("from PicoPicoRuby", W / 2, 70)
+  p5.text_color(WHITE)
+  p5.text("Powered by Harucom", W / 2, 208)
+  p5.text("(c) 2026 harukasan", W / 2, 222)
+  if (frame / 20) & 1 == 0
+    p5.text_color(BRASS_LITE)
+    p5.text("Press SPACE", W / 2, 156)
+  end
   p5.text_align(:left, :top)
 end
 
@@ -1539,12 +1537,12 @@ def draw_big_centered(p5, str, color, scale = 1)
   p5.text_align(:center, :center)
   if scale > 1
     p5.push_matrix
-    p5.translate(W / 2, H / 2)
+    p5.translate(W / 2, H / 3)
     p5.scale(scale, scale)
     p5.text(str, 0, 0)
     p5.pop_matrix
   else
-    p5.text(str, W / 2, H / 2)
+    p5.text(str, W / 2, H / 3)
   end
   p5.text_align(:left, :top)
 end
@@ -1567,16 +1565,16 @@ def draw_ending_announcement(p5, elapsed_ms, bg_offset, frame, wheel_phase)
   p5.text_font(DVI::Graphics::FONT_MPLUS_12)
   p5.text_align(:center, :top)
   p5.text_color(BRASS_LITE)
-  p5.text("PicoRubyKaigi 2026", W / 2, 50)
-  p5.text_color(WHITE)
-  p5.text("Assemble", W / 2, 70)
+  p5.text("PicoRubyKaigi 2026 Assemble", W / 2, 52)
   p5.text_color(SUN_CORE)
-  p5.text("2026.mm.dd", W / 2, 100)
+  p5.text("2026.10.31", W / 2, 78)
   p5.text_color(WHITE)
-  p5.text("at Akihabara", W / 2, 120)
+  p5.text("at Akihabara", W / 2, 100)
+  p5.text_color(BRASS_LITE)
+  p5.text("https://picorubykaigi.org/", W / 2, 122)
   if (frame / 20) & 1 == 0
     p5.text_color(BRASS_LITE)
-    p5.text("Press ENTER", W / 2, 156)
+    p5.text("Press SPACE", W / 2, 156)
   end
   p5.text_align(:left, :top)
 end
@@ -1589,18 +1587,22 @@ def draw_explosion(p5, elapsed_ms, bg_offset)
   draw_rails(p5, bg_offset)
   cx = LOCO_X
   cy = LOCO_Y - 6
-  r1 = 14 + (t * 60).to_i
-  r2 = 10 + (t * 70).to_i
-  r3 = 6 + (t * 50).to_i
+  # Orange is the outermost layer and grows fast enough to engulf the
+  # whole screen (~diag 200 px) by the mid-explosion mark. Yellow and red
+  # stay smaller so the fireball reads as a layered hot core inside an
+  # orange flash.
+  r_org = 20 + (t * 220).to_i
+  r_ylw = 12 + (t * 90).to_i
+  r_red = 6 + (t * 50).to_i
   p5.no_stroke
-  p5.fill(FIRE_YLW)
-  p5.circle(cx, cy, r1)
   p5.fill(FIRE_ORG)
-  p5.circle(cx, cy, r2)
+  p5.circle(cx, cy, r_org)
+  p5.fill(FIRE_YLW)
+  p5.circle(cx, cy, r_ylw)
   p5.fill(FIRE_RED)
-  p5.circle(cx, cy, r3)
+  p5.circle(cx, cy, r_red)
   p5.fill(WHITE)
-  p5.circle(cx, cy, r3 / 3)
+  p5.circle(cx, cy, r_red / 3)
   i = 0
   while i < 14
     angle_idx = i & 7
@@ -1683,25 +1685,10 @@ smoke_timer = 0
 smoke_index = 0
 next_frame_ms = Machine.board_millis
 
-# FPS counter for the HUD. $fps is read by draw_hud; window_* track the
-# rolling 1-second window used to recompute it. $render_ms / $commit_ms
-# break the per-frame budget into drawing vs commit so we can see which is
-# the actual bottleneck.
-$fps = 0
-$render_ms = 0
-$commit_ms = 0
-fps_window_start_ms = next_frame_ms
-fps_window_frames = 0
 prev_loop_ms = next_frame_ms
 
 loop do
   now = Machine.board_millis
-  fps_window_frames += 1
-  if now - fps_window_start_ms >= 1000
-    $fps = fps_window_frames
-    fps_window_frames = 0
-    fps_window_start_ms = now
-  end
   elapsed = now - state_start_ms
   # Wall-clock delta scaled to target-frame units. At 30fps this is ~1.0;
   # at 10fps it's ~3.0. Per-frame counters (bg_offset, frame, wheel_accum,
@@ -1720,7 +1707,7 @@ loop do
   # Background scroll: bg_offset only advances during warmup/running.
   # Opening uses a tiny drift to keep the locomotive idle but alive.
   if state == :warmup || state == :running
-    bg_offset += ((speed * 2.5 + 1.0) * dt_frames).to_i
+    bg_offset += ((speed * 2.8 + 1.0) * dt_frames).to_i
   elsif state == :opening
     bg_offset += (1 * dt_frames).to_i
   elsif state == :result_goal && elapsed > PHASE_RESULT_MS
@@ -1796,7 +1783,7 @@ loop do
     draw_train_sprite(p5, LOCO_SPRITE, LOCO_X, LOCO_Y, wheel_phase)
     draw_smoke_particles(p5, smoke_particles)
     remaining = total_ms - elapsed
-    draw_hud(p5, remaining, total_ms, "WARM UP")
+    draw_hud(p5, remaining, total_ms, "GO!")
     if elapsed >= warmup_ms
       state = :running
       state_start_ms = now
@@ -1884,11 +1871,7 @@ loop do
     draw_ruby_runner(p5, 42, 232, frame, ruby_speed)
   end
 
-  t_commit_start = Machine.board_millis
   p5.commit
-  t_commit_end = Machine.board_millis
-  $render_ms = t_commit_start - now
-  $commit_ms = t_commit_end - t_commit_start
   # Cap to ~30fps so frame intervals stay consistent rather than oscillating
   # between 16ms and 33ms. When rendering falls behind, frame counter scales
   # with wall-clock dt so animations stay at the same wall-clock pace.
