@@ -31,6 +31,17 @@ FileUtils.mkdir_p(File.dirname(OUTPUT_PATH))
 shim_source = <<~'RUBY'
   require "js"
 
+  # picoruby tasks do not get ARGV defined automatically; rubykaja reads
+  # ARGV[0] to pick the initial timer length, so seed it from the page URL
+  # (?seconds=NN) or default to "150".
+  argv_secs = "150"
+  query = JS.global[:location][:search].to_s
+  if query.include?("seconds=")
+    parsed = query.sub(/.*seconds=/, "").sub(/&.*/, "")
+    argv_secs = parsed unless parsed.empty?
+  end
+  Object.const_set(:ARGV, [argv_secs])
+
   # ----- DVI shim -----
   module DVI
     GRAPHICS_MODE = :graphics
@@ -137,7 +148,29 @@ shim_source = <<~'RUBY'
   end
 
   $keyboard = KeyboardShim.new
-  JS.global[:rubykaja_keyboard] = $keyboard
+
+  # Bridge browser keydown events directly from the Ruby task. picoruby's
+  # JS interop can't store a Ruby object as a JS property, so we instead
+  # add the listener here and translate event.key into a label the Ruby
+  # KeyboardShim understands.
+  JS.global[:document].addEventListener("keydown") do |event|
+    key = event[:key].to_s
+    label = case key
+            when "Enter"  then "ENTER"
+            when "Escape" then "ESCAPE"
+            when " "      then " "
+            else
+              if event[:ctrlKey].to_s == "true" && (key == "c" || key == "C")
+                "CTRL_C"
+              elsif key.length == 1
+                key
+              end
+            end
+    $keyboard.push(label) if label
+    # preventDefault for game keys is handled synchronously by a JS-side
+    # listener; calling it here is too late because picoruby dispatches
+    # this callback as a scheduled task after the browser default fires.
+  end
 
   # ----- P5 (Canvas-backed) -----
   # Mirrors the device P5 surface area used by rubykaja. Sprites built via
@@ -249,9 +282,17 @@ shim_source = <<~'RUBY'
 
     # Matrix / blend (no-ops or simple implementations)
 
+    # TRANS_KEY (magenta) is used by the device as a color-key transparent
+    # background for sprites. On Canvas we just clear the bitmap to
+    # transparent pixels; drawImage then composites natively without the
+    # anti-aliased magenta fringe that a color-key approach would leave.
     def background(c)
-      @ctx[:fillStyle] = rgb332_to_css(c)
-      @ctx.fillRect(0, 0, @width, @height)
+      if c.to_i == 0xE3
+        @ctx.clearRect(0, 0, @width, @height)
+      else
+        @ctx[:fillStyle] = rgb332_to_css(c)
+        @ctx.fillRect(0, 0, @width, @height)
+      end
     end
 
     def commit
@@ -262,12 +303,18 @@ shim_source = <<~'RUBY'
     def blend_mode(_); end
     def alpha(_); end
 
-    def push_matrix; end
-    def pop_matrix; end
-    def translate(_, _); end
-    def rotate(_); end
-    def scale(_, _ = nil); end
-    def reset_matrix; end
+    # Forward matrix transforms to the canvas so draw_big_centered's
+    # translate/scale dance for the countdown / START / GOAL / BOOM banners
+    # actually scales the text instead of dropping the call.
+    def push_matrix; @ctx.save; end
+    def pop_matrix;  @ctx.restore; end
+    def translate(tx, ty); @ctx.translate(tx, ty); end
+    def rotate(angle);     @ctx.rotate(angle); end
+    def scale(sx, sy = nil)
+      sy = sx if sy.nil?
+      @ctx.scale(sx, sy)
+    end
+    def reset_matrix; @ctx.setTransform(1, 0, 0, 1, 0, 0); end
 
     # Shape drawing
 
@@ -350,15 +397,11 @@ shim_source = <<~'RUBY'
     end
 
     # Routed-from-DVI helper. The sprite buffer is the offscreen Canvas.
-    def blit_canvas(canvas, x, y, w, h, transparent)
-      if transparent.to_i < 0
-        @ctx.drawImage(canvas, x, y)
-      else
-        # Color-key transparency: render through a temp canvas where pixels
-        # matching the key are made transparent. Cached per sprite.
-        masked = mask_sprite(canvas, w, h, transparent.to_i)
-        @ctx.drawImage(masked, x, y)
-      end
+    # Sprites built with background(TRANS_KEY) already start fully clear
+    # on the alpha channel, so drawImage handles transparency for us; the
+    # `transparent` arg is ignored on the canvas path.
+    def blit_canvas(canvas, x, y, _w, _h, _transparent)
+      @ctx.drawImage(canvas, x, y)
     end
 
     def fill_rect_on(buf, _bw, _bh, x, y, w, h, color)
@@ -437,37 +480,6 @@ shim_source = <<~'RUBY'
       "rgb(#{r},#{g},#{b})"
     end
 
-    @@mask_cache = {}
-
-    # Convert an offscreen Canvas into one where pixels matching `key_rgb332`
-    # are transparent. Cached on the source canvas's identity + key.
-    def mask_sprite(source, w, h, key)
-      cache_key = [source.to_s, w.to_i, h.to_i, key]
-      cached = @@mask_cache[cache_key]
-      return cached if cached
-      doc = JS.global[:document]
-      out = doc.createElement("canvas")
-      out[:width] = w
-      out[:height] = h
-      octx = out.getContext("2d")
-      octx.drawImage(source, 0, 0)
-      img = octx.getImageData(0, 0, w, h)
-      data = img[:data]
-      tr = ((key >> 5) & 0x7) * 255 / 7
-      tg = ((key >> 2) & 0x7) * 255 / 7
-      tb = (key & 0x3) * 255 / 3
-      len = (w * h * 4).to_i
-      i = 0
-      while i < len
-        if data[i].to_i == tr && data[i + 1].to_i == tg && data[i + 2].to_i == tb
-          data[i + 3] = 0
-        end
-        i += 4
-      end
-      octx.putImageData(img, 0, 0)
-      @@mask_cache[cache_key] = out
-      out
-    end
   end
 RUBY
 
@@ -478,7 +490,7 @@ html = <<~HTML
   <html lang="ja">
   <head>
     <meta charset="utf-8">
-    <title>RubyKaja Preview (picoruby.wasm)</title>
+    <title>RubyKaja Special Award Timer</title>
     <style>
       body {
         background: #111;
@@ -505,7 +517,7 @@ html = <<~HTML
     </style>
   </head>
   <body>
-    <h1>RubyKaja preview</h1>
+    <h1>Congrats on the RubyKaja 2026 Special Award, makicamel.</h1>
     <p>
       <kbd>Space</kbd> start / restart &nbsp;|&nbsp;
       <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> timer (150 / 60 / 30 s) &nbsp;|&nbsp;
@@ -523,36 +535,22 @@ html = <<~HTML
     </script>
 
     <script>
-      // Bridge keydown events to the Ruby-side keyboard queue. The Ruby
-      // KeyboardShim exposes itself as window.rubykaja_keyboard after the
-      // shim task starts; we wait for it before binding the listener.
-      function mapKey(evt) {
-        switch (evt.key) {
-          case "Enter":  return "ENTER";
-          case "Escape": return "ESCAPE";
-          case " ":      return " ";
-        }
-        if (evt.ctrlKey && (evt.key === "c" || evt.key === "C")) return "CTRL_C";
-        if (evt.key.length === 1) return evt.key;
-        return null;
-      }
+      // Synchronously preventDefault for game keys so the browser does not
+      // scroll on Space / arrows etc. The Ruby task that queues the key
+      // for rubykaja runs asynchronously, which is too late to cancel the
+      // default action; this listener fires first and stops it.
+      const SWALLOW = new Set([
+        " ", "Enter", "Escape", "Tab", "Backspace",
+        "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"
+      ]);
+      window.addEventListener("keydown", (evt) => {
+        if (SWALLOW.has(evt.key)) evt.preventDefault();
+      }, { capture: true });
 
-      function bind() {
-        const kb = window.rubykaja_keyboard;
-        if (!kb) { setTimeout(bind, 50); return; }
-        document.getElementById("status").textContent = "Running.";
+      window.addEventListener("load", () => {
         document.getElementById("p5_canvas").focus();
-        window.addEventListener("keydown", (evt) => {
-          const label = mapKey(evt);
-          if (label === null) return;
-          try { kb.push(label); } catch (e) { console.error("kb.push failed", e); }
-          if (["Enter","Escape","Tab","Backspace",
-               "ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(evt.key)) {
-            evt.preventDefault();
-          }
-        });
-      }
-      bind();
+        document.getElementById("status").textContent = "Running.";
+      });
     </script>
 
     <script src="https://cdn.jsdelivr.net/npm/@picoruby/wasm-wasi@3.4.5/dist/init.iife.js"></script>
