@@ -283,6 +283,24 @@ def scroll_view(console, buffer, scroll_top, scroll_left, vdelta, highlight_map,
   end
 end
 
+# Redraw the visible region after a horizontal scroll. Horizontal scroll has no
+# ring-buffer shortcut, so every visible line whose content moved must be
+# redrawn. Lines whose full display width is left of both the old and the new
+# viewport are blank before and after, so they are skipped.
+def draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, highlight_map, line_offsets)
+  threshold = old_scroll_left < scroll_left ? old_scroll_left : scroll_left
+  i = 0
+  while i < EDIT_ROWS
+    line = buffer.lines[scroll_top + i]
+    if line.nil? || Editor.display_width(line) <= threshold
+      i += 1
+      next
+    end
+    draw_line(console, buffer, i, scroll_top, scroll_left, highlight_map, line_offsets)
+    i += 1
+  end
+end
+
 # -- Viewport scrolling --
 
 def adjust_vertical_scroll(buffer, scroll_top)
@@ -302,15 +320,19 @@ def adjust_horizontal_scroll(buffer, scroll_left)
     return 0
   end
   cursor_col = Editor.byte_to_display_col(buffer.current_line, buffer.cursor_x)
-  # Cursor left of viewport
-  if cursor_col < scroll_left
-    return cursor_col
+  # Cursor still inside the visible window: no scroll. Horizontal scroll cannot
+  # use the ring buffer, so every step forces a full-width redraw; keeping the
+  # cursor inside the window avoids redrawing on each column of movement.
+  if cursor_col >= scroll_left && cursor_col < scroll_left + COLS
+    return scroll_left
   end
-  # Cursor right of viewport
-  if cursor_col >= scroll_left + COLS
-    return cursor_col - COLS + 1
-  end
-  scroll_left
+  # Cursor left the window: jump-scroll to roughly center the cursor so the next
+  # redraw is deferred for about half a screen of further movement.
+  new_scroll = cursor_col - COLS / 2
+  max_scroll = line_width - COLS + 1
+  new_scroll = max_scroll if new_scroll > max_scroll
+  new_scroll = 0 if new_scroll < 0
+  new_scroll
 end
 
 # -- Initial draw --
@@ -522,8 +544,10 @@ while running
     syntax_result, highlight_map, line_offsets = rebuild_syntax(buffer)
   end
 
-  if dirty == :structure || hscrolled || vdelta.abs >= EDIT_ROWS
+  if dirty == :structure || vdelta.abs >= EDIT_ROWS || (hscrolled && vdelta != 0)
     draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line_offsets)
+  elsif hscrolled
+    draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, highlight_map, line_offsets)
   elsif vdelta != 0
     scroll_view(console, buffer, scroll_top, scroll_left, vdelta, highlight_map, line_offsets)
     if dirty == :content
