@@ -259,6 +259,30 @@ def draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line
   end
 end
 
+# Differential vertical scroll: shift the visible region by vdelta rows using
+# the DVI ring-buffer scroll (O(1)), then draw only the newly exposed lines.
+# vdelta > 0 scrolls content up (cursor moved down); vdelta < 0 scrolls down.
+# The status/command rows shifted by the global ring scroll are restored by
+# the unconditional draw_status/draw_command_bar later in the same frame.
+def scroll_view(console, buffer, scroll_top, scroll_left, vdelta, highlight_map, line_offsets)
+  if vdelta > 0
+    DVI::Text.scroll_up(vdelta, EDIT_ATTR)
+    row = EDIT_ROWS - vdelta
+    while row < EDIT_ROWS
+      draw_line(console, buffer, row, scroll_top, scroll_left, highlight_map, line_offsets)
+      row += 1
+    end
+  else
+    n = -vdelta
+    DVI::Text.scroll_down(n, EDIT_ATTR)
+    row = 0
+    while row < n
+      draw_line(console, buffer, row, scroll_top, scroll_left, highlight_map, line_offsets)
+      row += 1
+    end
+  end
+end
+
 # -- Viewport scrolling --
 
 def adjust_vertical_scroll(buffer, scroll_top)
@@ -313,6 +337,8 @@ while running
   console.hide_cursor
   message = nil
   old_dirty = buffer.dirty
+  old_scroll_top = scroll_top
+  old_scroll_left = scroll_left
   buffer.clear_dirty
 
   # Process through input method if active
@@ -380,7 +406,6 @@ while running
     scroll_top = 0 if scroll_top < 0
     new_y = scroll_top
     buffer.move_to(buffer.cursor_x, new_y)
-    buffer.mark_dirty(:structure)
   when Keyboard::PAGEDOWN
     max_scroll = buffer.lines.length - EDIT_ROWS
     max_scroll = 0 if max_scroll < 0
@@ -389,7 +414,6 @@ while running
     new_y = scroll_top + EDIT_ROWS - 1
     new_y = buffer.lines.length - 1 if new_y >= buffer.lines.length
     buffer.move_to(buffer.cursor_x, new_y)
-    buffer.mark_dirty(:structure)
   when Keyboard::HOME
     undo_record_break(undo_stack)
     buffer.head
@@ -480,32 +504,33 @@ while running
   end
   end # unless ime_handled
 
-  # Adjust scroll for cursor visibility
-  new_vscroll = adjust_vertical_scroll(buffer, scroll_top)
-  if new_vscroll != scroll_top
-    scroll_top = new_vscroll
-    buffer.mark_dirty(:structure)
-  end
+  # Adjust scroll for cursor visibility. Scrolling is a viewport change, not a
+  # buffer change, so it does not mark the buffer dirty (and does not trigger a
+  # syntax re-analysis); it is handled by the differential redraw below.
+  scroll_top = adjust_vertical_scroll(buffer, scroll_top)
+  scroll_left = adjust_horizontal_scroll(buffer, scroll_left)
 
-  new_hscroll = adjust_horizontal_scroll(buffer, scroll_left)
-  if new_hscroll != scroll_left
-    scroll_left = new_hscroll
-    buffer.mark_dirty(:structure)
-  end
-
-  # Redraw based on dirty level
+  # Redraw based on dirty level and viewport movement
   dirty = buffer.dirty
   dirty = old_dirty if dirty == :none && old_dirty != :none
+  vdelta = scroll_top - old_scroll_top
+  hscrolled = scroll_left != old_scroll_left
 
-  # Re-analyze on content changes
+  # Re-analyze only on content/structure changes. The highlight map is keyed by
+  # byte offsets and is viewport-independent, so pure scrolling keeps it valid.
   if highlight_enabled && (dirty == :content || dirty == :structure)
     syntax_result, highlight_map, line_offsets = rebuild_syntax(buffer)
   end
 
-  case dirty
-  when :structure
+  if dirty == :structure || hscrolled || vdelta.abs >= EDIT_ROWS
     draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line_offsets)
-  when :content
+  elsif vdelta != 0
+    scroll_view(console, buffer, scroll_top, scroll_left, vdelta, highlight_map, line_offsets)
+    if dirty == :content
+      screen_row = buffer.cursor_y - scroll_top
+      draw_line(console, buffer, screen_row, scroll_top, scroll_left, highlight_map, line_offsets)
+    end
+  elsif dirty == :content
     screen_row = buffer.cursor_y - scroll_top
     draw_line(console, buffer, screen_row, scroll_top, scroll_left, highlight_map, line_offsets)
   end
