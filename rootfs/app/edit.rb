@@ -38,10 +38,19 @@ running = true
 message = nil
 
 # Syntax analysis state (highlighting and indentation)
+#
+# RubySyntax.analyze rejects sources larger than ~8KB, so the whole file cannot
+# be parsed at once. Instead a window of lines around the viewport is parsed and
+# cached. The window is rebuilt on content edits and whenever the viewport
+# scrolls outside it. SYNTAX_MARGIN lines of headroom above and below absorb
+# normal scrolling so a rebuild fires roughly once per that many scrolled lines.
 highlight_enabled = filepath && filepath.end_with?(".rb")
-syntax_result = nil
-highlight_map = nil
-line_offsets = nil
+SYNTAX_MARGIN      = 40 # extra lines parsed above/below the viewport
+SYNTAX_ANCHOR_SCAN = 60 # max lines scanned upward to find a parse anchor
+SYNTAX_MAX_BYTES   = 8100 # window source byte budget (RubySyntax.analyze limit)
+syntax = nil   # [highlight_map, window_offsets, win_start] or nil
+win_start = 0  # first line index covered by the parsed window
+win_end = 0    # one past the last line index covered (exclusive)
 
 # Undo stack
 # Each entry: [:insert, y, x, text] | [:delete, y, x, text]
@@ -145,20 +154,84 @@ if filepath && File.exist?(filepath)
   buffer.changed = false
 end
 
-def rebuild_syntax(buffer)
-  source = buffer.lines.join("\n")
-  result = RubySyntax.analyze(source)
-  return nil, nil, nil unless result
-  map = result.highlight_map
-  offsets = []
-  offset = 0
-  buffer.lines.each { |l| offsets.push(offset); offset += l.bytesize + 1 }
-  return result, map, offsets
+# A line that begins at column 0 with a top-level construct boundary is a safe
+# place to start parsing: it is not a continuation of a string, heredoc, or
+# expression carried over from a previous line.
+def syntax_anchor?(line)
+  return false if line.bytesize == 0
+  b0 = line.getbyte(0)
+  return false if b0 == 0x20 || b0 == 0x09 # leading whitespace: nested/continuation
+  return true if line == "end"
+  line.start_with?("class ", "class\t", "module ", "module\t", "def ", "def\t")
 end
 
-# Initial syntax analysis
+# Find a parse anchor at or above from_line, scanning up to SYNTAX_ANCHOR_SCAN
+# lines. Falls back to the scan limit when no anchor is found.
+def syntax_anchor_line(buffer, from_line)
+  from_line = 0 if from_line < 0
+  limit = from_line - SYNTAX_ANCHOR_SCAN
+  limit = 0 if limit < 0
+  i = from_line
+  while i > limit
+    line = buffer.lines[i]
+    return i if line && syntax_anchor?(line)
+    i -= 1
+  end
+  limit
+end
+
+# Parse a window of lines covering [top, bottom] (absolute line indices) plus
+# margins, capped to SYNTAX_MAX_BYTES. Returns [result, syntax, win_start,
+# win_end] where syntax is [highlight_map, window_offsets, win_start] (or nil if
+# parsing failed). window_offsets[k] is the byte offset of line (win_start + k)
+# within the parsed window source.
+def analyze_window(buffer, top, bottom)
+  lines = buffer.lines
+  n = lines.length
+  return [nil, nil, 0, 0] if n == 0
+  top = 0 if top < 0
+  bottom = n - 1 if bottom > n - 1
+  bottom = top if bottom < top
+
+  ws = syntax_anchor_line(buffer, top - SYNTAX_MARGIN)
+  we = bottom + SYNTAX_MARGIN + 1
+  we = n if we > n
+
+  total = 0
+  i = ws
+  while i < we
+    total += lines[i].bytesize + 1
+    i += 1
+  end
+  # Trim the bottom margin, then the top context, to fit the byte budget while
+  # always keeping the requested [top, bottom] range covered.
+  while total > SYNTAX_MAX_BYTES && we > bottom + 1
+    we -= 1
+    total -= lines[we].bytesize + 1
+  end
+  while total > SYNTAX_MAX_BYTES && ws < top
+    total -= lines[ws].bytesize + 1
+    ws += 1
+  end
+
+  source = lines[ws...we].join("\n")
+  result = RubySyntax.analyze(source)
+  return [nil, nil, ws, we] unless result
+
+  offsets = []
+  off = 0
+  i = ws
+  while i < we
+    offsets.push(off)
+    off += lines[i].bytesize + 1
+    i += 1
+  end
+  [result, [result.highlight_map, offsets, ws], ws, we]
+end
+
+# Initial syntax analysis around the top of the file
 if highlight_enabled
-  syntax_result, highlight_map, line_offsets = rebuild_syntax(buffer)
+  _r, syntax, win_start, win_end = analyze_window(buffer, 0, EDIT_ROWS - 1)
 end
 
 # -- Drawing helpers --
@@ -236,25 +309,33 @@ def prompt_input(console, keyboard, label, y_or_n: false)
   end
 end
 
-def draw_line(console, buffer, screen_row, scroll_top, scroll_left, highlight_map, line_offsets)
+# Draw one visible line. The syntax bundle is [highlight_map, window_offsets,
+# win_start]; a line inside the parsed window is highlighted, otherwise it is
+# drawn as plain text.
+def draw_line(console, buffer, screen_row, scroll_top, scroll_left, syntax)
   row = EDIT_TOP + screen_row
   line_index = scroll_top + screen_row
   console.clear_line(row)
   return if line_index >= buffer.lines.length
 
   line = buffer.lines[line_index]
-  if highlight_map && line_offsets
-    RubySyntax.draw_line(0, row, line, highlight_map, line_offsets[line_index] || 0, scroll_left, Console::COLS, EDIT_ATTR)
+  line_offset = nil
+  if syntax
+    rel = line_index - syntax[2]
+    line_offset = syntax[1][rel] if rel >= 0 && rel < syntax[1].length
+  end
+  if line_offset
+    RubySyntax.draw_line(0, row, line, syntax[0], line_offset, scroll_left, Console::COLS, EDIT_ATTR)
   else
     text = Editor.display_slice(line, scroll_left, Console::COLS)
     console.put_string_at(0, row, text, EDIT_ATTR) if text && text.bytesize > 0
   end
 end
 
-def draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line_offsets)
+def draw_all_lines(console, buffer, scroll_top, scroll_left, syntax)
   i = 0
   while i < EDIT_ROWS
-    draw_line(console, buffer, i, scroll_top, scroll_left, highlight_map, line_offsets)
+    draw_line(console, buffer, i, scroll_top, scroll_left, syntax)
     i += 1
   end
 end
@@ -264,12 +345,12 @@ end
 # vdelta > 0 scrolls content up (cursor moved down); vdelta < 0 scrolls down.
 # The status/command rows shifted by the global ring scroll are restored by
 # the unconditional draw_status/draw_command_bar later in the same frame.
-def scroll_view(console, buffer, scroll_top, scroll_left, vdelta, highlight_map, line_offsets)
+def scroll_view(console, buffer, scroll_top, scroll_left, vdelta, syntax)
   if vdelta > 0
     DVI::Text.scroll_up(vdelta, EDIT_ATTR)
     row = EDIT_ROWS - vdelta
     while row < EDIT_ROWS
-      draw_line(console, buffer, row, scroll_top, scroll_left, highlight_map, line_offsets)
+      draw_line(console, buffer, row, scroll_top, scroll_left, syntax)
       row += 1
     end
   else
@@ -277,7 +358,7 @@ def scroll_view(console, buffer, scroll_top, scroll_left, vdelta, highlight_map,
     DVI::Text.scroll_down(n, EDIT_ATTR)
     row = 0
     while row < n
-      draw_line(console, buffer, row, scroll_top, scroll_left, highlight_map, line_offsets)
+      draw_line(console, buffer, row, scroll_top, scroll_left, syntax)
       row += 1
     end
   end
@@ -287,7 +368,7 @@ end
 # ring-buffer shortcut, so every visible line whose content moved must be
 # redrawn. Lines whose full display width is left of both the old and the new
 # viewport are blank before and after, so they are skipped.
-def draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, highlight_map, line_offsets)
+def draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, syntax)
   threshold = old_scroll_left < scroll_left ? old_scroll_left : scroll_left
   i = 0
   while i < EDIT_ROWS
@@ -296,7 +377,7 @@ def draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, high
       i += 1
       next
     end
-    draw_line(console, buffer, i, scroll_top, scroll_left, highlight_map, line_offsets)
+    draw_line(console, buffer, i, scroll_top, scroll_left, syntax)
     i += 1
   end
 end
@@ -338,7 +419,7 @@ end
 # -- Initial draw --
 console.clear
 draw_command_bar(console)
-draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line_offsets)
+draw_all_lines(console, buffer, scroll_top, scroll_left, syntax)
 draw_status(console, filepath, buffer, scroll_top, nil)
 
 # Position cursor
@@ -464,21 +545,20 @@ while running
     undo_record(undo_stack, [:split, buffer.cursor_y, buffer.cursor_x])
     undo_record_break(undo_stack)
     buffer.put(c.to_buffer_input)
-    # Auto-indent: re-analyze after line split to get correct indent
+    # Auto-indent: re-analyze the window around the cursor to get correct indent
     if highlight_enabled
-      source = buffer.lines.join("\n")
-      result = RubySyntax.analyze(source)
+      result, _s, ind_ws, _e = analyze_window(buffer, buffer.cursor_y - 1, buffer.cursor_y)
       if result
         # Re-indent previous line (e.g. de-indent end/else/ensure)
         prev_y = buffer.cursor_y - 1
         if prev_y >= 0
           old_line = buffer.lines[prev_y]
-          if RubySyntax.reindent_line(buffer, prev_y, result.indent_level(prev_y))
+          if RubySyntax.reindent_line(buffer, prev_y, result.indent_level(prev_y - ind_ws))
             undo_record(undo_stack, [:replace_line, prev_y, old_line])
           end
         end
         # Indent new line
-        level = result.indent_level(buffer.cursor_y)
+        level = result.indent_level(buffer.cursor_y - ind_ws)
         if level > 0
           spaces = "  " * level
           undo_record(undo_stack, [:insert, buffer.cursor_y, 0, spaces])
@@ -509,11 +589,10 @@ while running
       buffer.put(c.to_s)
       # De-indent on space after keywords like when, elsif, rescue, in
       if highlight_enabled && c.to_s == " " && RubySyntax.should_dedent_on_space?(buffer.current_line)
-        source = buffer.lines.join("\n")
-        result = RubySyntax.analyze(source)
+        result, _s, ind_ws, _e = analyze_window(buffer, buffer.cursor_y, buffer.cursor_y)
         if result
           old_line = buffer.current_line
-          if RubySyntax.reindent_line(buffer, buffer.cursor_y, result.indent_level(buffer.cursor_y))
+          if RubySyntax.reindent_line(buffer, buffer.cursor_y, result.indent_level(buffer.cursor_y - ind_ws))
             undo_record(undo_stack, [:replace_line, buffer.cursor_y, old_line])
             buffer.mark_dirty(:content)
           end
@@ -538,25 +617,36 @@ while running
   vdelta = scroll_top - old_scroll_top
   hscrolled = scroll_left != old_scroll_left
 
-  # Re-analyze only on content/structure changes. The highlight map is keyed by
-  # byte offsets and is viewport-independent, so pure scrolling keeps it valid.
-  if highlight_enabled && (dirty == :content || dirty == :structure)
-    syntax_result, highlight_map, line_offsets = rebuild_syntax(buffer)
+  # Rebuild the parsed window on content changes, or when the viewport scrolls
+  # out of the cached window. Within the window the highlight map stays valid, so
+  # pure scrolling reuses it and only newly exposed lines are redrawn.
+  content_changed = dirty == :content || dirty == :structure
+  window_rebuilt = false
+  if highlight_enabled
+    vis_bottom = scroll_top + EDIT_ROWS
+    vis_bottom = buffer.lines.length if vis_bottom > buffer.lines.length
+    if content_changed || scroll_top < win_start || vis_bottom > win_end
+      _r, syntax, win_start, win_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
+      window_rebuilt = true
+    end
   end
 
-  if dirty == :structure || vdelta.abs >= EDIT_ROWS || (hscrolled && vdelta != 0)
-    draw_all_lines(console, buffer, scroll_top, scroll_left, highlight_map, line_offsets)
+  # A window rebuilt for scrolling (not editing) changes the highlight of every
+  # visible line, so it needs a full redraw rather than the differential path.
+  if dirty == :structure || vdelta.abs >= EDIT_ROWS || (hscrolled && vdelta != 0) ||
+     (window_rebuilt && !content_changed)
+    draw_all_lines(console, buffer, scroll_top, scroll_left, syntax)
   elsif hscrolled
-    draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, highlight_map, line_offsets)
+    draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, syntax)
   elsif vdelta != 0
-    scroll_view(console, buffer, scroll_top, scroll_left, vdelta, highlight_map, line_offsets)
+    scroll_view(console, buffer, scroll_top, scroll_left, vdelta, syntax)
     if dirty == :content
       screen_row = buffer.cursor_y - scroll_top
-      draw_line(console, buffer, screen_row, scroll_top, scroll_left, highlight_map, line_offsets)
+      draw_line(console, buffer, screen_row, scroll_top, scroll_left, syntax)
     end
   elsif dirty == :content
     screen_row = buffer.cursor_y - scroll_top
-    draw_line(console, buffer, screen_row, scroll_top, scroll_left, highlight_map, line_offsets)
+    draw_line(console, buffer, screen_row, scroll_top, scroll_left, syntax)
   end
 
   draw_status(console, filepath, buffer, scroll_top, message)
