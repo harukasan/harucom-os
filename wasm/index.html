@@ -95,6 +95,7 @@
       const MAX_CATCHUP_TICKS = 8; // cap clock catch-up after a stall / background tab
       const STEPS_PER_FRAME = 16;
       let lastFrame = -1;
+      let audioPump = null;        // set once the AudioContext starts (see startAudio)
       let lastTick = performance.now();
       function step() {
         const now = performance.now();
@@ -107,6 +108,7 @@
         if (now - lastTick >= MRB_TICK_UNIT) lastTick = now; // fell too far behind; resync
         for (let s = 0; s < STEPS_PER_FRAME; s++) Module._mrb_run_step();
         applyReleases();
+        if (audioPump) audioPump(); // refill the audio buffer from the synth ring
         const frame = Module._harucom_dvi_frame_count();
         if (frame !== lastFrame) {
           lastFrame = frame;
@@ -219,45 +221,69 @@
       window.addEventListener("keyup", onKeyUp, true);
 
       // --- Audio: PWMAudio synth ring buffer -> Web Audio ------------------
-      // The synth renders into a ring buffer (filled by the Ruby PWMAudio.update
-      // loop); harucom_audio_pull drains it into planar float L/R. A
-      // ScriptProcessorNode pulls a block each callback on the main thread, so no
-      // SharedArrayBuffer / cross-origin-isolation headers are needed. An
-      // AudioContext must be started from a user gesture, so it is created lazily
-      // on the first canvas interaction.
+      // The synth renders into a small 1024-frame ring (filled by the Ruby
+      // PWMAudio.update loop). The audio callback runs on the same (busy) main
+      // thread as the VM, so pulling straight from that small ring glitched
+      // whenever a frame ran long, and any sample-rate mismatch dropped a frame
+      // at each callback boundary. Instead the rAF loop pumps the synth ring into
+      // a larger JS ring (audioPump), and the ScriptProcessor drains the JS ring
+      // with a continuous fractional read position (so resampling never skips a
+      // frame). The JS ring plus a larger block absorb frame-time jitter without
+      // needing a SharedArrayBuffer / AudioWorklet (no cross-origin headers). The
+      // AudioContext is created lazily on the first user gesture.
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       let audioCtx = null, audioNode = null; // kept alive so the node is not GC'd
       function startAudio() {
         if (audioCtx || !AudioCtx) return;
         const srcRate = Module._harucom_audio_sample_rate(); // 22050
-        // Prefer a context at the synth rate to avoid resampling; browsers that
-        // ignore the request fall back to their hardware rate and we resample.
+        // Request the synth rate so no resampling is needed when honored.
         try { audioCtx = new AudioCtx({ sampleRate: srcRate }); }
         catch (e) { audioCtx = new AudioCtx(); }
         const ctx = audioCtx;
-        const ratio = srcRate / ctx.sampleRate; // 1.0 when honored
-        // The synth ring buffer is 1024 frames; a block can only pull what the
-        // ring holds at the moment the callback fires (the producer cannot run
-        // mid-callback on this single thread), so keep the block well under the
-        // ring or every callback is mostly silence. 512 leaves the producer room
-        // to refill between callbacks.
-        const BLOCK = 512;
-        const maxSrc = Math.ceil(BLOCK * ratio) + 2;
-        const lPtr = Module._malloc(maxSrc * 4);
-        const rPtr = Module._malloc(maxSrc * 4);
+        const ratio = srcRate / ctx.sampleRate; // source frames per output frame
+
+        const JS_CAP = 8192, MASK = JS_CAP - 1; // JS ring, power of 2
+        const jsL = new Float32Array(JS_CAP), jsR = new Float32Array(JS_CAP);
+        let jsWr = 0;       // producer index (source frames written)
+        let readPos = 0;    // consumer index (fractional source frames consumed)
+        const TARGET = 1024; // source frames to keep buffered (~46ms at 22050)
+        const PULL = 1024;
+        const lPtr = Module._malloc(PULL * 4), rPtr = Module._malloc(PULL * 4);
+
+        // Pull from the synth ring into the JS ring, keeping ~TARGET buffered.
+        audioPump = function () {
+          let want = TARGET - (jsWr - Math.floor(readPos));
+          while (want > 0) {
+            const n = want < PULL ? want : PULL;
+            const got = Module._harucom_audio_pull(lPtr, rPtr, n);
+            if (got === 0) break; // synth ring empty; the producer refills it
+            const H = Module.HEAPF32, lo = lPtr >> 2, ro = rPtr >> 2;
+            for (let i = 0; i < got; i++) {
+              jsL[jsWr & MASK] = H[lo + i];
+              jsR[jsWr & MASK] = H[ro + i];
+              jsWr++;
+            }
+            want -= got;
+            if (got < n) break;
+          }
+        };
+
+        const BLOCK = 2048; // larger block = bigger output buffer to ride jitter
         const node = ctx.createScriptProcessor(BLOCK, 0, 2);
         audioNode = node;
         node.onaudioprocess = (e) => {
           const outL = e.outputBuffer.getChannelData(0);
           const outR = e.outputBuffer.getChannelData(1);
-          const need = Math.ceil(BLOCK * ratio);
-          Module._harucom_audio_pull(lPtr, rPtr, need);
-          const H = Module.HEAPF32; // re-read: the view detaches on memory growth
-          const lo = lPtr >> 2, ro = rPtr >> 2;
           for (let i = 0; i < BLOCK; i++) {
-            const s = (ratio === 1) ? i : Math.floor(i * ratio);
-            outL[i] = H[lo + s];
-            outR[i] = H[ro + s];
+            const idx = Math.floor(readPos);
+            if (idx < jsWr) {
+              const s = idx & MASK;
+              outL[i] = jsL[s];
+              outR[i] = jsR[s];
+              readPos += ratio; // fractional, carried across callbacks
+            } else {
+              outL[i] = 0; outR[i] = 0; // underrun: hold position, emit silence
+            }
           }
         };
         node.connect(ctx.destination);
