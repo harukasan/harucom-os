@@ -189,6 +189,37 @@ function verifyDict(Module) {
   return runChecks(checks, out.split("\n").filter((l) => l.trim()).slice(-4).join(" | "));
 }
 
+// End-to-end graphics test: from IRB, switch to graphics mode and fill a red
+// (RGB332 0xE0) rectangle, then assert it appears in the displayed framebuffer.
+// Exercises dvi_set_mode + the DVI::Graphics drawing primitives + the wasm
+// dvi_graphics_commit present path (graphics_buf -> framebuffer).
+function verifyGraphics(Module) {
+  const W = Module._harucom_dvi_width();
+  const H = Module._harucom_dvi_height();
+  const fb = Module._harucom_dvi_framebuffer();
+  const center = 125 * W + 125; // center of a 50x50 rect at (100,100)
+
+  typeString(Module, "DVI.set_mode(DVI::GRAPHICS_MODE)");
+  hidType(Module, [[0, 0x28]]); // Enter
+  drive(Module, 2000);
+  typeString(Module, "DVI::Graphics.fill_rect(100,100,50,50,224);DVI::Graphics.commit");
+  hidType(Module, [[0, 0x28]]); // Enter
+  for (let i = 0; i < 40000; i++) {
+    Module._mrb_tick_wasm();
+    Module._mrb_run_step();
+    if (i % 64 === 0 && Module.HEAPU8[fb + center] === 0xE0) break;
+  }
+
+  const px = Module.HEAPU8.subarray(fb, fb + W * H);
+  let red = 0;
+  for (let i = 0; i < px.length; i++) if (px[i] === 0xE0) red++;
+  const checks = [
+    ["graphics mode rect rendered (center pixel red)", px[center] === 0xE0],
+    ["filled ~50x50 red pixels", red >= 2000],
+  ];
+  return runChecks(checks, `red=${red}, center=0x${px[center].toString(16)}`);
+}
+
 createHarucomModule({
   print: (s) => record(process.stdout, s),
   printErr: (s) => record(process.stderr, s),
@@ -215,7 +246,10 @@ createHarucomModule({
     process.stdout.write("[IME dictionary verification]\n");
     const dictOk = verifyDict(Module);
 
-    if (!bootOk || !renderOk || !inputOk || !dictOk) {
+    process.stdout.write("[Graphics mode verification]\n");
+    const graphicsOk = verifyGraphics(Module);
+
+    if (!bootOk || !renderOk || !inputOk || !dictOk || !graphicsOk) {
       process.stderr.write("smoke test failed\n");
       process.exit(1);
     }

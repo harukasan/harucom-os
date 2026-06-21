@@ -18,3 +18,17 @@ class DVI
     sleep_ms 16
   end
 end
+
+# Browser frame pacing for graphics. On the board DVI::Graphics.commit blocks on
+# the hardware vsync, which paces animation loops and yields the core. The C
+# commit in the browser only copies the drawing buffer to the display and returns
+# immediately, so a P5 draw/commit loop (e.g. p5_demo, p5_game_demo) would
+# busy-spin and freeze the tab. Wrap commit to also suspend the task for a frame,
+# matching the board's behavior so those loops yield to the JS run loop.
+class << DVI::Graphics
+  alias_method :commit_without_yield, :commit
+  def commit
+    commit_without_yield
+    DVI.wait_vsync
+  end
+end

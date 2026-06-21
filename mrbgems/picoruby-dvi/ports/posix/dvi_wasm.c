@@ -33,7 +33,13 @@ static uint8_t framebuffer[FB_WIDTH * FB_HEIGHT];
 static dvi_mode_t active_mode = DVI_MODE_TEXT;
 static uint32_t frame_count = 0;
 static int graphics_scale = 1;
-static uint8_t *back_framebuf = NULL;
+
+// Graphics drawing target. DVI::Graphics primitives draw into dvi_get_framebuffer()
+// at the logical resolution (640x480 at scale 1, the top-left 320x240 at scale 2);
+// dvi_graphics_commit copies/upscales it into the displayed framebuffer. Keeping
+// it separate from framebuffer keeps the text and graphics surfaces from
+// clobbering each other and lets get_pixel read back the logical image.
+static uint8_t graphics_buf[FB_WIDTH * FB_HEIGHT];
 
 // ---------------------------------------------------------------------------
 // Text renderer: VRAM cells -> RGB332 framebuffer (faithful to the RP2350
@@ -96,9 +102,22 @@ render_text(void)
 // Platform contract (the parts the RP2350 port keeps in dvi_output.c)
 // ---------------------------------------------------------------------------
 
-void dvi_set_mode(dvi_mode_t mode) { active_mode = mode; }
+// Switch the displayed surface. There is no hardware VSync to defer to, so apply
+// immediately. Switching back to text repaints the text VRAM right away;
+// switching to graphics leaves the last frame up until the first graphics commit.
+void
+dvi_set_mode(dvi_mode_t mode)
+{
+  if (mode == active_mode) return;
+  active_mode = mode;
+  if (mode == DVI_MODE_TEXT) {
+    render_text();
+    frame_count++;
+  }
+}
+
 void dvi_set_blanking(bool enable) { (void)enable; }
-uint8_t *dvi_get_framebuffer(void) { return framebuffer; }
+uint8_t *dvi_get_framebuffer(void) { return graphics_buf; }
 uint32_t dvi_get_frame_count(void) { return frame_count; }
 
 // No-op: there is no hardware vsync in the browser, and spinning here would
@@ -107,25 +126,47 @@ uint32_t dvi_get_frame_count(void) { return frame_count; }
 // so the task suspends and hands control back to the browser run loop.
 void dvi_wait_vsync(void) {}
 
-// Text commit: render the current VRAM into the framebuffer. Single buffered,
-// so there is no buffer swap; JS reads the framebuffer on its own rAF loop.
+// Text commit: render the current VRAM into the displayed framebuffer. Skipped in
+// graphics mode so a Console redraw cannot clobber the graphics image.
 void
 dvi_text_commit(void)
 {
+  if (active_mode != DVI_MODE_TEXT) return;
   render_text();
   frame_count++;
 }
 
-// Graphics mode (text-only for now; provide the contract so the binding links).
+// Graphics geometry: the logical resolution. At scale 2 the drawing is 320x240
+// and gets pixel-doubled to the 640x480 display by dvi_graphics_commit.
 int dvi_graphics_get_width(void) { return FB_WIDTH / graphics_scale; }
 int dvi_graphics_get_height(void) { return FB_HEIGHT / graphics_scale; }
 void dvi_set_graphics_scale(int scale) { if (scale == 1 || scale == 2) graphics_scale = scale; }
-void dvi_graphics_set_back_buffer(uint8_t *bb) { back_framebuf = bb; }
-void dvi_graphics_commit(void)
+
+// No browser back buffer: drawing already targets graphics_buf via
+// dvi_get_framebuffer(). Kept so the platform contract links; never called here.
+void dvi_graphics_set_back_buffer(uint8_t *bb) { (void)bb; }
+
+// Present the graphics drawing buffer to the display. At scale 1 it is a straight
+// copy; at scale 2 the 320x240 logical image is nearest-neighbor doubled to
+// 640x480, mirroring the board's HSTX/DMA byte replication.
+void
+dvi_graphics_commit(void)
 {
-  if (back_framebuf) {
-    int gw = dvi_graphics_get_width(), gh = dvi_graphics_get_height();
-    memcpy(framebuffer, back_framebuf, (size_t)gw * gh);
+  if (graphics_scale == 1) {
+    memcpy(framebuffer, graphics_buf, (size_t)FB_WIDTH * FB_HEIGHT);
+  } else {
+    int gw = FB_WIDTH / graphics_scale;   // 320
+    int gh = FB_HEIGHT / graphics_scale;  // 240
+    for (int y = 0; y < gh; y++) {
+      const uint8_t *src = graphics_buf + y * gw;
+      uint8_t *d0 = framebuffer + (2 * y) * FB_WIDTH;
+      uint8_t *d1 = d0 + FB_WIDTH;
+      for (int x = 0; x < gw; x++) {
+        uint8_t px = src[x];
+        d0[2 * x] = px; d0[2 * x + 1] = px;
+        d1[2 * x] = px; d1[2 * x + 1] = px;
+      }
+    }
   }
   frame_count++;
 }
@@ -147,6 +188,7 @@ dvi_wasm_init(void)
   memset(row_has_wide, 0, sizeof(row_has_wide));
   memset(glyph_bitmap, 0, sizeof(glyph_bitmap));
   memset(framebuffer, 0, sizeof(framebuffer));
+  memset(graphics_buf, 0, sizeof(graphics_buf));
 
   dvi_text_set_font(&font_mplus_f12r);
   dvi_text_set_bold_font(&font_mplus_f12b);
