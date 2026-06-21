@@ -3,10 +3,7 @@
 // shared by the text core (src/dvi_text.c) and the graphics text renderer
 // (src/dvi_graphics_text.c), both of which call the inline uni2jis_lookup().
 //
-// On RP2350 the generated table is compiled into the picoruby-dvi CMake library
-// (see CMakeLists.txt). Builds that go entirely through PicoRuby rake, with no
-// CMake step (wasm and other POSIX ports), have no other place to compile it, so
-// pull it into libmruby here. The guard keeps RP2350 from compiling it twice.
-#if defined(PICORB_PLATFORM_POSIX)
+// Compiling it here, in a PicoRuby src file, pulls the table into libmruby on
+// every platform (RP2350, wasm and other POSIX ports) so the renderers find the
+// uni2jis_direct symbol at link time without any CMake-side source entry.
 #include "uni2jis_table.c"
-#endif
