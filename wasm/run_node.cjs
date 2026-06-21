@@ -58,7 +58,9 @@ function verifyRender(Module) {
   const fb = Module._harucom_dvi_framebuffer();
   const px = Module.HEAPU8.subarray(fb, fb + W * H);
 
-  // RGB332 palette values (see default_palette in src/dvi_text.c).
+  // RGB332 palette entries the banner draws with, mirrored by index from
+  // default_palette[] in src/dvi_text.c (no C getter is exported, so these must
+  // stay in sync if that table changes): 0 black, 6 cyan, 11 yellow, 15 white.
   const BG = 0x00, YELLOW = 0xFC, WHITE = 0xFF, CYAN = 0x1F;
 
   let nonbg = 0;
