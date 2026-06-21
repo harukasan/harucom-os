@@ -99,6 +99,45 @@ function verifyRender(Module) {
   return runChecks(checks, `non-bg=${nonbg}, distinct colors=${colors.size}`);
 }
 
+// Run the scheduler for a fixed number of steps, ticking the clock each step so
+// sleeping/waiting tasks wake.
+function drive(Module, steps) {
+  for (let i = 0; i < steps; i++) {
+    Module._mrb_tick_wasm();
+    Module._mrb_run_step();
+  }
+}
+
+// Inject HID keystrokes the way the browser keydown/keyup handlers do: set the
+// report with one usage held so the keyboard task polls the press, then clear it
+// so it polls the release. Held only briefly so the OS key repeat (400ms) never
+// fires (board_millis is real wall-clock time).
+function hidType(Module, keys) {
+  for (const [modifier, usage] of keys) {
+    Module._harucom_kbd_set_state(modifier, usage, 0, 0, 0, 0, 0);
+    drive(Module, 200);
+    Module._harucom_kbd_set_state(0, 0, 0, 0, 0, 0, 0);
+    drive(Module, 200);
+  }
+}
+
+// End-to-end keystroke test through the whole input pipeline (USB host stub ->
+// Keyboard -> LineEditor -> IRB -> Sandbox eval): type "9-7" + Enter (all
+// unshifted US keys) and confirm IRB echoes "=> 2". This exercises
+// harucom_kbd_set_state and the reused keyboard/line-editor/IRB stack headlessly.
+function verifyInput(Module) {
+  hidType(Module, [[0, 0x26], [0, 0x2D], [0, 0x24], [0, 0x28]]); // 9 - 7 Enter
+  for (let i = 0; i < 20000; i++) {
+    Module._mrb_tick_wasm();
+    Module._mrb_run_step();
+    if (i % 64 === 0 && output.join("\n").includes("=> 2")) break;
+  }
+  const checks = [
+    ["IRB evaluated typed input (9 - 7 => 2)", output.join("\n").includes("=> 2")],
+  ];
+  return runChecks(checks, null);
+}
+
 createHarucomModule({
   print: (s) => record(process.stdout, s),
   printErr: (s) => record(process.stderr, s),
@@ -119,7 +158,10 @@ createHarucomModule({
     process.stdout.write("[DVI render verification]\n");
     const renderOk = verifyRender(Module);
 
-    if (!bootOk || !renderOk) {
+    process.stdout.write("[Keyboard input verification]\n");
+    const inputOk = verifyInput(Module);
+
+    if (!bootOk || !renderOk || !inputOk) {
       process.stderr.write("smoke test failed\n");
       process.exit(1);
     }
