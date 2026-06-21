@@ -32,3 +32,17 @@ class << DVI::Graphics
     DVI.wait_vsync
   end
 end
+
+# Same frame pacing for text-mode apps. Text app render loops (e.g. audio_demo,
+# pad_demo) present each frame with DVI::Text.commit and have no other yield, so
+# without this they busy-spin and freeze the tab. The board renders text
+# continuously in hardware; here commit doubles as the once-per-frame yield. The
+# line editor / IRB already yield via DVI.wait_vsync, so the extra suspend per
+# commit only paces them to the frame rate.
+class << DVI::Text
+  alias_method :commit_without_yield, :commit
+  def commit
+    commit_without_yield
+    DVI.wait_vsync
+  end
+end
