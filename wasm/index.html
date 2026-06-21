@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harucom OS (wasm)</title>
+  <style>
+    body { font-family: sans-serif; margin: 1.5rem; background: #111; color: #eee; }
+    h1 { font-size: 1.1rem; }
+    #out { background: #000; color: #0f0; padding: 1rem; border-radius: 4px;
+           white-space: pre-wrap; font-family: "Source Code Pro", monospace;
+           min-height: 8rem; }
+  </style>
+</head>
+<body>
+  <h1>Harucom OS (wasm): Phase 1 (headless filesystem boot)</h1>
+  <pre id="out"></pre>
+
+  <script src="harucom.js"></script>
+  <script>
+    const outEl = document.getElementById("out");
+    const append = (s) => { outEl.textContent += s; };
+
+    // stdout / stderr arrive via the posix hal_write() (emscripten fd 1 / 2),
+    // which emscripten routes to Module.print / Module.printErr.
+    createHarucomModule({
+      print: (s) => append(s + "\n"),
+      printErr: (s) => append(s + "\n"),
+    }).then((Module) => {
+      if (Module._harucom_init() !== 0) {
+        append("\n[harucom_init failed]\n");
+        return;
+      }
+      // Drive the mruby task scheduler from the browser event loop. mrb_tick_wasm
+      // advances the scheduler clock (for sleep_ms); mrb_run_step runs one step.
+      // Blocking Ruby yields by suspending its task, so this never freezes.
+      function step() {
+        Module._mrb_tick_wasm();
+        Module._mrb_run_step();
+        setTimeout(step, 16);
+      }
+      step();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "harucom-os-wasm-test",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Headless smoke-test harness for the Harucom OS wasm build (rake wasm:test)",
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

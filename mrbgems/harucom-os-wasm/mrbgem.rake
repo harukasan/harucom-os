@@ -1,12 +1,11 @@
 MRuby::Gem::Specification.new('harucom-os-wasm') do |spec|
   spec.license = 'MIT'
   spec.author  = 'Harucom OS'
-  spec.summary = 'WebAssembly HAL and bootstrap for Harucom OS'
+  spec.summary = 'WebAssembly boot entry for Harucom OS'
 
-  # Provides the wasm counterparts of src/hal_machine.c, src/hal_task.c and the
-  # picoruby-io-console port, so the same Ruby userland that runs on the board
-  # runs in the browser. picoruby-machine and picoruby-io-console supply the
-  # headers (machine.h, ringbuffer.h, io-console.h) this HAL implements.
-  spec.add_dependency 'picoruby-machine'
-  spec.add_dependency 'picoruby-io-console'
+  # Provides harucom_init(): deploy the rootfs into the emscripten in-memory
+  # filesystem and boot mruby. The hardware HAL, Machine_*, the task scheduler
+  # HAL and the io-console / env / rng ports come from picoruby's posix ports
+  # (auto-compiled under PICORB_PLATFORM_POSIX), so this gem carries no HAL.
+  spec.add_dependency 'mruby-compiler2'
 end
