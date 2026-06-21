@@ -19,22 +19,26 @@
 
 #include "pwm_audio.h"
 
-// PWM duty (0..PWM_AUDIO_PWM_WRAP) is unsigned and centered near WRAP/2; map it
-// to a normalized float in roughly [-1, 1] for the Web Audio output.
-#define AUDIO_MID (PWM_AUDIO_PWM_WRAP / 2.0f)
+// The synth's PWM duty (0..PWM_AUDIO_PWM_WRAP) is an UNSIGNED waveform whose
+// silence is duty 0, not the mid level, so a tone is a positive-only swing with
+// a large DC component. Normalize to ~0..2 (full scale) here; the DC-blocking
+// high-pass below removes the offset (see AUDIO_DCBLOCK_R).
+#define AUDIO_NORM (PWM_AUDIO_PWM_WRAP / 2.0f)
 
-// The board reconstructs the PWM output through a one-pole RC low-pass per
-// channel: R28/R29 = 220 ohm in series, C25/C26 = 220 nF to ground, giving a
-// cutoff of 1/(2*pi*R*C) ~= 3.3 kHz. Reproduce it as a one-pole IIR so the
-// browser timbre matches the hardware (square/sawtooth voices lose their harsh
-// upper harmonics). alpha = dt / (R*C + dt), dt = 1 / sample_rate. The series
-// C27/R30/R32 stage is only DC blocking, already handled by the AUDIO_MID
-// subtraction below, so no extra high-pass is needed.
-#define AUDIO_RC       (220.0f * 220e-9f)            // R28*C25 seconds
-#define AUDIO_DT       (1.0f / PWM_AUDIO_SAMPLE_RATE)
-#define AUDIO_LP_ALPHA (AUDIO_DT / (AUDIO_RC + AUDIO_DT))
+// Reproduce the board's analog output stage per channel:
+//  - R28/R29 = 220 ohm + C25/C26 = 220 nF: one-pole RC low-pass, ~3.3 kHz, the
+//    PWM reconstruction filter (alpha = dt / (R*C + dt), dt = 1/sample_rate).
+//  - C27/C28 = 100 uF AC coupling (~0.16 Hz high-pass with R30/R32): removes the
+//    DC. Model it as a DC-blocking one-pole high-pass (a fixed mid subtraction
+//    would not work, since silence sits at duty 0, leaving a huge -1.0 offset).
+#define AUDIO_RC        (220.0f * 220e-9f)            // R28*C25 seconds
+#define AUDIO_DT        (1.0f / PWM_AUDIO_SAMPLE_RATE)
+#define AUDIO_LP_ALPHA  (AUDIO_DT / (AUDIO_RC + AUDIO_DT))
+#define AUDIO_DCBLOCK_R 0.999f                        // DC-block pole (~3.5 Hz at 22050)
 
-static float lp_l = 0.0f, lp_r = 0.0f; // one-pole filter state, persists across pulls
+static float lp_l = 0.0f, lp_r = 0.0f;   // RC low-pass state
+static float dcx_l = 0.0f, dcy_l = 0.0f; // DC-block state (prev input/output), L
+static float dcx_r = 0.0f, dcy_r = 0.0f; // DC-block state, R
 
 // No PWM hardware in the browser. init only resets the ring (the synth state is
 // set up by the Ruby PWMAudio.tone/update calls); deinit silences the synth.
@@ -75,20 +79,23 @@ harucom_audio_pull(float *out_l, float *out_r, int frames)
   for (int i = 0; i < frames; i++) {
     float xl, xr;
     if (pwm_audio_wr == pwm_audio_rd) {
-      xl = 0.0f; // underrun: feed silence through the filter so it decays smoothly
+      xl = 0.0f; // underrun: feed silence through the filters so they settle
       xr = 0.0f;
     } else {
       uint32_t sample = pwm_audio_buf[pwm_audio_rd & PWM_AUDIO_BUF_MASK];
       pwm_audio_rd++;
-      xl = ((float)(sample >> 16) - AUDIO_MID) / AUDIO_MID;
-      xr = ((float)(sample & 0xFFFF) - AUDIO_MID) / AUDIO_MID;
+      xl = (float)(sample >> 16) / AUDIO_NORM;    // 0..2, DC removed below
+      xr = (float)(sample & 0xFFFF) / AUDIO_NORM;
       produced++;
     }
-    // One-pole RC low-pass, matching the board's analog reconstruction filter.
+    // R28/C25 one-pole RC low-pass (PWM reconstruction).
     lp_l += AUDIO_LP_ALPHA * (xl - lp_l);
     lp_r += AUDIO_LP_ALPHA * (xr - lp_r);
-    out_l[i] = lp_l;
-    out_r[i] = lp_r;
+    // C27 DC-blocking high-pass: y[n] = x[n] - x[n-1] + R*y[n-1].
+    float yl = lp_l - dcx_l + AUDIO_DCBLOCK_R * dcy_l; dcx_l = lp_l; dcy_l = yl;
+    float yr = lp_r - dcx_r + AUDIO_DCBLOCK_R * dcy_r; dcx_r = lp_r; dcy_r = yr;
+    out_l[i] = yl;
+    out_r[i] = yr;
   }
   return produced;
 }
