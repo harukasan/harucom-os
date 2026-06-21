@@ -134,8 +134,9 @@ namespace :wasm do
       rm_rf WASM_HOST
     end
     mkdir_p WASM_OUT
-    # Build libmruby.a with emscripten. Run outside the harucom bundler env so
-    # the picoruby submodule build uses its own gems, not this Gemfile.
+    # Build libmruby.a with emscripten outside this project's bundler env: the
+    # bundler env breaks emcc's bundled Python. The picoruby-dvi font generation
+    # still works because freetype is installed as a system gem.
     Bundler.with_unbundled_env do
       sh({ "MRUBY_CONFIG" => WASM_CONFIG }, "rake", chdir: PICORUBY_DIR)
     end
@@ -144,7 +145,11 @@ namespace :wasm do
     # picorb_init) and targets web,node without EXPORT_ES6 so wasm/run_node.cjs
     # can require() it. harucom_init / mrb_run_step / mrb_tick_wasm are driven by
     # the run loop in wasm/index.html.
-    exported = '["' + %w[_harucom_init _mrb_run_step _mrb_tick_wasm _malloc _free].join('","') + '"]'
+    exported = '["' + %w[
+      _harucom_init _mrb_run_step _mrb_tick_wasm
+      _harucom_dvi_framebuffer _harucom_dvi_width _harucom_dvi_height
+      _malloc _free
+    ].join('","') + '"]'
     runtime  = '["' + %w[ccall cwrap UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8].join('","') + '"]'
     sh "emcc", "-g0", "-O2",
        "-sWASM=1", "-sMODULARIZE=1", "-sEXPORT_NAME=createHarucomModule",

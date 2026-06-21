@@ -36,6 +36,14 @@
 extern mrb_state *global_mrb;
 extern int picorb_create_task(const char *code);
 
+/* DVI text-mode browser port (mrbgems/picoruby-dvi/ports/posix/dvi_wasm.c).
+ * dvi_wasm_init() wires the shared text core to the framebuffer and loads the
+ * M+ fonts; the dvi_text_* writers fill the text VRAM and dvi_text_commit()
+ * renders it into the RGB332 framebuffer that the JS canvas blit reads. */
+extern void dvi_wasm_init(void);
+extern void dvi_text_put_string(int col, int row, const char *str, uint8_t attr);
+extern void dvi_text_commit(void);
+
 /* This gem only provides the boot entry; there is no Ruby API to register. */
 void
 mrb_harucom_os_wasm_gem_init(mrb_state *mrb)
@@ -99,6 +107,20 @@ static const char ruby_bootstrap[] =
     "  puts \"boot error: #{e.class}: #{e.message}\"\n"
     "end\n";
 
+/* Phase 2 bring-up: paint a banner straight from C (narrow glyphs, a full-width
+ * glyph and a few palette colors) so the text VRAM -> framebuffer -> canvas blit
+ * path can be validated before the Ruby Console is wired to the text VRAM. */
+static void
+draw_dvi_test_banner(void)
+{
+  dvi_text_put_string(0, 0, "Harucom OS (wasm) - DVI text mode", 0xB0);
+  dvi_text_put_string(0, 2, "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz", 0xF0);
+  dvi_text_put_string(0, 3, "0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", 0xF0);
+  dvi_text_put_string(0, 5, "日本語表示 wide-glyph test", 0x60);
+  dvi_text_put_string(0, 7, "> ", 0xF0);
+  dvi_text_commit();
+}
+
 EMSCRIPTEN_KEEPALIVE
 int
 harucom_init(void)
@@ -124,6 +146,11 @@ harucom_init(void)
             mrb_string_p(m) ? RSTRING_PTR(m) : "(no message)");
     mrb->exc = NULL;
   }
+
+  /* Bring up the DVI text console and paint a bring-up banner, so the canvas
+   * blit path is exercised independently of the Ruby boot task below. */
+  dvi_wasm_init();
+  draw_dvi_test_banner();
 
   mrb_define_global_const(mrb, "HARUCOM_VERSION", mrb_str_new_cstr(mrb, "wasm"));
   mrb_define_global_const(mrb, "HARUCOM_BUILD_DATE", mrb_str_new_cstr(mrb, "wasm"));

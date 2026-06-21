@@ -57,6 +57,11 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   conf.gem core: "picoruby-io-console"
   conf.gem core: "picoruby-sandbox"
 
+  # DVI text/graphics. The portable text core (src/dvi_text.c) and graphics
+  # drawing compile here; the browser renderer lives in ports/posix/dvi_wasm.c
+  # (auto-compiled under POSIX) and blits the framebuffer to a canvas.
+  conf.gem File.expand_path("../mrbgems/picoruby-dvi", __dir__)
+
   # Harucom boot entry: deploys the rootfs into MEMFS and boots /system.rb.
   conf.gem File.expand_path("../mrbgems/harucom-os-wasm", __dir__)
 

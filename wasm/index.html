@@ -7,19 +7,33 @@
   <style>
     body { font-family: sans-serif; margin: 1.5rem; background: #111; color: #eee; }
     h1 { font-size: 1.1rem; }
+    /* The DVI text surface is 640x480; scale it up with crisp (nearest) pixels. */
+    #screen { width: 640px; height: 480px; image-rendering: pixelated;
+              background: #000; border-radius: 4px; display: block; }
     #out { background: #000; color: #0f0; padding: 1rem; border-radius: 4px;
            white-space: pre-wrap; font-family: "Source Code Pro", monospace;
-           min-height: 8rem; }
+           min-height: 4rem; margin-top: 1rem; }
   </style>
 </head>
 <body>
-  <h1>Harucom OS (wasm): Phase 1 (headless filesystem boot)</h1>
+  <h1>Harucom OS (wasm): Phase 2 (DVI text on canvas)</h1>
+  <canvas id="screen" width="640" height="480"></canvas>
   <pre id="out"></pre>
 
   <script src="harucom.js"></script>
   <script>
     const outEl = document.getElementById("out");
     const append = (s) => { outEl.textContent += s; };
+
+    // RGB332 (bits 7-5 R, 4-2 G, 1-0 B) -> RGBA lookup. Stored as little-endian
+    // Uint32 (0xAABBGGRR) so it can be written straight into the ImageData view.
+    const rgb332 = new Uint32Array(256);
+    for (let c = 0; c < 256; c++) {
+      const r = Math.round(((c >> 5) & 7) * 255 / 7);
+      const g = Math.round(((c >> 2) & 7) * 255 / 7);
+      const b = Math.round((c & 3) * 255 / 3);
+      rgb332[c] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+    }
 
     // stdout / stderr arrive via the posix hal_write() (emscripten fd 1 / 2),
     // which emscripten routes to Module.print / Module.printErr.
@@ -31,12 +45,32 @@
         append("\n[harucom_init failed]\n");
         return;
       }
+
+      // The framebuffer is a static C array, so its address is stable across
+      // memory growth; fetch it once. HEAPU8 itself may be replaced on growth,
+      // so it is re-read every frame.
+      const W = Module._harucom_dvi_width();
+      const H = Module._harucom_dvi_height();
+      const fbPtr = Module._harucom_dvi_framebuffer();
+      const canvas = document.getElementById("screen");
+      const ctx = canvas.getContext("2d");
+      const image = ctx.createImageData(W, H);
+      const pixels = new Uint32Array(image.data.buffer);
+
+      function blit() {
+        const fb = Module.HEAPU8;
+        for (let i = 0; i < W * H; i++) pixels[i] = rgb332[fb[fbPtr + i]];
+        ctx.putImageData(image, 0, 0);
+      }
+
       // Drive the mruby task scheduler from the browser event loop. mrb_tick_wasm
       // advances the scheduler clock (for sleep_ms); mrb_run_step runs one step.
-      // Blocking Ruby yields by suspending its task, so this never freezes.
+      // Blocking Ruby yields by suspending its task, so this never freezes. The
+      // canvas is repainted from the framebuffer every step.
       function step() {
         Module._mrb_tick_wasm();
         Module._mrb_run_step();
+        blit();
         setTimeout(step, 16);
       }
       step();
