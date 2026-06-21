@@ -80,6 +80,11 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   # (ports/posix/dict_region.c) loads it from the emcc-embedded /dict.bin.
   conf.gem File.expand_path("../mrbgems/harucom-os-dict", __dir__)
 
+  # PWM audio synth (PWMAudio). The synth/ring buffer in src/ is portable; the
+  # browser port (ports/posix/pwm_audio_wasm.c) drains the ring to Web Audio
+  # instead of the board's PWM timer ISR.
+  conf.gem File.expand_path("../mrbgems/picoruby-pwm-audio", __dir__)
+
   # Harucom boot entry: deploys the rootfs into MEMFS and boots /system.rb.
   conf.gem File.expand_path("../mrbgems/harucom-os-wasm", __dir__)
 

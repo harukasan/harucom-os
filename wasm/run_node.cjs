@@ -220,6 +220,44 @@ function verifyGraphics(Module) {
   return runChecks(checks, `red=${red}, center=0x${px[center].toString(16)}`);
 }
 
+// End-to-end audio test: from IRB, start the PWMAudio synth on a 440Hz square
+// wave and fill the ring buffer, then drain it through harucom_audio_pull (the
+// same path the browser ScriptProcessorNode uses) and assert the floats form a
+// real oscillating waveform. Audio can't be heard headlessly, so this verifies
+// the synth + the wasm pull port produce sound.
+function verifyAudio(Module) {
+  typeString(Module, "PWMAudio.init(24,25);PWMAudio.tone(0,440,PWMAudio::SQUARE,15);PWMAudio.update");
+  hidType(Module, [[0, 0x28]]); // Enter
+  drive(Module, 8000); // let IRB evaluate the line
+
+  const N = 512;
+  const lPtr = Module._malloc(N * 4);
+  const rPtr = Module._malloc(N * 4);
+  const got = Module._harucom_audio_pull(lPtr, rPtr, N);
+  const H = Module.HEAPF32;
+  let min = Infinity, max = -Infinity, maxDelta = 0, prev = H[lPtr >> 2];
+  for (let i = 0; i < N; i++) {
+    const v = H[(lPtr >> 2) + i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+    const d = Math.abs(v - prev);
+    if (d > maxDelta) maxDelta = d;
+    prev = v;
+  }
+  Module._free(lPtr);
+  Module._free(rPtr);
+  const spread = max - min;
+  // The RC low-pass rounds the square's edges, so the largest sample-to-sample
+  // step is well below the peak-to-peak swing; an unfiltered square would jump
+  // the full swing in one sample (maxDelta == spread).
+  const checks = [
+    ["synth produced samples (ring drained)", got > 0],
+    ["square wave oscillates (amplitude spread)", spread > 0.5],
+    ["RC low-pass smooths transitions", maxDelta < spread * 0.9],
+  ];
+  return runChecks(checks, `pulled=${got}, spread=${spread.toFixed(2)}, maxDelta=${maxDelta.toFixed(2)}`);
+}
+
 createHarucomModule({
   print: (s) => record(process.stdout, s),
   printErr: (s) => record(process.stderr, s),
@@ -249,7 +287,10 @@ createHarucomModule({
     process.stdout.write("[Graphics mode verification]\n");
     const graphicsOk = verifyGraphics(Module);
 
-    if (!bootOk || !renderOk || !inputOk || !dictOk || !graphicsOk) {
+    process.stdout.write("[Audio synth verification]\n");
+    const audioOk = verifyAudio(Module);
+
+    if (!bootOk || !renderOk || !inputOk || !dictOk || !graphicsOk || !audioOk) {
       process.stderr.write("smoke test failed\n");
       process.exit(1);
     }

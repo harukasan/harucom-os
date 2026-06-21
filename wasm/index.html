@@ -208,6 +208,49 @@
       // which element currently holds focus (and so space never scrolls the page).
       window.addEventListener("keydown", onKeyDown, true);
       window.addEventListener("keyup", onKeyUp, true);
+
+      // --- Audio: PWMAudio synth ring buffer -> Web Audio ------------------
+      // The synth renders into a ring buffer (filled by the Ruby PWMAudio.update
+      // loop); harucom_audio_pull drains it into planar float L/R. A
+      // ScriptProcessorNode pulls a block each callback on the main thread, so no
+      // SharedArrayBuffer / cross-origin-isolation headers are needed. An
+      // AudioContext must be started from a user gesture, so it is created lazily
+      // on the first canvas interaction.
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      let audioCtx = null, audioNode = null; // kept alive so the node is not GC'd
+      function startAudio() {
+        if (audioCtx || !AudioCtx) return;
+        const srcRate = Module._harucom_audio_sample_rate(); // 22050
+        // Prefer a context at the synth rate to avoid resampling; browsers that
+        // ignore the request fall back to their hardware rate and we resample.
+        try { audioCtx = new AudioCtx({ sampleRate: srcRate }); }
+        catch (e) { audioCtx = new AudioCtx(); }
+        const ctx = audioCtx;
+        const ratio = srcRate / ctx.sampleRate; // 1.0 when honored
+        const BLOCK = 4096; // ~93ms at 44.1k; large enough to ride scheduler jitter
+        const maxSrc = Math.ceil(BLOCK * ratio) + 2;
+        const lPtr = Module._malloc(maxSrc * 4);
+        const rPtr = Module._malloc(maxSrc * 4);
+        const node = ctx.createScriptProcessor(BLOCK, 0, 2);
+        audioNode = node;
+        node.onaudioprocess = (e) => {
+          const outL = e.outputBuffer.getChannelData(0);
+          const outR = e.outputBuffer.getChannelData(1);
+          const need = Math.ceil(BLOCK * ratio);
+          Module._harucom_audio_pull(lPtr, rPtr, need);
+          const H = Module.HEAPF32; // re-read: the view detaches on memory growth
+          const lo = lPtr >> 2, ro = rPtr >> 2;
+          for (let i = 0; i < BLOCK; i++) {
+            const s = (ratio === 1) ? i : Math.floor(i * ratio);
+            outL[i] = H[lo + s];
+            outR[i] = H[ro + s];
+          }
+        };
+        node.connect(ctx.destination);
+        ctx.resume();
+      }
+      canvas.addEventListener("mousedown", startAudio);
+      window.addEventListener("keydown", startAudio, true);
     });
   </script>
 </body>

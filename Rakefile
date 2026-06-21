@@ -156,9 +156,10 @@ namespace :wasm do
       _harucom_dvi_framebuffer _harucom_dvi_width _harucom_dvi_height
       _harucom_dvi_frame_count
       _harucom_kbd_set_state
+      _harucom_audio_pull _harucom_audio_sample_rate
       _malloc _free
     ].join('","') + '"]'
-    runtime  = '["' + %w[ccall cwrap UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8].join('","') + '"]'
+    runtime  = '["' + %w[ccall cwrap UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8 HEAPF32].join('","') + '"]'
     sh "emcc", "-g0", "-O2",
        "-sWASM=1", "-sMODULARIZE=1", "-sEXPORT_NAME=createHarucomModule",
        "-sEXPORTED_RUNTIME_METHODS=#{runtime}",
