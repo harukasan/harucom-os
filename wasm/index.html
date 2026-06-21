@@ -220,74 +220,103 @@
       window.addEventListener("keydown", onKeyDown, true);
       window.addEventListener("keyup", onKeyUp, true);
 
-      // --- Audio: PWMAudio synth ring buffer -> Web Audio ------------------
+      // --- Audio: PWMAudio synth ring buffer -> Web Audio (AudioWorklet) ----
       // The synth renders into a small 1024-frame ring (filled by the Ruby
-      // PWMAudio.update loop). The audio callback runs on the same (busy) main
-      // thread as the VM, so pulling straight from that small ring glitched
-      // whenever a frame ran long, and any sample-rate mismatch dropped a frame
-      // at each callback boundary. Instead the rAF loop pumps the synth ring into
-      // a larger JS ring (audioPump), and the ScriptProcessor drains the JS ring
-      // with a continuous fractional read position (so resampling never skips a
-      // frame). The JS ring plus a larger block absorb frame-time jitter without
-      // needing a SharedArrayBuffer / AudioWorklet (no cross-origin headers). The
-      // AudioContext is created lazily on the first user gesture.
+      // PWMAudio.update loop). A ScriptProcessor ran its callback on the busy main
+      // thread and glitched whenever a frame ran long. Instead an AudioWorklet
+      // plays on the dedicated audio thread (never blocked by the VM): it keeps
+      // its own ring and reports its fill level back, and the rAF loop (audioPump)
+      // pulls from the synth ring, resamples with a continuous fractional position
+      // and posts frames to keep the worklet ~TARGET buffered. No SharedArrayBuffer
+      // (samples cross via postMessage), so no cross-origin-isolation headers.
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const WORKLET_SRC = `
+        class HarucomAudio extends AudioWorkletProcessor {
+          constructor() {
+            super();
+            this.cap = 16384; this.mask = this.cap - 1;
+            this.bl = new Float32Array(this.cap);
+            this.br = new Float32Array(this.cap);
+            this.wr = 0; this.rd = 0;
+            this.port.onmessage = (e) => {
+              const l = e.data.l, r = e.data.r;
+              for (let i = 0; i < l.length; i++) {
+                this.bl[this.wr & this.mask] = l[i];
+                this.br[this.wr & this.mask] = r[i];
+                this.wr++;
+              }
+            };
+          }
+          process(inputs, outputs) {
+            const out = outputs[0], outL = out[0], outR = out[1], n = outL.length;
+            for (let i = 0; i < n; i++) {
+              if (this.rd < this.wr) {
+                const s = this.rd & this.mask;
+                outL[i] = this.bl[s]; outR[i] = this.br[s]; this.rd++;
+              } else { outL[i] = 0; outR[i] = 0; }
+            }
+            this.port.postMessage(this.wr - this.rd); // buffered level for flow control
+            return true;
+          }
+        }
+        registerProcessor('harucom-audio', HarucomAudio);`;
       let audioCtx = null, audioNode = null; // kept alive so the node is not GC'd
       function startAudio() {
         if (audioCtx || !AudioCtx) return;
         const srcRate = Module._harucom_audio_sample_rate(); // 22050
-        // Request the synth rate so no resampling is needed when honored.
+        // Request the synth rate so the worklet needs no resampling when honored.
         try { audioCtx = new AudioCtx({ sampleRate: srcRate }); }
         catch (e) { audioCtx = new AudioCtx(); }
         const ctx = audioCtx;
         const ratio = srcRate / ctx.sampleRate; // source frames per output frame
-
-        const JS_CAP = 8192, MASK = JS_CAP - 1; // JS ring, power of 2
-        const jsL = new Float32Array(JS_CAP), jsR = new Float32Array(JS_CAP);
-        let jsWr = 0;       // producer index (source frames written)
-        let readPos = 0;    // consumer index (fractional source frames consumed)
-        const TARGET = 1024; // source frames to keep buffered (~46ms at 22050)
+        const TARGET = 2048; // output frames to keep buffered in the worklet (~latency)
         const PULL = 1024;
         const lPtr = Module._malloc(PULL * 4), rPtr = Module._malloc(PULL * 4);
+        let workletLevel = 0; // frames buffered in the worklet (from its reports)
 
-        // Pull from the synth ring into the JS ring, keeping ~TARGET buffered.
-        audioPump = function () {
-          let want = TARGET - (jsWr - Math.floor(readPos));
-          while (want > 0) {
-            const n = want < PULL ? want : PULL;
-            const got = Module._harucom_audio_pull(lPtr, rPtr, n);
-            if (got === 0) break; // synth ring empty; the producer refills it
-            const H = Module.HEAPF32, lo = lPtr >> 2, ro = rPtr >> 2;
-            for (let i = 0; i < got; i++) {
-              jsL[jsWr & MASK] = H[lo + i];
-              jsR[jsWr & MASK] = H[ro + i];
-              jsWr++;
-            }
-            want -= got;
-            if (got < n) break;
-          }
-        };
+        // Source FIFO for continuous resampling: pulled synth frames awaiting
+        // consumption; srcPos is the fractional read position (integer at ratio 1).
+        const SF_CAP = 8192, SF_MASK = SF_CAP - 1;
+        const sfL = new Float32Array(SF_CAP), sfR = new Float32Array(SF_CAP);
+        let sfWr = 0, srcPos = 0;
 
-        const BLOCK = 2048; // larger block = bigger output buffer to ride jitter
-        const node = ctx.createScriptProcessor(BLOCK, 0, 2);
-        audioNode = node;
-        node.onaudioprocess = (e) => {
-          const outL = e.outputBuffer.getChannelData(0);
-          const outR = e.outputBuffer.getChannelData(1);
-          for (let i = 0; i < BLOCK; i++) {
-            const idx = Math.floor(readPos);
-            if (idx < jsWr) {
-              const s = idx & MASK;
-              outL[i] = jsL[s];
-              outR[i] = jsR[s];
-              readPos += ratio; // fractional, carried across callbacks
-            } else {
-              outL[i] = 0; outR[i] = 0; // underrun: hold position, emit silence
+        const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "application/javascript" }));
+        ctx.audioWorklet.addModule(url).then(() => {
+          URL.revokeObjectURL(url);
+          const node = new AudioWorkletNode(ctx, "harucom-audio", { numberOfInputs: 0, outputChannelCount: [2] });
+          audioNode = node;
+          node.port.onmessage = (e) => { workletLevel = e.data; };
+          node.connect(ctx.destination);
+          ctx.resume();
+
+          audioPump = function () {
+            let want = TARGET - workletLevel; // output frames to supply
+            if (want <= 0) return;
+            const outL = new Float32Array(want), outR = new Float32Array(want);
+            let produced = 0;
+            while (produced < want) {
+              if (sfWr - Math.floor(srcPos) < 2) {
+                const got = Module._harucom_audio_pull(lPtr, rPtr, PULL);
+                if (got === 0) break; // synth ring empty; producer will refill
+                const H = Module.HEAPF32, lo = lPtr >> 2, ro = rPtr >> 2;
+                for (let i = 0; i < got; i++) {
+                  sfL[sfWr & SF_MASK] = H[lo + i];
+                  sfR[sfWr & SF_MASK] = H[ro + i];
+                  sfWr++;
+                }
+              }
+              if (sfWr - Math.floor(srcPos) < 1) break;
+              const s = Math.floor(srcPos) & SF_MASK;
+              outL[produced] = sfL[s]; outR[produced] = sfR[s]; produced++;
+              srcPos += ratio;
             }
-          }
-        };
-        node.connect(ctx.destination);
-        ctx.resume();
+            if (produced === 0) return;
+            const L = produced === want ? outL : outL.slice(0, produced);
+            const R = produced === want ? outR : outR.slice(0, produced);
+            workletLevel += produced; // optimistic; corrected by the next report
+            node.port.postMessage({ l: L, r: R }, [L.buffer, R.buffer]);
+          };
+        });
       }
       canvas.addEventListener("mousedown", startAudio);
       window.addEventListener("keydown", startAudio, true);
