@@ -135,8 +135,6 @@
         ControlLeft:0x01,ShiftLeft:0x02,AltLeft:0x04,MetaLeft:0x08,
         ControlRight:0x10,ShiftRight:0x20,AltRight:0x40,MetaRight:0x80,
       };
-      // Keys that scroll or move focus; always swallow these so the page stays put.
-      const NAV = new Set([0x2A,0x2B,0x2C,0x4A,0x4B,0x4D,0x4E,0x4F,0x50,0x51,0x52]);
 
       const held = [];   // HID usages currently down, in press order (max 6)
       let modifier = 0;  // HID modifier bitmask
@@ -186,10 +184,14 @@
         if (e.code in MOD) { modifier |= MOD[e.code]; pushKeyState(); showDbg(e, undefined, false); return; }
         const usage = usageFor(e);
         if (usage === undefined) { showDbg(e, undefined, false); return; }
-        // Swallow navigation keys, and ordinary typing, but let Ctrl/Cmd browser
-        // shortcuts (reload, devtools, etc.) through while the OS still sees them.
+        // Capture keys for the OS so the browser does not steal its shortcuts
+        // (the OS uses Ctrl-J for SKK, Ctrl-C/D/L, etc. — Firefox would otherwise
+        // open Downloads on Ctrl-J). Leave Meta/Cmd combos and the function keys
+        // to the browser so it keeps usable escapes (F5 reload, F12 devtools,
+        // macOS Cmd-* shortcuts); the OS still receives them via the report.
+        const isFunctionKey = usage >= 0x3A && usage <= 0x45; // F1..F12
         let prevented = false;
-        if (NAV.has(usage) || !(e.ctrlKey || e.metaKey)) { e.preventDefault(); prevented = true; }
+        if (!e.metaKey && !isFunctionKey) { e.preventDefault(); prevented = true; }
         pendingRelease.delete(usage); // re-pressed before its release was applied
         if (!held.includes(usage) && held.length < 6) held.push(usage);
         pushKeyState();
