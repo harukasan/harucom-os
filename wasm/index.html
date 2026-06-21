@@ -13,11 +13,14 @@
     #out { background: #000; color: #0f0; padding: 1rem; border-radius: 4px;
            white-space: pre-wrap; font-family: "Source Code Pro", monospace;
            min-height: 4rem; margin-top: 1rem; }
+    #kbddbg { color: #888; font-family: monospace; font-size: 0.8rem;
+              margin-top: 0.5rem; min-height: 1rem; }
   </style>
 </head>
 <body>
   <h1>Harucom OS (wasm): Phase 2 (DVI text on canvas)</h1>
   <canvas id="screen" width="640" height="480"></canvas>
+  <div id="kbddbg"></div>
   <pre id="out"></pre>
 
   <script src="harucom.js"></script>
@@ -64,15 +67,24 @@
       }
 
       // Drive the mruby task scheduler from requestAnimationFrame. mrb_tick_wasm
-      // advances the scheduler clock (for sleep_ms); mrb_run_step runs one step.
-      // Blocking Ruby yields by suspending its task, so this never freezes. rAF
-      // pauses in a background tab, which idles the OS instead of burning CPU.
-      // The framebuffer only changes on a commit, so blit only when the commit
-      // counter advanced rather than repainting the whole canvas every frame.
+      // advances the scheduler clock (for sleep_ms); mrb_run_step runs one task
+      // slice. Blocking Ruby yields by suspending its task, so this never
+      // freezes. rAF pauses in a background tab, which idles the OS instead of
+      // burning CPU. The framebuffer only changes on a commit, so blit only when
+      // the commit counter advanced rather than repainting every frame.
+      //
+      // Several steps per frame so the always-ready keyboard task actually polls
+      // every frame. With one step per frame the keyboard polled only every few
+      // frames, so a key whose down and up arrive in the same frame (e.g. the
+      // synthetic space tap from SandS-style remappers) was set and cleared
+      // between two polls and lost. applyReleases() (below) defers key releases
+      // until after this batch, so every press is observed by at least one poll.
+      const STEPS_PER_FRAME = 16;
       let lastFrame = -1;
       function step() {
         Module._mrb_tick_wasm();
-        Module._mrb_run_step();
+        for (let s = 0; s < STEPS_PER_FRAME; s++) Module._mrb_run_step();
+        applyReleases();
         const frame = Module._harucom_dvi_frame_count();
         if (frame !== lastFrame) {
           lastFrame = frame;
@@ -115,34 +127,72 @@
 
       const held = [];   // HID usages currently down, in press order (max 6)
       let modifier = 0;  // HID modifier bitmask
+      const pendingRelease = new Set(); // keyups waiting for a poll before removal
       function pushKeyState() {
         Module._harucom_kbd_set_state(modifier,
           held[0]||0, held[1]||0, held[2]||0, held[3]||0, held[4]||0, held[5]||0);
       }
+      // Apply deferred key releases. Called once per frame after the scheduler
+      // batch has run, so a key that went down and up within one frame is still
+      // present in the report while the keyboard task polls, then removed.
+      function applyReleases() {
+        if (pendingRelease.size === 0) return;
+        for (const usage of pendingRelease) {
+          const i = held.indexOf(usage);
+          if (i >= 0) held.splice(i, 1);
+        }
+        pendingRelease.clear();
+        pushKeyState();
+      }
 
-      canvas.tabIndex = 0;          // focusable so it can receive key events
+      canvas.tabIndex = 0;          // focusable, for a visible focus target
       canvas.style.outline = "none";
       canvas.focus();
-      canvas.addEventListener("click", () => canvas.focus());
+      canvas.addEventListener("mousedown", () => canvas.focus());
 
-      canvas.addEventListener("keydown", (e) => {
-        if (e.code in MOD) { modifier |= MOD[e.code]; pushKeyState(); return; }
-        const usage = HID[e.code];
-        if (usage === undefined) return;
+      // Resolve a DOM key event to a HID usage. Keyed on e.code, but fall back
+      // to e.key for the space bar: some browsers / IME states report its code
+      // as something other than "Space", while e.key is always " ".
+      function usageFor(e) {
+        let u = HID[e.code];
+        if (u === undefined && e.key === " ") u = 0x2C;
+        return u;
+      }
+
+      const dbg = document.getElementById("kbddbg");
+      function showDbg(e, usage, prevented) {
+        if (!dbg) return;
+        const hex = (u) => "0x" + u.toString(16);
+        dbg.textContent =
+          `last key: code=${e.code || "(none)"} key=${JSON.stringify(e.key)} ` +
+          `usage=${usage === undefined ? "-" : hex(usage)} prevented=${prevented} ` +
+          `held=[${held.map(hex).join(",")}] mod=${hex(modifier)}`;
+      }
+
+      function onKeyDown(e) {
+        if (e.code in MOD) { modifier |= MOD[e.code]; pushKeyState(); showDbg(e, undefined, false); return; }
+        const usage = usageFor(e);
+        if (usage === undefined) { showDbg(e, undefined, false); return; }
         // Swallow navigation keys, and ordinary typing, but let Ctrl/Cmd browser
         // shortcuts (reload, devtools, etc.) through while the OS still sees them.
-        if (NAV.has(usage) || !(e.ctrlKey || e.metaKey)) e.preventDefault();
+        let prevented = false;
+        if (NAV.has(usage) || !(e.ctrlKey || e.metaKey)) { e.preventDefault(); prevented = true; }
+        pendingRelease.delete(usage); // re-pressed before its release was applied
         if (!held.includes(usage) && held.length < 6) held.push(usage);
         pushKeyState();
-      });
-      canvas.addEventListener("keyup", (e) => {
+        showDbg(e, usage, prevented);
+      }
+      function onKeyUp(e) {
         if (e.code in MOD) { modifier &= ~MOD[e.code]; pushKeyState(); return; }
-        const usage = HID[e.code];
+        const usage = usageFor(e);
         if (usage === undefined) return;
-        const i = held.indexOf(usage);
-        if (i >= 0) held.splice(i, 1);
-        pushKeyState();
-      });
+        // Defer removal to applyReleases so a same-frame down+up is still polled.
+        pendingRelease.add(usage);
+      }
+      // Listen on window in the capture phase so keys reach the OS regardless of
+      // which element currently holds focus (and so space never scrolls the page).
+      window.addEventListener("keydown", onKeyDown, true);
+      window.addEventListener("keyup", onKeyUp, true);
     });
   </script>
 </body>
