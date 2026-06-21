@@ -41,6 +41,10 @@ extern int picorb_create_task(const char *code);
  * RGB332 framebuffer that the JS canvas blit reads. */
 extern void dvi_wasm_init(void);
 
+/* IME dictionary browser port (mrbgems/harucom-os-dict/ports/posix/dict_region.c).
+ * Loads the emcc-embedded /dict.bin so InputMethod.skk_lookup / tcode_lookup work. */
+extern void dict_wasm_init(void);
+
 /* This gem only provides the boot entry; there is no Ruby API to register. */
 void
 mrb_harucom_os_wasm_gem_init(mrb_state *mrb)
@@ -129,6 +133,9 @@ harucom_init(void)
   /* Initialize the DVI text surface (VRAM, fonts, framebuffer) before the boot
    * task runs, so the Ruby Console has a cleared screen to draw into. */
   dvi_wasm_init();
+
+  /* Load the embedded IME dictionary so SKK / T-Code conversion works. */
+  dict_wasm_init();
 
   mrb_define_global_const(mrb, "HARUCOM_VERSION", mrb_str_new_cstr(mrb, "wasm"));
   mrb_define_global_const(mrb, "HARUCOM_BUILD_DATE", mrb_str_new_cstr(mrb, "wasm"));

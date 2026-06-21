@@ -138,6 +138,57 @@ function verifyInput(Module) {
   return runChecks(checks, null);
 }
 
+// Map a printable ASCII char to [modifier, HID usage] on the US layout, so a
+// whole string can be typed through the keyboard pipeline. Mirrors
+// picoruby-keyboard-input's LAYOUT_US_NORMAL / LAYOUT_US_SHIFTED.
+function hidForChar(ch) {
+  const SH = 0x02; // left shift bit
+  const c = ch.charCodeAt(0);
+  if (ch >= "a" && ch <= "z") return [0, 0x04 + c - 97];
+  if (ch >= "A" && ch <= "Z") return [SH, 0x04 + c - 65];
+  if (ch >= "1" && ch <= "9") return [0, 0x1e + c - 49];
+  if (ch === "0") return [0, 0x27];
+  const M = {
+    " ": [0, 0x2c], "-": [0, 0x2d], "_": [SH, 0x2d], "=": [0, 0x2e], "+": [SH, 0x2e],
+    "[": [0, 0x2f], "]": [0, 0x30], "\\": [0, 0x31], ";": [0, 0x33], ":": [SH, 0x33],
+    "'": [0, 0x34], '"': [SH, 0x34], ",": [0, 0x36], ".": [0, 0x37], "/": [0, 0x38],
+    "?": [SH, 0x38], "(": [SH, 0x26], ")": [SH, 0x27], "&": [SH, 0x24], "*": [SH, 0x25],
+    "!": [SH, 0x1e], "@": [SH, 0x1f], "#": [SH, 0x20], "$": [SH, 0x21], "%": [SH, 0x22],
+  };
+  if (M[ch]) return M[ch];
+  throw new Error("no HID mapping for char " + JSON.stringify(ch));
+}
+
+function typeString(Module, str) {
+  for (const ch of str) {
+    const [mod, usage] = hidForChar(ch);
+    Module._harucom_kbd_set_state(mod, usage, 0, 0, 0, 0, 0);
+    drive(Module, 100);
+    Module._harucom_kbd_set_state(0, 0, 0, 0, 0, 0, 0);
+    drive(Module, 100);
+  }
+}
+
+// End-to-end IME dictionary test: type a Ruby probe that looks up the SKK
+// reading にほん (entered as \u escapes so the keystrokes stay ASCII) and prints
+// the candidates. The embedded /dict.bin, loaded by dict_wasm_init via the
+// ports/posix dict port, must resolve it to include 日本.
+function verifyDict(Module) {
+  const before = output.length;
+  typeString(Module, 'puts InputMethod.skk_lookup("\\u306b\\u307b\\u3093")');
+  hidType(Module, [[0, 0x28]]); // Enter
+  for (let i = 0; i < 40000; i++) {
+    Module._mrb_tick_wasm();
+    Module._mrb_run_step();
+    if (i % 64 === 0 && output.slice(before).join("\n").includes("日本")) break;
+  }
+  const out = output.slice(before).join("\n");
+  const checks = [
+    ["SKK lookup of にほん includes 日本", out.includes("日本")],
+  ];
+  return runChecks(checks, out.split("\n").filter((l) => l.trim()).slice(-4).join(" | "));
+}
+
 createHarucomModule({
   print: (s) => record(process.stdout, s),
   printErr: (s) => record(process.stderr, s),
@@ -161,7 +212,10 @@ createHarucomModule({
     process.stdout.write("[Keyboard input verification]\n");
     const inputOk = verifyInput(Module);
 
-    if (!bootOk || !renderOk || !inputOk) {
+    process.stdout.write("[IME dictionary verification]\n");
+    const dictOk = verifyDict(Module);
+
+    if (!bootOk || !renderOk || !inputOk || !dictOk) {
       process.stderr.write("smoke test failed\n");
       process.exit(1);
     }

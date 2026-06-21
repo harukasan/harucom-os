@@ -4,6 +4,7 @@ PROJECT_DIR = __dir__
 BUILD_DIR   = File.join(PROJECT_DIR, "build")
 DICT_DIR    = File.join(PROJECT_DIR, "vendor", "harucom-os-dict")
 DICT_UF2    = File.join(DICT_DIR, "build", "dict.uf2")
+DICT_BIN    = File.join(DICT_DIR, "build", "dict.bin")
 HARUCOM_UF2 = File.join(BUILD_DIR, "harucom_os.uf2")
 FULL_UF2    = File.join(BUILD_DIR, "harucom_os_full.uf2")
 MERGE_SCRIPT = File.join(PROJECT_DIR, "scripts", "merge_uf2.rb")
@@ -39,6 +40,11 @@ end
 desc "Build dictionary UF2 (vendor/harucom-os-dict)"
 task dict_uf2: :dict_submodule do
   sh "rake uf2", chdir: DICT_DIR
+end
+
+# Build just the raw HCDK image (no UF2 wrapper) for the wasm --embed-file step.
+file DICT_BIN => :dict_submodule do
+  sh "rake build/dict.bin", chdir: DICT_DIR
 end
 
 desc "Build combined UF2 (harucom-os + dict)"
@@ -127,7 +133,7 @@ namespace :wasm do
   end
 
   desc "Build build/wasm/harucom.{js,wasm} (CLEAN=1 to rebuild presym/host from scratch)"
-  task build: :rootfs do
+  task build: [:rootfs, DICT_BIN] do
     require_emcc!
     if %w[1 true yes].include?(ENV["CLEAN"].to_s.downcase)
       rm_rf WASM_BUILD
@@ -160,6 +166,7 @@ namespace :wasm do
        "-sINITIAL_MEMORY=32MB", "-sALLOW_MEMORY_GROWTH=1", "-sSTACK_SIZE=2MB",
        "-sENVIRONMENT=web,node", "-sWASM_ASYNC_COMPILATION=1",
        "-sERROR_ON_UNDEFINED_SYMBOLS=0", "--no-entry",
+       "--embed-file", "#{DICT_BIN}@/dict.bin",
        WASM_LIBMRUBY, "-o", WASM_JS
     stage_index!
     puts "Built #{WASM_WASM} (#{File.size(WASM_WASM)} bytes)"

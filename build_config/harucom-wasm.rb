@@ -75,6 +75,11 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   # RubySyntax.analyze (Prism-based highlight/indent) used by the line editor.
   conf.gem File.expand_path("../mrbgems/picoruby-ruby-syntax", __dir__)
 
+  # Japanese IME dictionary (InputMethod.dict_available?/skk_lookup/tcode_lookup).
+  # The HCDK image is read from flash via XIP on the board; the browser port
+  # (ports/posix/dict_region.c) loads it from the emcc-embedded /dict.bin.
+  conf.gem File.expand_path("../mrbgems/harucom-os-dict", __dir__)
+
   # Harucom boot entry: deploys the rootfs into MEMFS and boots /system.rb.
   conf.gem File.expand_path("../mrbgems/harucom-os-wasm", __dir__)
 
