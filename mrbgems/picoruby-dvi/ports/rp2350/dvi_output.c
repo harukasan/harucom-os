@@ -187,7 +187,7 @@ static volatile bool dvi_blanking = false;
 // Text mode reuses the same memory as per-position glyph bitmap.
 static union {
   uint8_t framebuffer[DVI_GRAPHICS_MAX_WIDTH * DVI_GRAPHICS_MAX_HEIGHT];
-  uint8_t glyph_bitmap[DVI_TEXT_MAX_ROWS * 13 * DVI_TEXT_MAX_COLS];
+  uint8_t glyph_bitmap[GLYPH_BITMAP_SIZE];
 } screenbuf;
 static uint8_t *back_framebuf = NULL;
 static bool graphics_dirty = false;

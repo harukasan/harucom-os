@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 // 12px renderer geometry (6px half-width, 13px glyph height, 106 columns).
+#define TEXT_GLYPH_WIDTH_12WIDE  6
 #define TEXT_GLYPH_HEIGHT_12WIDE 13
 #define NARROW_CACHE_STRIDE      512
 #define GLYPH_BITMAP_STRIDE      DVI_TEXT_MAX_COLS

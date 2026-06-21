@@ -18,9 +18,11 @@
 #include "font_mplus_f12b.h"
 #include "font_mplus_j12_combined.h"
 
-#define FB_WIDTH  640
-#define FB_HEIGHT 480
-#define CELL_W    6  // half-width cell pixel width
+// Framebuffer geometry comes from the shared DVI headers (dvi.h surface size,
+// dvi_text_internal.h cell width) so the wasm renderer cannot drift from the
+// board renderer or the shared text core.
+#define FB_WIDTH  DVI_GRAPHICS_MAX_WIDTH
+#define FB_HEIGHT DVI_GRAPHICS_MAX_HEIGHT
 
 // Platform-owned buffers (single-buffered: the browser is single threaded).
 static dvi_text_cell_t vram[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
@@ -53,8 +55,7 @@ render_text(void)
       continue;
     }
 
-    int phys_row = text_row + dvi_text_write_scroll_offset;
-    if (phys_row >= dvi_text_rows) phys_row -= dvi_text_rows;
+    int phys_row = dvi_text_physical_row(text_row, dvi_text_write_scroll_offset);
 
     const dvi_text_cell_t *row = &dvi_text_write_vram[phys_row * dvi_text_cols];
     const uint8_t *nrow = dvi_text_narrow_cache + glyph_y * NARROW_CACHE_STRIDE;
@@ -77,12 +78,13 @@ render_text(void)
         col++; // consume the WIDE_R cell
       } else if (cell.flags & DVI_CELL_FLAG_WIDE_R) {
         // Stray right half (e.g. mid-glyph scroll); paint background.
-        for (int px = 0; px < CELL_W; px++) out[x++] = bg;
+        for (int px = 0; px < TEXT_GLYPH_WIDTH_12WIDE; px++) out[x++] = bg;
       } else {
         // Half-width: 6px from the narrow cache (bold is encoded as ch|0x100,
         // which indexes the 256-511 region of the row cache).
         uint8_t fb = nrow[cell.ch & 0x1FF];
-        for (int px = 0; px < CELL_W; px++) out[x++] = (fb & (0x80 >> px)) ? fg : bg;
+        for (int px = 0; px < TEXT_GLYPH_WIDTH_12WIDE; px++)
+          out[x++] = (fb & (0x80 >> px)) ? fg : bg;
       }
     }
     // Right margin (640 - cols*6) stays background.
@@ -99,9 +101,10 @@ void dvi_set_blanking(bool enable) { (void)enable; }
 uint8_t *dvi_get_framebuffer(void) { return framebuffer; }
 uint32_t dvi_get_frame_count(void) { return frame_count; }
 
-// Yielding is done at the Ruby level (DVI.wait_vsync is overridden to sleep_ms
-// so the task scheduler hands control back to the browser); this stays a no-op
-// to avoid spinning the single browser thread.
+// No-op: there is no hardware vsync in the browser, and spinning here would
+// freeze the single browser thread. Yielding is done at the Ruby level instead,
+// where harucom-os-wasm/mrblib/dvi_wasm.rb overrides DVI.wait_vsync to sleep_ms
+// so the task suspends and hands control back to the browser run loop.
 void dvi_wait_vsync(void) {}
 
 // Text commit: render the current VRAM into the framebuffer. Single buffered,

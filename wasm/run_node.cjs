@@ -8,11 +8,16 @@
  * gem init the browser does, rather than hand-rolled stubs. The real target is
  * the browser (rake wasm:server); this harness is for headless smoke testing.
  *
- * Two gates, both exit non-zero on failure so `rake wasm:test` is usable in CI:
+ * Three gates, all exit non-zero on failure so `rake wasm:test` is usable in CI:
  *   1. harucom_init() must succeed (VM + MEMFS rootfs + task scheduler).
  *   2. The DVI text core must have rendered the C bring-up banner into the
  *      framebuffer (the same pixels the browser canvas blits), checked by
  *      sampling palette colors and the full-width glyph region.
+ *   3. The Ruby boot task must actually run (rootfs deployed, /system.rb read),
+ *      checked against the captured stdout/stderr. harucom_init returning 0 only
+ *      means the task compiled; without this a broken rootfs deploy or a boot
+ *      task that raises at runtime would still pass gates 1 and 2 (the banner is
+ *      drawn from C, independent of Ruby).
  */
 const { JSDOM } = require("jsdom");
 
@@ -25,6 +30,24 @@ globalThis.document = dom.window.document;
 globalThis.navigator = dom.window.navigator;
 
 const createHarucomModule = require("../build/wasm/harucom.js");
+
+// Capture every line the wasm prints (fd 1 / 2 via the posix hal_write) while
+// still echoing it, so gate 3 can assert against the boot task's output.
+const output = [];
+const record = (stream, s) => {
+  output.push(s);
+  stream.write(s + "\n");
+};
+
+function runChecks(checks, note) {
+  let ok = true;
+  for (const [name, pass] of checks) {
+    process.stdout.write(`  [${pass ? "PASS" : "FAIL"}] ${name}\n`);
+    if (!pass) ok = false;
+  }
+  if (note) process.stdout.write(`  (${note})\n`);
+  return ok;
+}
 
 // Verify the framebuffer holds the C-drawn banner. The banner uses three
 // palette colors so each row exercises a distinct attribute, and a row of
@@ -61,22 +84,30 @@ function verifyRender(Module) {
     ["cyan text, palette 6 (attr 0x60)", colors.has(CYAN)],
     ["full-width glyphs rasterized", wideRegionCyan > 10],
   ];
-
-  let ok = true;
-  for (const [name, pass] of checks) {
-    process.stdout.write(`  [${pass ? "PASS" : "FAIL"}] ${name}\n`);
-    if (!pass) ok = false;
-  }
-  process.stdout.write(
-    `  (non-bg=${nonbg}, distinct colors=${colors.size}, wideRegionCyan=${wideRegionCyan})\n`
+  return runChecks(
+    checks,
+    `non-bg=${nonbg}, distinct colors=${colors.size}, wideRegionCyan=${wideRegionCyan}`
   );
-  return ok;
+}
+
+// Verify the Ruby boot task ran by checking its printed output. The bootstrap
+// (mrbgems/harucom-os-wasm/src/harucom_wasm.c) prints a banner, reads
+// /system.rb back from MEMFS, and prints its byte size; a failure prints
+// "boot error:". deploy_rootfs() logs the file count to stderr.
+function verifyBoot() {
+  const text = output.join("\n");
+  const checks = [
+    ["rootfs deployed to MEMFS", /rootfs: deployed \d+ files/.test(text)],
+    ["boot task started", text.includes("Harucom OS (wasm) booting")],
+    ["/system.rb read back from MEMFS", /system\.rb: \d+ bytes/.test(text)],
+    ["no boot error raised", !text.includes("boot error:")],
+  ];
+  return runChecks(checks, null);
 }
 
 createHarucomModule({
-  // stdout / stderr come from the posix hal_write() (emscripten fd 1 / 2).
-  print: (s) => process.stdout.write(s + "\n"),
-  printErr: (s) => process.stderr.write(s + "\n"),
+  print: (s) => record(process.stdout, s),
+  printErr: (s) => record(process.stderr, s),
 })
   .then((Module) => {
     const rc = Module._harucom_init();
@@ -87,14 +118,21 @@ createHarucomModule({
     }
 
     process.stdout.write("[DVI render verification]\n");
-    if (!verifyRender(Module)) {
-      process.stderr.write("DVI render verification failed\n");
-      process.exit(1);
-    }
+    const renderOk = verifyRender(Module);
 
+    // The boot task's puts run while the scheduler advances, so drive it first,
+    // then check its output.
     for (let i = 0; i < 5000; i++) {
       Module._mrb_tick_wasm();
       Module._mrb_run_step();
+    }
+
+    process.stdout.write("[Ruby boot verification]\n");
+    const bootOk = verifyBoot();
+
+    if (!renderOk || !bootOk) {
+      process.stderr.write("smoke test failed\n");
+      process.exit(1);
     }
     process.stdout.write("[done driving scheduler]\n");
     process.exit(0);
