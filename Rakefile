@@ -148,6 +148,7 @@ namespace :wasm do
     exported = '["' + %w[
       _harucom_init _mrb_run_step _mrb_tick_wasm
       _harucom_dvi_framebuffer _harucom_dvi_width _harucom_dvi_height
+      _harucom_dvi_frame_count
       _malloc _free
     ].join('","') + '"]'
     runtime  = '["' + %w[ccall cwrap UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8].join('","') + '"]'

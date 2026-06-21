@@ -168,4 +168,8 @@ harucom_dvi_framebuffer(void)
 EMSCRIPTEN_KEEPALIVE int harucom_dvi_width(void) { return FB_WIDTH; }
 EMSCRIPTEN_KEEPALIVE int harucom_dvi_height(void) { return FB_HEIGHT; }
 
+// Monotonic counter bumped on every commit, so the JS run loop can skip the
+// canvas blit on frames where the framebuffer did not change.
+EMSCRIPTEN_KEEPALIVE uint32_t harucom_dvi_frame_count(void) { return frame_count; }
+
 #endif /* __EMSCRIPTEN__ */

@@ -63,17 +63,24 @@
         ctx.putImageData(image, 0, 0);
       }
 
-      // Drive the mruby task scheduler from the browser event loop. mrb_tick_wasm
+      // Drive the mruby task scheduler from requestAnimationFrame. mrb_tick_wasm
       // advances the scheduler clock (for sleep_ms); mrb_run_step runs one step.
-      // Blocking Ruby yields by suspending its task, so this never freezes. The
-      // canvas is repainted from the framebuffer every step.
+      // Blocking Ruby yields by suspending its task, so this never freezes. rAF
+      // pauses in a background tab, which idles the OS instead of burning CPU.
+      // The framebuffer only changes on a commit, so blit only when the commit
+      // counter advanced rather than repainting the whole canvas every frame.
+      let lastFrame = -1;
       function step() {
         Module._mrb_tick_wasm();
         Module._mrb_run_step();
-        blit();
-        setTimeout(step, 16);
+        const frame = Module._harucom_dvi_frame_count();
+        if (frame !== lastFrame) {
+          lastFrame = frame;
+          blit();
+        }
+        requestAnimationFrame(step);
       }
-      step();
+      requestAnimationFrame(step);
     });
   </script>
 </body>
