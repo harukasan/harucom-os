@@ -15,12 +15,21 @@
            min-height: 4rem; margin-top: 1rem; }
     #kbddbg { color: #888; font-family: monospace; font-size: 0.8rem;
               margin-top: 0.5rem; min-height: 1rem; }
+    #pads { display: flex; gap: 2rem; margin-top: 0.5rem; }
+    .pad { display: grid; grid-template-columns: repeat(3, 2.4rem);
+           grid-auto-rows: 2.4rem; gap: 2px; }
+    .pad-title { color: #888; font: 0.8rem monospace; grid-column: 1 / -1; }
+    .padbtn { font-size: 1.1rem; background: #333; color: #eee;
+              border: 1px solid #555; border-radius: 4px; cursor: pointer;
+              user-select: none; touch-action: none; }
+    .padbtn.on { background: #0a0; }
   </style>
 </head>
 <body>
   <h1>Harucom OS (wasm): Phase 2 (DVI text on canvas)</h1>
   <canvas id="screen" width="640" height="480"></canvas>
   <div id="kbddbg"></div>
+  <div id="pads"></div>
   <pre id="out"></pre>
 
   <script src="harucom.js"></script>
@@ -251,6 +260,68 @@
       }
       canvas.addEventListener("mousedown", startAudio);
       window.addEventListener("keydown", startAudio, true);
+
+      // --- ADC pads: on-screen D-pads -> resistor-ladder value -> wasm -----
+      // The board has two resistor-ladder pads read over ADC (Board::Pad). Each
+      // on-screen D-pad button maps to a direction; the pressed set is converted
+      // to the ADC value the ladder would produce (parallel resistance), matching
+      // Board::Pad's calibration table so its decode returns the right buttons.
+      const PAD_CAL = [2000, 2760, 3300, 3646]; // single RIGHT/UP/DOWN/LEFT raw
+      const PAD_G = PAD_CAL.map((c) => 4095 / c - 1);
+      function padRaw(mask) {
+        if (!mask) return 4095; // idle: pulled to 3V3
+        let s = 0;
+        for (let i = 0; i < 4; i++) if (mask & (1 << i)) s += PAD_G[i];
+        return Math.round(4095 / (s + 1));
+      }
+      const padMask = [0, 0];
+      function setPadButton(pad, dir, down) {
+        if (down) padMask[pad] |= (1 << dir);
+        else padMask[pad] &= ~(1 << dir);
+        Module._harucom_pad_set(pad, padRaw(padMask[pad]));
+      }
+      const padsEl = document.getElementById("pads");
+      if (padsEl) {
+        // dir constants: RIGHT=0, UP=1, DOWN=2, LEFT=3; arranged as a cross.
+        const LAYOUT = [
+          { label: "↑", dir: 1, col: 2, row: 1 }, // up
+          { label: "←", dir: 3, col: 1, row: 2 }, // left
+          { label: "→", dir: 0, col: 3, row: 2 }, // right
+          { label: "↓", dir: 2, col: 2, row: 3 }, // down
+        ];
+        for (let pad = 0; pad < 2; pad++) {
+          const grid = document.createElement("div");
+          grid.className = "pad";
+          const title = document.createElement("div");
+          title.className = "pad-title";
+          title.textContent = "PAD" + pad;
+          grid.appendChild(title);
+          LAYOUT.forEach((b) => {
+            const btn = document.createElement("button");
+            btn.className = "padbtn";
+            btn.textContent = b.label;
+            btn.style.gridColumn = String(b.col);
+            btn.style.gridRow = String(b.row + 1); // row 1 is the title
+            const press = (e) => {
+              e.preventDefault();
+              startAudio(); // a pad tap is a user gesture too
+              setPadButton(pad, b.dir, true);
+              btn.classList.add("on");
+            };
+            const release = (e) => {
+              e.preventDefault();
+              setPadButton(pad, b.dir, false);
+              btn.classList.remove("on");
+            };
+            btn.addEventListener("pointerdown", press);
+            btn.addEventListener("pointerup", release);
+            btn.addEventListener("pointerleave", release);
+            btn.addEventListener("pointercancel", release);
+            grid.appendChild(btn);
+          });
+          padsEl.appendChild(grid);
+        }
+      }
     });
   </script>
 </body>

@@ -258,6 +258,27 @@ function verifyAudio(Module) {
   return runChecks(checks, `pulled=${got}, spread=${spread.toFixed(2)}, maxDelta=${maxDelta.toFixed(2)}`);
 }
 
+// End-to-end pad test: inject a single-button ADC value (the resistor-ladder
+// raw value for UP on PAD0) via harucom_pad_set, then have Board::Pad read and
+// decode it in IRB and confirm only UP is detected. Covers the wasm ADC shim
+// through Board::Pad's decoder.
+function verifyPad(Module) {
+  Module._harucom_pad_set(0, 2760); // PAD0 raw for a single UP press
+  const before = output.length;
+  typeString(Module, 'require "board/pad";b=Board::Pad.new(28);b.read;puts [b.right?,b.up?,b.down?,b.left?].inspect');
+  hidType(Module, [[0, 0x28]]); // Enter
+  for (let i = 0; i < 30000; i++) {
+    Module._mrb_tick_wasm();
+    Module._mrb_run_step();
+    if (i % 64 === 0 && output.slice(before).join("\n").includes("[false")) break;
+  }
+  const out = output.slice(before).join("\n");
+  const checks = [
+    ["Board::Pad decodes UP from injected ADC value", out.includes("[false, true, false, false]")],
+  ];
+  return runChecks(checks, out.split("\n").filter((l) => l.includes("[") || l.includes("error")).slice(-2).join(" | "));
+}
+
 createHarucomModule({
   print: (s) => record(process.stdout, s),
   printErr: (s) => record(process.stderr, s),
@@ -290,7 +311,10 @@ createHarucomModule({
     process.stdout.write("[Audio synth verification]\n");
     const audioOk = verifyAudio(Module);
 
-    if (!bootOk || !renderOk || !inputOk || !dictOk || !graphicsOk || !audioOk) {
+    process.stdout.write("[ADC pad verification]\n");
+    const padOk = verifyPad(Module);
+
+    if (!bootOk || !renderOk || !inputOk || !dictOk || !graphicsOk || !audioOk || !padOk) {
       process.stderr.write("smoke test failed\n");
       process.exit(1);
     }
