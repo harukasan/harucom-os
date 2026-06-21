@@ -139,8 +139,11 @@ namespace :wasm do
     Bundler.with_unbundled_env do
       sh({ "MRUBY_CONFIG" => WASM_CONFIG }, "rake", chdir: PICORUBY_DIR)
     end
-    # Link libmruby.a into the browser module. harucom_init / mrb_run_step /
-    # mrb_tick_wasm are driven by wasm/index.html's run loop.
+    # Link libmruby.a into the browser module. This intentionally differs from
+    # the picoruby-wasm gem's own link task: it exports harucom_init (not
+    # picorb_init) and targets web,node without EXPORT_ES6 so wasm/run_node.cjs
+    # can require() it. harucom_init / mrb_run_step / mrb_tick_wasm are driven by
+    # the run loop in wasm/index.html.
     exported = '["' + %w[_harucom_init _mrb_run_step _mrb_tick_wasm _malloc _free].join('","') + '"]'
     runtime  = '["' + %w[ccall cwrap UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8].join('","') + '"]'
     sh "emcc", "-g0", "-O2",
