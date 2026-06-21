@@ -138,6 +138,29 @@ function verifyInput(Module) {
   return runChecks(checks, null);
 }
 
+// Verify the opcode-budget preemption hook: a long busy Ruby loop must be split
+// across many mrb_run_step calls. The test driver only ticks the scheduler clock
+// between steps, so without the hook the whole loop would run inside a single
+// mrb_run_step (and in the browser would freeze the tab); with the hook it yields
+// every budget of opcodes, so it takes many steps to finish.
+function verifyPreempt(Module) {
+  const before = output.length;
+  typeString(Module, "i=0;while i<1000000;i=i+1;end;puts i");
+  hidType(Module, [[0, 0x28]]); // Enter
+  let steps = 0, done = false;
+  for (let i = 0; i < 100000; i++) {
+    Module._mrb_tick_wasm();
+    Module._mrb_run_step();
+    steps++;
+    if (output.slice(before).join("").includes("1000000")) { done = true; break; }
+  }
+  const checks = [
+    ["busy loop completed", done],
+    ["busy loop preempted across many steps (hook active)", steps > 50],
+  ];
+  return runChecks(checks, `steps=${steps}`);
+}
+
 // Map a printable ASCII char to [modifier, HID usage] on the US layout, so a
 // whole string can be typed through the keyboard pipeline. Mirrors
 // picoruby-keyboard-input's LAYOUT_US_NORMAL / LAYOUT_US_SHIFTED.
@@ -152,6 +175,7 @@ function hidForChar(ch) {
     " ": [0, 0x2c], "-": [0, 0x2d], "_": [SH, 0x2d], "=": [0, 0x2e], "+": [SH, 0x2e],
     "[": [0, 0x2f], "]": [0, 0x30], "\\": [0, 0x31], ";": [0, 0x33], ":": [SH, 0x33],
     "'": [0, 0x34], '"': [SH, 0x34], ",": [0, 0x36], ".": [0, 0x37], "/": [0, 0x38],
+    "<": [SH, 0x36], ">": [SH, 0x37],
     "?": [SH, 0x38], "(": [SH, 0x26], ")": [SH, 0x27], "&": [SH, 0x24], "*": [SH, 0x25],
     "!": [SH, 0x1e], "@": [SH, 0x1f], "#": [SH, 0x20], "$": [SH, 0x21], "%": [SH, 0x22],
   };
@@ -302,6 +326,9 @@ createHarucomModule({
     process.stdout.write("[Keyboard input verification]\n");
     const inputOk = verifyInput(Module);
 
+    process.stdout.write("[Scheduler preemption verification]\n");
+    const preemptOk = verifyPreempt(Module);
+
     process.stdout.write("[IME dictionary verification]\n");
     const dictOk = verifyDict(Module);
 
@@ -314,7 +341,7 @@ createHarucomModule({
     process.stdout.write("[ADC pad verification]\n");
     const padOk = verifyPad(Module);
 
-    if (!bootOk || !renderOk || !inputOk || !dictOk || !graphicsOk || !audioOk || !padOk) {
+    if (!bootOk || !renderOk || !inputOk || !preemptOk || !dictOk || !graphicsOk || !audioOk || !padOk) {
       process.stderr.write("smoke test failed\n");
       process.exit(1);
     }

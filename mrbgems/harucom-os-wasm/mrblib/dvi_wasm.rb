@@ -1,48 +1,19 @@
-# Browser yield point for the cooperative task scheduler.
+# Browser idle yield for the task scheduler.
 #
-# On the board, DVI.wait_vsync blocks on a hardware vsync interrupt. In the
-# browser there is no such interrupt and the single JavaScript thread only
-# regains control when a task suspends, so the C dvi_wait_vsync() is an
-# intentional no-op (see picoruby-dvi/ports/posix/dvi_wasm.c). Override the
-# method here to suspend the task for about one frame instead: sleep_ms is
-# task-aware, so mrb_run_step returns, the canvas repaints and queued keyboard
-# events are delivered, then the scheduler resumes the task. Without this, the
-# read loops in line_editor.rb / edit.rb (`c = read_char; DVI.wait_vsync if !c`)
-# would busy-spin and freeze the tab.
+# On the board, DVI.wait_vsync blocks on a hardware vsync interrupt; the read
+# loops in line_editor.rb / irb.rb (`c = read_char; DVI.wait_vsync if !c`) use it
+# to idle while waiting for input. There is no vsync in the browser, so the C
+# dvi_wait_vsync() is a no-op; override it to suspend the task for about a frame
+# instead (sleep_ms is task-aware: mrb_run_step returns, the canvas repaints and
+# queued keys are delivered, then the scheduler resumes the task). This keeps
+# idle wait loops idle rather than busy-spinning.
 #
-# The exact cadence depends on how the JS run loop advances the scheduler clock
-# (mrb_tick_wasm); 16ms is the nominal 60Hz frame and can be tuned once the
-# interactive console is wired up.
+# Busy render loops that never call wait_vsync (audio_demo, pad_demo, the p5
+# demos) are handled by the opcode-budget preemption hook installed in
+# harucom_init (mrbgems/harucom-os-wasm/src/harucom_wasm.c), which makes the wasm
+# scheduler preemptive like the board, so those apps need no override here.
 class DVI
   def self.wait_vsync
     sleep_ms 16
-  end
-end
-
-# Browser frame pacing for graphics. On the board DVI::Graphics.commit blocks on
-# the hardware vsync, which paces animation loops and yields the core. The C
-# commit in the browser only copies the drawing buffer to the display and returns
-# immediately, so a P5 draw/commit loop (e.g. p5_demo, p5_game_demo) would
-# busy-spin and freeze the tab. Wrap commit to also suspend the task for a frame,
-# matching the board's behavior so those loops yield to the JS run loop.
-class << DVI::Graphics
-  alias_method :commit_without_yield, :commit
-  def commit
-    commit_without_yield
-    DVI.wait_vsync
-  end
-end
-
-# Same frame pacing for text-mode apps. Text app render loops (e.g. audio_demo,
-# pad_demo) present each frame with DVI::Text.commit and have no other yield, so
-# without this they busy-spin and freeze the tab. The board renders text
-# continuously in hardware; here commit doubles as the once-per-frame yield. The
-# line editor / IRB already yield via DVI.wait_vsync, so the extra suspend per
-# commit only paces them to the frame rate.
-class << DVI::Text
-  alias_method :commit_without_yield, :commit
-  def commit
-    commit_without_yield
-    DVI.wait_vsync
   end
 end

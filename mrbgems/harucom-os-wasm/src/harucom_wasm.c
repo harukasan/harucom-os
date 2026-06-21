@@ -151,11 +151,39 @@ deploy_rootfs(void)
 }
 
 /* Boot bootstrap: mirror the board (src/main.c) without the littlefs/VFS mount,
- * since the rootfs lives in MEMFS. $LOAD_PATH lets require resolve /lib/*.rb, and
- * `load` runs /system.rb (which starts the Console, keyboard task and IRB). */
+ * since the rootfs lives in MEMFS. $LOAD_PATH lets require resolve files under
+ * /lib, and `load` runs /system.rb (which starts the Console, keyboard and IRB). */
 static const char ruby_bootstrap[] =
     "$LOAD_PATH = [\"/lib\"]\n"
     "load \"/system.rb\"\n";
+
+/* Preemptive scheduling for the browser.
+ *
+ * The board preempts tasks with a 1ms timer interrupt that expires the running
+ * task's timeslice (sets mrb->task.switching); the VM checks that flag on every
+ * opcode (vm.c RETURN_IF_TASK_STOPPED) and yields. The browser main thread can
+ * not be interrupted, so a Ruby loop with no explicit yield would run forever
+ * inside one mrb_run_step and freeze the tab.
+ *
+ * The VM also calls code_fetch_hook on every opcode, so use it to count opcodes
+ * and request a context switch after a budget, simulating the timeslice. This
+ * makes the wasm scheduler preemptive like the board, so userland app loops
+ * (audio_demo, pad_demo, the p5 demos) need no wasm-specific yield. Cooperative
+ * sleeps (DVI.wait_vsync -> sleep_ms) are kept so idle wait loops still idle
+ * rather than busy-spin. */
+#define PREEMPT_OP_BUDGET 30000
+static void
+preempt_hook(mrb_state *mrb, const struct mrb_irep *irep, const mrb_code *pc, mrb_value *regs)
+{
+  (void)irep;
+  (void)pc;
+  (void)regs;
+  static uint32_t ops = 0;
+  if (++ops >= PREEMPT_OP_BUDGET) {
+    ops = 0;
+    mrb->task.switching = TRUE; /* yield at the next opcode, like the timer tick */
+  }
+}
 
 EMSCRIPTEN_KEEPALIVE
 int
@@ -182,6 +210,10 @@ harucom_init(void)
             mrb_string_p(m) ? RSTRING_PTR(m) : "(no message)");
     mrb->exc = NULL;
   }
+
+  /* Install the opcode-budget preemption hook so busy task loops yield back to
+   * the JS run loop, the way the board's timer interrupt preempts them. */
+  mrb->code_fetch_hook = preempt_hook;
 
   /* Initialize the DVI text surface (VRAM, fonts, framebuffer) before the boot
    * task runs, so the Ruby Console has a cleared screen to draw into. */

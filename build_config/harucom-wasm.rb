@@ -37,6 +37,12 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   # Console and IME need UTF-8 strings (as in harucom-os-pico2.rb).
   conf.cc.defines << "MRB_UTF8_STRING"
 
+  # Enable the per-opcode code_fetch_hook so harucom_wasm.c can install an
+  # opcode-budget preemption hook. The board preempts tasks with a timer
+  # interrupt; the browser main thread cannot be interrupted, so the hook
+  # simulates the timeslice and keeps busy Ruby loops from freezing the tab.
+  conf.cc.defines << "MRB_USE_DEBUG_HOOK"
+
   conf.microruby
 
   # NB: we do NOT use the "minimum" gembox here. Under POSIX it pulls in the
