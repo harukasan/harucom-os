@@ -292,8 +292,13 @@ dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr)
   dvi_text_write_row_has_wide[phys] = 1;
 }
 
-void
-dvi_text_put_string(int col, int row, const char *str, uint8_t attr)
+// Shared body for put_string / put_string_bold: lay out a UTF-8 string into
+// cells, wrapping at the right edge and on '\n', mapping non-ASCII through JIS
+// to full-width glyphs (falling back to '?' when unmapped). The bold flag picks
+// the bold cell writers; this is a set-time path, so the extra branch has no
+// effect on render timing.
+static void
+put_string_internal(int col, int row, const char *str, uint8_t attr, bool bold)
 {
   int start_col = col;
   while (*str && row < dvi_text_rows) {
@@ -312,7 +317,8 @@ dvi_text_put_string(int col, int row, const char *str, uint8_t attr)
         row++;
         if (row >= dvi_text_rows) break;
       }
-      dvi_text_put_char(col, row, (char)cp, attr);
+      if (bold) dvi_text_put_char_bold(col, row, (char)cp, attr);
+      else      dvi_text_put_char(col, row, (char)cp, attr);
       col++;
     } else {
       uint16_t jis = unicode_to_jis(cp);
@@ -322,7 +328,8 @@ dvi_text_put_string(int col, int row, const char *str, uint8_t attr)
           row++;
           if (row >= dvi_text_rows) break;
         }
-        dvi_text_put_wide_char(col, row, dvi_jis_to_linear(jis), attr);
+        if (bold) dvi_text_put_wide_char_bold(col, row, dvi_jis_to_linear(jis), attr);
+        else      dvi_text_put_wide_char(col, row, dvi_jis_to_linear(jis), attr);
         col += 2;
       } else {
         if (col >= dvi_text_cols) {
@@ -330,7 +337,8 @@ dvi_text_put_string(int col, int row, const char *str, uint8_t attr)
           row++;
           if (row >= dvi_text_rows) break;
         }
-        dvi_text_put_char(col, row, '?', attr);
+        if (bold) dvi_text_put_char_bold(col, row, '?', attr);
+        else      dvi_text_put_char(col, row, '?', attr);
         col++;
       }
     }
@@ -338,48 +346,15 @@ dvi_text_put_string(int col, int row, const char *str, uint8_t attr)
 }
 
 void
+dvi_text_put_string(int col, int row, const char *str, uint8_t attr)
+{
+  put_string_internal(col, row, str, attr, false);
+}
+
+void
 dvi_text_put_string_bold(int col, int row, const char *str, uint8_t attr)
 {
-  int start_col = col;
-  while (*str && row < dvi_text_rows) {
-    uint32_t cp;
-    str = utf8_decode(str, &cp);
-
-    if (cp == '\n') {
-      col = start_col;
-      row++;
-      continue;
-    }
-
-    if (cp < 0x80) {
-      if (col >= dvi_text_cols) {
-        col = start_col;
-        row++;
-        if (row >= dvi_text_rows) break;
-      }
-      dvi_text_put_char_bold(col, row, (char)cp, attr);
-      col++;
-    } else {
-      uint16_t jis = unicode_to_jis(cp);
-      if (jis) {
-        if (col + 1 >= dvi_text_cols) {
-          col = start_col;
-          row++;
-          if (row >= dvi_text_rows) break;
-        }
-        dvi_text_put_wide_char_bold(col, row, dvi_jis_to_linear(jis), attr);
-        col += 2;
-      } else {
-        if (col >= dvi_text_cols) {
-          col = start_col;
-          row++;
-          if (row >= dvi_text_rows) break;
-        }
-        dvi_text_put_char_bold(col, row, '?', attr);
-        col++;
-      }
-    }
-  }
+  put_string_internal(col, row, str, attr, true);
 }
 
 // ---------------------------------------------------------------------------
