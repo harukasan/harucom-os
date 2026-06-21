@@ -62,6 +62,19 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   # (auto-compiled under POSIX) and blits the framebuffer to a canvas.
   conf.gem File.expand_path("../mrbgems/picoruby-dvi", __dir__)
 
+  # Userland support gems pulled in by rootfs/system.rb. picoruby-editor is an
+  # upstream pure-Ruby gem (Editor / Editor::Buffer, used by line_editor.rb).
+  conf.gem core: "picoruby-editor"
+
+  # USB host (USB::Host) and the Keyboard class on top of it. usb-host ships
+  # only a ports/rp2350 hardware driver, so the browser build supplies its own
+  # ports/posix/usb_host_wasm.c that returns JS-injected key state.
+  conf.gem File.expand_path("../mrbgems/picoruby-usb-host", __dir__)
+  conf.gem File.expand_path("../mrbgems/picoruby-keyboard-input", __dir__)
+
+  # RubySyntax.analyze (Prism-based highlight/indent) used by the line editor.
+  conf.gem File.expand_path("../mrbgems/picoruby-ruby-syntax", __dir__)
+
   # Harucom boot entry: deploys the rootfs into MEMFS and boots /system.rb.
   conf.gem File.expand_path("../mrbgems/harucom-os-wasm", __dir__)
 

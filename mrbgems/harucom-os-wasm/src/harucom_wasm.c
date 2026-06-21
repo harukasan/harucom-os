@@ -11,10 +11,9 @@
  * task. The scheduler is driven from JavaScript via mrb_run_step()/mrb_tick_wasm()
  * (provided by the picoruby-wasm gem), so blocking Ruby yields to the browser.
  *
- * Phase 1 boots a minimal bootstrap that reads back the rootfs to validate the
- * VM + filesystem + task scheduler + stdout path. A later phase replaces the
- * bootstrap body with `load "/system.rb"` once the DVI console and keyboard are
- * wired up.
+ * The boot task mirrors the board bootstrap (src/main.c) minus the littlefs/VFS
+ * mount: it sets $LOAD_PATH to /lib and `load`s /system.rb, which brings up the
+ * Console, keyboard and IRB on the DVI text surface.
  */
 
 #include <string.h>
@@ -38,11 +37,9 @@ extern int picorb_create_task(const char *code);
 
 /* DVI text-mode browser port (mrbgems/picoruby-dvi/ports/posix/dvi_wasm.c).
  * dvi_wasm_init() wires the shared text core to the framebuffer and loads the
- * M+ fonts; the dvi_text_* writers fill the text VRAM and dvi_text_commit()
- * renders it into the RGB332 framebuffer that the JS canvas blit reads. */
+ * M+ fonts; the Ruby Console then fills the text VRAM and commits it into the
+ * RGB332 framebuffer that the JS canvas blit reads. */
 extern void dvi_wasm_init(void);
-extern void dvi_text_put_string(int col, int row, const char *str, uint8_t attr);
-extern void dvi_text_commit(void);
 
 /* This gem only provides the boot entry; there is no Ruby API to register. */
 void
@@ -96,30 +93,12 @@ deploy_rootfs(void)
   fprintf(stderr, "rootfs: deployed %d files to MEMFS\n", ruby_scripts_count);
 }
 
-/* Phase 1 bootstrap: read the rootfs back to validate the filesystem. */
+/* Boot bootstrap: mirror the board (src/main.c) without the littlefs/VFS mount,
+ * since the rootfs lives in MEMFS. $LOAD_PATH lets require resolve /lib/*.rb, and
+ * `load` runs /system.rb (which starts the Console, keyboard task and IRB). */
 static const char ruby_bootstrap[] =
-    "begin\n"
-    "  puts \"Harucom OS (wasm) booting\"\n"
-    "  $LOAD_PATH = [\"/lib\"]\n"
-    "  data = File.read(\"/system.rb\")\n"
-    "  puts \"system.rb: #{data.bytesize} bytes\"\n"
-    "rescue => e\n"
-    "  puts \"boot error: #{e.class}: #{e.message}\"\n"
-    "end\n";
-
-/* Phase 2 bring-up: paint a banner straight from C (narrow glyphs, a full-width
- * glyph and a few palette colors) so the text VRAM -> framebuffer -> canvas blit
- * path can be validated before the Ruby Console is wired to the text VRAM. */
-static void
-draw_dvi_test_banner(void)
-{
-  dvi_text_put_string(0, 0, "Harucom OS (wasm) - DVI text mode", 0xB0);
-  dvi_text_put_string(0, 2, "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz", 0xF0);
-  dvi_text_put_string(0, 3, "0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", 0xF0);
-  dvi_text_put_string(0, 5, "日本語表示 wide-glyph test", 0x60);
-  dvi_text_put_string(0, 7, "> ", 0xF0);
-  dvi_text_commit();
-}
+    "$LOAD_PATH = [\"/lib\"]\n"
+    "load \"/system.rb\"\n";
 
 EMSCRIPTEN_KEEPALIVE
 int
@@ -147,10 +126,9 @@ harucom_init(void)
     mrb->exc = NULL;
   }
 
-  /* Bring up the DVI text console and paint a bring-up banner, so the canvas
-   * blit path is exercised independently of the Ruby boot task below. */
+  /* Initialize the DVI text surface (VRAM, fonts, framebuffer) before the boot
+   * task runs, so the Ruby Console has a cleared screen to draw into. */
   dvi_wasm_init();
-  draw_dvi_test_banner();
 
   mrb_define_global_const(mrb, "HARUCOM_VERSION", mrb_str_new_cstr(mrb, "wasm"));
   mrb_define_global_const(mrb, "HARUCOM_BUILD_DATE", mrb_str_new_cstr(mrb, "wasm"));

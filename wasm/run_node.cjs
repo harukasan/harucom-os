@@ -10,14 +10,12 @@
  *
  * Three gates, all exit non-zero on failure so `rake wasm:test` is usable in CI:
  *   1. harucom_init() must succeed (VM + MEMFS rootfs + task scheduler).
- *   2. The DVI text core must have rendered the C bring-up banner into the
- *      framebuffer (the same pixels the browser canvas blits), checked by
- *      sampling palette colors and the full-width glyph region.
- *   3. The Ruby boot task must actually run (rootfs deployed, /system.rb read),
- *      checked against the captured stdout/stderr. harucom_init returning 0 only
- *      means the task compiled; without this a broken rootfs deploy or a boot
- *      task that raises at runtime would still pass gates 1 and 2 (the banner is
- *      drawn from C, independent of Ruby).
+ *   2. Booting /system.rb must run the full userland: deploy rootfs, require the
+ *      console / IME / line editor / keyboard / IRB libraries, and reach the IRB
+ *      banner. The Console mirrors its output to STDOUT (fd 1), so the banner is
+ *      captured here even though it is really painted on the DVI text surface.
+ *   3. The Console must have rendered into the framebuffer (the pixels the
+ *      browser canvas blits), checked by sampling for non-background pixels.
  */
 const { JSDOM } = require("jsdom");
 
@@ -32,7 +30,7 @@ globalThis.navigator = dom.window.navigator;
 const createHarucomModule = require("../build/wasm/harucom.js");
 
 // Capture every line the wasm prints (fd 1 / 2 via the posix hal_write) while
-// still echoing it, so gate 3 can assert against the boot task's output.
+// still echoing it, so the boot gate can assert against the userland's output.
 const output = [];
 const record = (stream, s) => {
   output.push(s);
@@ -49,20 +47,43 @@ function runChecks(checks, note) {
   return ok;
 }
 
-// Verify the framebuffer holds the C-drawn banner. The banner uses three
-// palette colors so each row exercises a distinct attribute, and a row of
-// full-width Japanese glyphs exercises the wide (12px) rendering path.
+// Drive the cooperative scheduler the way the browser run loop does: tick the
+// clock (so sleep_ms / DVI.wait_vsync tasks wake) then run one step. The boot
+// task loads /system.rb in a sandbox, which requires the userland libraries and
+// finally starts IRB; stop early once the IRB banner has been printed.
+function driveUntilBooted(Module, marker, maxSteps) {
+  for (let i = 0; i < maxSteps; i++) {
+    Module._mrb_tick_wasm();
+    Module._mrb_run_step();
+    if (i % 64 === 0 && output.join("\n").includes(marker)) return i + 1;
+  }
+  return maxSteps;
+}
+
+// Verify the userland actually booted by checking the IRB banner reached STDOUT
+// (Console mirrors DVI output to the original STDOUT). Reaching the banner means
+// every require in system.rb resolved and IRB started; a failed require or a
+// raised exception would stop before it.
+function verifyBoot(steps) {
+  const text = output.join("\n");
+  const checks = [
+    ["rootfs deployed to MEMFS", /rootfs: deployed \d+ files/.test(text)],
+    ["IRB banner reached (system.rb booted)", text.includes("Powered by PicoRuby")],
+    ["banner author line printed", text.includes("Shunsuke Michii")],
+  ];
+  return runChecks(checks, `drove ${steps} scheduler steps`);
+}
+
+// Verify the Console rendered into the framebuffer (the same pixels the browser
+// canvas blits). The banner is drawn on the DVI text surface and committed, so
+// after boot the framebuffer holds non-background pixels.
 function verifyRender(Module) {
   const W = Module._harucom_dvi_width();
   const H = Module._harucom_dvi_height();
   const fb = Module._harucom_dvi_framebuffer();
   const px = Module.HEAPU8.subarray(fb, fb + W * H);
 
-  // RGB332 palette entries the banner draws with, mirrored by index from
-  // default_palette[] in src/dvi_text.c (no C getter is exported, so these must
-  // stay in sync if that table changes): 0 black, 6 cyan, 11 yellow, 15 white.
-  const BG = 0x00, YELLOW = 0xFC, WHITE = 0xFF, CYAN = 0x1F;
-
+  const BG = 0x00; // palette[0], default background (see default_palette[])
   let nonbg = 0;
   const colors = new Set();
   for (let i = 0; i < px.length; i++) {
@@ -70,41 +91,12 @@ function verifyRender(Module) {
     colors.add(px[i]);
   }
 
-  // Line 5 (y 65..77) is "日本語表示 wide-glyph test" in cyan. The 5 full-width
-  // glyphs span x 0..59; 5 narrow fallback '?' glyphs would only reach x 30, so
-  // cyan pixels at x 30..59 confirm the wide glyphs actually rasterized.
-  let wideRegionCyan = 0;
-  for (let y = 65; y <= 77; y++)
-    for (let x = 30; x < 60; x++)
-      if (px[y * W + x] === CYAN) wideRegionCyan++;
-
   const checks = [
     ["framebuffer is 640x480", W === 640 && H === 480],
-    ["banner rendered (non-background pixels)", nonbg > 500],
-    ["yellow banner, palette 11 (attr 0xB0)", colors.has(YELLOW)],
-    ["white text, palette 15 (attr 0xF0)", colors.has(WHITE)],
-    ["cyan text, palette 6 (attr 0x60)", colors.has(CYAN)],
-    ["full-width glyphs rasterized", wideRegionCyan > 10],
+    ["console rendered (non-background pixels)", nonbg > 500],
+    ["frame committed at least once", Module._harucom_dvi_frame_count() > 0],
   ];
-  return runChecks(
-    checks,
-    `non-bg=${nonbg}, distinct colors=${colors.size}, wideRegionCyan=${wideRegionCyan}`
-  );
-}
-
-// Verify the Ruby boot task ran by checking its printed output. The bootstrap
-// (mrbgems/harucom-os-wasm/src/harucom_wasm.c) prints a banner, reads
-// /system.rb back from MEMFS, and prints its byte size; a failure prints
-// "boot error:". deploy_rootfs() logs the file count to stderr.
-function verifyBoot() {
-  const text = output.join("\n");
-  const checks = [
-    ["rootfs deployed to MEMFS", /rootfs: deployed \d+ files/.test(text)],
-    ["boot task started", text.includes("Harucom OS (wasm) booting")],
-    ["/system.rb read back from MEMFS", /system\.rb: \d+ bytes/.test(text)],
-    ["no boot error raised", !text.includes("boot error:")],
-  ];
-  return runChecks(checks, null);
+  return runChecks(checks, `non-bg=${nonbg}, distinct colors=${colors.size}`);
 }
 
 createHarucomModule({
@@ -119,20 +111,15 @@ createHarucomModule({
       process.exit(1);
     }
 
+    const steps = driveUntilBooted(Module, "Powered by PicoRuby", 200000);
+
+    process.stdout.write("[Ruby boot verification]\n");
+    const bootOk = verifyBoot(steps);
+
     process.stdout.write("[DVI render verification]\n");
     const renderOk = verifyRender(Module);
 
-    // The boot task's puts run while the scheduler advances, so drive it first,
-    // then check its output.
-    for (let i = 0; i < 5000; i++) {
-      Module._mrb_tick_wasm();
-      Module._mrb_run_step();
-    }
-
-    process.stdout.write("[Ruby boot verification]\n");
-    const bootOk = verifyBoot();
-
-    if (!renderOk || !bootOk) {
+    if (!bootOk || !renderOk) {
       process.stderr.write("smoke test failed\n");
       process.exit(1);
     }
