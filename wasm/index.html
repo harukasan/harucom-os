@@ -236,7 +236,12 @@
         catch (e) { audioCtx = new AudioCtx(); }
         const ctx = audioCtx;
         const ratio = srcRate / ctx.sampleRate; // 1.0 when honored
-        const BLOCK = 4096; // ~93ms at 44.1k; large enough to ride scheduler jitter
+        // The synth ring buffer is 1024 frames; a block can only pull what the
+        // ring holds at the moment the callback fires (the producer cannot run
+        // mid-callback on this single thread), so keep the block well under the
+        // ring or every callback is mostly silence. 512 leaves the producer room
+        // to refill between callbacks.
+        const BLOCK = 512;
         const maxSrc = Math.ceil(BLOCK * ratio) + 2;
         const lPtr = Module._malloc(maxSrc * 4);
         const rPtr = Module._malloc(maxSrc * 4);
