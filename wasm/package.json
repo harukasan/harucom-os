@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "description": "Headless smoke-test harness for the Harucom OS wasm build (rake wasm:test)",
+  "scripts": {
+    "test": "node --test run_node.test.cjs"
+  },
   "devDependencies": {
     "jsdom": "^29.1.1"
   }

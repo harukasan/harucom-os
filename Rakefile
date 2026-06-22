@@ -187,10 +187,10 @@ namespace :wasm do
        "--directory", WASM_OUT
   end
 
-  desc "Smoke-test the wasm build headlessly under Node"
+  desc "Smoke-test the wasm build headlessly under Node (node:test runner)"
   task :test do
     abort "#{WASM_WASM} not found. Run `rake wasm:build` first." unless File.exist?(WASM_WASM)
-    sh "node", File.join(WASM_DIR, "run_node.cjs")
+    sh "node", "--test", File.join(WASM_DIR, "run_node.test.cjs")
   end
 
   desc "Remove the wasm build output"
