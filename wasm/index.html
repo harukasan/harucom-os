@@ -288,6 +288,9 @@
           node.port.onmessage = (e) => { workletLevel = e.data; };
           node.connect(ctx.destination);
           ctx.resume();
+          // Diagnostic: if this is not the synth rate, output is resampled.
+          console.log("Harucom audio: ctx " + ctx.sampleRate + "Hz, synth " +
+                      srcRate + "Hz, ratio " + ratio.toFixed(4));
 
           audioPump = function () {
             let want = TARGET - workletLevel; // output frames to supply
@@ -295,6 +298,8 @@
             const outL = new Float32Array(want), outR = new Float32Array(want);
             let produced = 0;
             while (produced < want) {
+              // Keep at least two source frames ahead so linear interpolation has
+              // both endpoints (at ratio 1 the fraction is 0, so this is exact).
               if (sfWr - Math.floor(srcPos) < 2) {
                 const got = Module._harucom_audio_pull(lPtr, rPtr, PULL);
                 if (got === 0) break; // synth ring empty; producer will refill
@@ -305,9 +310,12 @@
                   sfWr++;
                 }
               }
-              if (sfWr - Math.floor(srcPos) < 1) break;
-              const s = Math.floor(srcPos) & SF_MASK;
-              outL[produced] = sfL[s]; outR[produced] = sfR[s]; produced++;
+              if (sfWr - Math.floor(srcPos) < 2) break;
+              const i0 = Math.floor(srcPos), frac = srcPos - i0;
+              const s0 = i0 & SF_MASK, s1 = (i0 + 1) & SF_MASK;
+              outL[produced] = sfL[s0] + (sfL[s1] - sfL[s0]) * frac; // linear interp
+              outR[produced] = sfR[s0] + (sfR[s1] - sfR[s0]) * frac;
+              produced++;
               srcPos += ratio;
             }
             if (produced === 0) return;
