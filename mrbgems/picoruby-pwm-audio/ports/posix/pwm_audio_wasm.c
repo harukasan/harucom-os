@@ -77,17 +77,19 @@ harucom_audio_pull(float *out_l, float *out_r, int frames)
 {
   int produced = 0;
   for (int i = 0; i < frames; i++) {
-    float xl, xr;
     if (pwm_audio_wr == pwm_audio_rd) {
-      xl = 0.0f; // underrun: feed silence through the filters so they settle
-      xr = 0.0f;
-    } else {
-      uint32_t sample = pwm_audio_buf[pwm_audio_rd & PWM_AUDIO_BUF_MASK];
-      pwm_audio_rd++;
-      xl = (float)(sample >> 16) / AUDIO_NORM;    // 0..2, DC removed below
-      xr = (float)(sample & 0xFFFF) / AUDIO_NORM;
-      produced++;
+      // Underrun: the caller asked for more than the ring holds (the JS pump
+      // over-pulls to refill its FIFO and discards these silence frames). Emit
+      // silence but do NOT advance the filters: running zeros through them would
+      // corrupt the lp/dc state and glitch the next real sample on resume.
+      out_l[i] = 0.0f;
+      out_r[i] = 0.0f;
+      continue;
     }
+    uint32_t sample = pwm_audio_buf[pwm_audio_rd & PWM_AUDIO_BUF_MASK];
+    pwm_audio_rd++;
+    float xl = (float)(sample >> 16) / AUDIO_NORM;    // 0..2, DC removed below
+    float xr = (float)(sample & 0xFFFF) / AUDIO_NORM;
     // R28/C25 one-pole RC low-pass (PWM reconstruction).
     lp_l += AUDIO_LP_ALPHA * (xl - lp_l);
     lp_r += AUDIO_LP_ALPHA * (xr - lp_r);
@@ -96,6 +98,7 @@ harucom_audio_pull(float *out_l, float *out_r, int frames)
     float yr = lp_r - dcx_r + AUDIO_DCBLOCK_R * dcy_r; dcx_r = lp_r; dcy_r = yr;
     out_l[i] = yl;
     out_r[i] = yr;
+    produced++;
   }
   return produced;
 }
