@@ -234,10 +234,10 @@
         class HarucomAudio extends AudioWorkletProcessor {
           constructor() {
             super();
-            this.cap = 16384; this.mask = this.cap - 1;
+            this.cap = 32768; this.mask = this.cap - 1;
             this.bl = new Float32Array(this.cap);
             this.br = new Float32Array(this.cap);
-            this.wr = 0; this.rd = 0;
+            this.wr = 0; this.rd = 0; this.under = 0;
             this.port.onmessage = (e) => {
               const l = e.data.l, r = e.data.r;
               for (let i = 0; i < l.length; i++) {
@@ -253,9 +253,9 @@
               if (this.rd < this.wr) {
                 const s = this.rd & this.mask;
                 outL[i] = this.bl[s]; outR[i] = this.br[s]; this.rd++;
-              } else { outL[i] = 0; outR[i] = 0; }
+              } else { outL[i] = 0; outR[i] = 0; this.under++; }
             }
-            this.port.postMessage(this.wr - this.rd); // buffered level for flow control
+            this.port.postMessage({ lvl: this.wr - this.rd, under: this.under });
             return true;
           }
         }
@@ -269,10 +269,10 @@
         catch (e) { audioCtx = new AudioCtx(); }
         const ctx = audioCtx;
         const ratio = srcRate / ctx.sampleRate; // source frames per output frame
-        const TARGET = 2048; // output frames to keep buffered in the worklet (~latency)
+        const TARGET = 3072; // output frames to keep buffered in the worklet (~140ms)
         const PULL = 1024;
         const lPtr = Module._malloc(PULL * 4), rPtr = Module._malloc(PULL * 4);
-        let workletLevel = 0; // frames buffered in the worklet (from its reports)
+        let workletLevel = 0, workletUnder = 0; // from the worklet's reports
 
         // Source FIFO for continuous resampling: pulled synth frames awaiting
         // consumption; srcPos is the fractional read position (integer at ratio 1).
@@ -285,16 +285,31 @@
           URL.revokeObjectURL(url);
           const node = new AudioWorkletNode(ctx, "harucom-audio", { numberOfInputs: 0, outputChannelCount: [2] });
           audioNode = node;
-          node.port.onmessage = (e) => { workletLevel = e.data; };
+          node.port.onmessage = (e) => { workletLevel = e.data.lvl; workletUnder = e.data.under; };
           node.connect(ctx.destination);
           ctx.resume();
-          // Diagnostic: if this is not the synth rate, output is resampled.
           console.log("Harucom audio: ctx " + ctx.sampleRate + "Hz, synth " +
                       srcRate + "Hz, ratio " + ratio.toFixed(4));
 
+          // Flow control is time-based, not level-based: supply the frames the
+          // worklet consumed since the last pump (wall-clock * rate) plus a gentle
+          // pull toward TARGET. This is robust to the worklet's level reports being
+          // delayed when the main thread is busy with the VM (a level-only scheme
+          // then stalls supply and the worklet underruns -> choppy noise).
+          let lastPump = 0, pumpCount = 0, maxWant = 0;
           audioPump = function () {
-            let want = TARGET - workletLevel; // output frames to supply
+            const now = performance.now();
+            let want;
+            if (lastPump === 0) {
+              want = TARGET; // prime the buffer on the first pump
+            } else {
+              const consumed = (now - lastPump) / 1000 * ctx.sampleRate;
+              want = Math.round(consumed + (TARGET - workletLevel) * 0.25);
+            }
+            lastPump = now;
             if (want <= 0) return;
+            if (want > TARGET) want = TARGET; // cap a post-stall catch-up burst
+            pumpCount++; if (want > maxWant) maxWant = want;
             const outL = new Float32Array(want), outR = new Float32Array(want);
             let produced = 0;
             while (produced < want) {
@@ -321,9 +336,16 @@
             if (produced === 0) return;
             const L = produced === want ? outL : outL.slice(0, produced);
             const R = produced === want ? outR : outR.slice(0, produced);
-            workletLevel += produced; // optimistic; corrected by the next report
             node.port.postMessage({ l: L, r: R }, [L.buffer, R.buffer]);
           };
+
+          // Diagnostic: report worklet buffer health once a second. underruns
+          // climbing means the pump cannot keep the worklet fed (choppy noise).
+          setInterval(() => {
+            console.log("audio diag: level=" + workletLevel + " underruns=" + workletUnder +
+                        " pumps/s=" + pumpCount + " maxWant=" + maxWant);
+            pumpCount = 0; maxWant = 0;
+          }, 1000);
         });
       }
       canvas.addEventListener("mousedown", startAudio);
