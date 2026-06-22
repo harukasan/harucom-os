@@ -124,13 +124,13 @@ Phase 2b + グラフィックス + IME + 音声 + パッド + プリエンプシ
 
 次の順序（以降）:
 
-### 次の作業A: ブラウザ実機での目視確認（ユーザー）
+### 作業A: ブラウザ実機での目視確認 ✅完了（ユーザー確認済み）
 
-ヘッドレス（`rake wasm:test`）は通っているが canvas はこちらから見えない。
-`bundle exec rake wasm:server` → `http://localhost:8000` を開き:
-- IRB バナー + `irb> ` プロンプトが M+ グリフで描画されるか。
-- canvas をクリックしてフォーカス → `1 + 1`↵ → `=> 2`、日本語 URL 行の全角描画。
-- キーリピート（長押し）、カーソル移動、Backspace、Ctrl-C の挙動。
+ユーザーがブラウザで動作確認済み: IRB 描画・キーボード入力（space/SandS/キーリピート/
+Ctrl 系含む）・日本語 IME 変換・グラフィックス（p5 デモ）・音声（`audio_demo`、合成/
+note-off declick）・ADC パッドが動作。Linux Firefox では Ctrl-Q をブラウザが奪うため
+`about:config` の `browser.quitShortcut.disabled=true` を案内済み。残る音声の微調整
+（sine の非倍音ノイズ）は上の「次セッションの最優先」に集約。
 
 ### 次の作業B: 残りのコードレビュー指摘（DVI 描画エッジケース）
 
