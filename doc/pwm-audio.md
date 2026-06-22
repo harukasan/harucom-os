@@ -477,7 +477,12 @@ new source values.
 
 The oscillator source is a 32-bit phase accumulator stepped by
 `frequency << 32 / SAMPLE_RATE`, generating a 12-bit sine (256-entry
-table), square, triangle, or sawtooth from the phase bits.
+table), square, triangle, or sawtooth from the phase bits. The square
+and sawtooth are band-limited with a 2-point PolyBLEP residual at each
+edge, which places the step at its true fractional position instead of
+on the sample grid and suppresses the audible-band aliasing of the
+naive waveforms by roughly 20 dB. Sine is already band-limited and
+triangle's aliasing is mild, so both are generated directly.
 
 ### Sample playback
 
