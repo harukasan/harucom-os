@@ -254,9 +254,10 @@ function verifyAudio(Module) {
   hidType(Module, [[0, 0x28]]); // Enter
   drive(Module, 8000); // let IRB evaluate the line
 
+  const CAP = 1024;
+  const lPtr = Module._malloc(CAP * 4);
+  const rPtr = Module._malloc(CAP * 4);
   const N = 512;
-  const lPtr = Module._malloc(N * 4);
-  const rPtr = Module._malloc(N * 4);
   const got = Module._harucom_audio_pull(lPtr, rPtr, N);
   const H = Module.HEAPF32;
   let min = Infinity, max = -Infinity, maxDelta = 0, prev = H[lPtr >> 2];
@@ -268,18 +269,46 @@ function verifyAudio(Module) {
     if (d > maxDelta) maxDelta = d;
     prev = v;
   }
+  const spread = max - min;
+
+  // Regression: the JS pump pulls a full block each frame, over-pulling the
+  // 1023-frame ring, so harucom_audio_pull hits an underrun every call. It must
+  // not run those silence frames through the RC/DC filters (that corrupts their
+  // state and glitches the next real sample). Play a smooth sine, then over-pull
+  // 1024 across refill boundaries; on a clean sine every step is tiny, so any
+  // large jump is a filter-corruption glitch at the boundary.
+  typeString(Module, "PWMAudio.tone(0,440,PWMAudio::SINE,8)");
+  hidType(Module, [[0, 0x28]]);
+  drive(Module, 4000);
+  const sine = [];
+  for (let k = 0; k < 3; k++) {
+    typeString(Module, "PWMAudio.update");
+    hidType(Module, [[0, 0x28]]);
+    drive(Module, 2000);
+    const g = Module._harucom_audio_pull(lPtr, rPtr, CAP); // over-pull (ring < CAP)
+    const HH = Module.HEAPF32;
+    if (k >= 1) for (let i = 0; i < g; i++) sine.push(HH[(lPtr >> 2) + i]);
+  }
+  let sineMaxDelta = 0;
+  for (let i = 1; i < sine.length; i++) {
+    const d = Math.abs(sine[i] - sine[i - 1]);
+    if (d > sineMaxDelta) sineMaxDelta = d;
+  }
+
   Module._free(lPtr);
   Module._free(rPtr);
-  const spread = max - min;
   // The RC low-pass rounds the square's edges, so the largest sample-to-sample
   // step is well below the peak-to-peak swing; an unfiltered square would jump
-  // the full swing in one sample (maxDelta == spread).
+  // the full swing in one sample (maxDelta == spread). A 440Hz sine steps by at
+  // most ~0.03 between samples, so 0.08 flags an underrun-boundary glitch.
   const checks = [
     ["synth produced samples (ring drained)", got > 0],
     ["square wave oscillates (amplitude spread)", spread > 0.5],
     ["RC low-pass smooths transitions", maxDelta < spread * 0.9],
+    ["sine has no underrun-boundary glitch", sine.length > 0 && sineMaxDelta < 0.08],
   ];
-  return runChecks(checks, `pulled=${got}, spread=${spread.toFixed(2)}, maxDelta=${maxDelta.toFixed(2)}`);
+  return runChecks(checks,
+    `pulled=${got}, spread=${spread.toFixed(2)}, maxDelta=${maxDelta.toFixed(2)}, sineMaxDelta=${sineMaxDelta.toFixed(3)}`);
 }
 
 // End-to-end pad test: inject a single-button ADC value (the resistor-ladder
