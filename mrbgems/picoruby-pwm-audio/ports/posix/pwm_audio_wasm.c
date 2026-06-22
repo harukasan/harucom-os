@@ -108,4 +108,57 @@ harucom_audio_pull(float *out_l, float *out_r, int frames)
   return produced;
 }
 
+// --- Measurement-only helpers (headless spectral analysis) -------------------
+// These are not used by the browser run loop. They let wasm/measure_audio.cjs
+// capture a clean, continuous, underrun-free stream of synth output so a DFT can
+// separate the fundamental, harmonics, and non-harmonic noise. The goal is to
+// decide whether the residual noise is synth quantization/aliasing (identical on
+// the board, since the synth is shared) or something the wasm-only path adds.
+
+// Set a channel's tone directly (no Ruby boot needed for measurement).
+EMSCRIPTEN_KEEPALIVE
+void
+harucom_audio_measure_tone(int channel, int frequency, int waveform, int volume)
+{
+  // The ~2.9 ms attack ramp (env 0 -> MAX in 64 samples) is discarded by the
+  // analysis warmup region, so no need to snap the envelope here.
+  pwm_audio_set_tone((uint8_t)channel, (uint32_t)frequency, (uint8_t)waveform,
+                     (uint8_t)volume);
+}
+
+// Render `total` continuous mono frames (channel L of the mix) into `out` with
+// no ring underrun, so the captured waveform is gap-free. mode 0 = raw
+// normalized synth duty centered on 0 (pre-analog, the pure digital synth, which
+// is bit-identical to the board); mode 1 = the full analog model (RC LP + DC
+// block), i.e. the board-equivalent analog output. Filters are reset at the
+// start of each call so the warmup region is deterministic.
+EMSCRIPTEN_KEEPALIVE
+int
+harucom_audio_measure_pull(float *out, int total, int mode)
+{
+  lp_l = 0.0f; dcx_l = 0.0f; dcy_l = 0.0f;
+  pwm_audio_rd = 0;
+  pwm_audio_wr = 0;
+  int produced = 0;
+  while (produced < total) {
+    pwm_audio_fill_buffer();
+    if (pwm_audio_wr == pwm_audio_rd) break; // synth produced nothing (no tone)
+    while (pwm_audio_wr != pwm_audio_rd && produced < total) {
+      uint32_t sample = pwm_audio_buf[pwm_audio_rd & PWM_AUDIO_BUF_MASK];
+      pwm_audio_rd++;
+      float xl = (float)(sample >> 16) / AUDIO_NORM; // 0..2
+      if (mode == 1) {
+        lp_l += AUDIO_LP_ALPHA * (xl - lp_l);
+        float yl = lp_l - dcx_l + AUDIO_DCBLOCK_R * dcy_l;
+        dcx_l = lp_l; dcy_l = yl;
+        out[produced] = yl;
+      } else {
+        out[produced] = xl - 1.0f; // center the unsigned duty on 0
+      }
+      produced++;
+    }
+  }
+  return produced;
+}
+
 #endif /* __EMSCRIPTEN__ */
