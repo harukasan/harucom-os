@@ -20,9 +20,19 @@ typedef enum {
   PWM_AUDIO_WAVE_SAWTOOTH,
 } pwm_audio_waveform_t;
 
+/* Per-channel attack/release amplitude ramp. The waveform is unsigned (a large
+ * DC offset), so starting or stopping a note abruptly steps that DC and clicks.
+ * Ramp a gain (0..ENV_MAX) toward env_target over ENV_MAX/ENV_STEP samples so the
+ * whole waveform (DC included) fades in/out, declicking note on/off. */
+#define PWM_AUDIO_ENV_BITS 12
+#define PWM_AUDIO_ENV_MAX  (1u << PWM_AUDIO_ENV_BITS) /* unity gain */
+#define PWM_AUDIO_ENV_STEP 64                         /* ~2.9 ms ramp at 22050 Hz */
+
 typedef struct {
   uint32_t phase;
   uint32_t phase_increment;
+  uint16_t env;        /* current ramp gain, 0..PWM_AUDIO_ENV_MAX */
+  uint16_t env_target; /* ramp destination: ENV_MAX when sounding, 0 when off */
   uint8_t waveform; /* pwm_audio_waveform_t */
   uint8_t volume;   /* 0-15 */
   uint8_t pan;      /* 0-15: 0=L, 8=center, 15=R */

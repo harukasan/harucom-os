@@ -92,7 +92,16 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
   for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
     pwm_audio_channel_t *ch = &channels[i];
 
-    if (ch->muted || !ch->phase_increment) continue;
+    /* Step the attack/release ramp toward its target (declicks note on/off). */
+    if (ch->env < ch->env_target) {
+      ch->env += PWM_AUDIO_ENV_STEP;
+      if (ch->env > ch->env_target) ch->env = ch->env_target;
+    } else if (ch->env > ch->env_target) {
+      ch->env = (ch->env > PWM_AUDIO_ENV_STEP) ? (uint16_t)(ch->env - PWM_AUDIO_ENV_STEP) : 0;
+      if (ch->env < ch->env_target) ch->env = ch->env_target;
+    }
+
+    if (ch->env == 0 || !ch->phase_increment) continue;
 
     ch->phase += ch->phase_increment;
 
@@ -100,6 +109,7 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
 
     uint32_t gain = vol_tab[ch->volume & 0x0F];
     amp = (amp * gain) >> 12;
+    amp = (amp * ch->env) >> PWM_AUDIO_ENV_BITS; /* apply the ramp */
 
     uint8_t bal = ch->pan & 0x0F;
     mix_l += (amp * pan_tab_l[bal]) >> 12;
@@ -121,6 +131,8 @@ pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_
   ch->waveform = waveform;
   ch->volume = volume & 0x0F;
   ch->muted = false;
+  /* Ramp up (from silence, or continue if already sounding) to avoid a click. */
+  ch->env_target = ch->phase_increment ? PWM_AUDIO_ENV_MAX : 0;
 }
 
 void
@@ -134,15 +146,20 @@ void
 pwm_audio_set_mute(uint8_t channel, bool mute)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
-  channels[channel].muted = mute;
+  pwm_audio_channel_t *ch = &channels[channel];
+  ch->muted = mute;
+  /* Ramp out/in instead of cutting, so mute/unmute does not click. */
+  ch->env_target = mute ? 0 : (ch->phase_increment ? PWM_AUDIO_ENV_MAX : 0);
 }
 
 void
 pwm_audio_stop_channel(uint8_t channel)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
-  channels[channel].phase_increment = 0;
-  channels[channel].phase = 0;
+  /* Ramp the note out (env -> 0) rather than cutting it, which would step the
+   * waveform's DC and click. The ramp keeps playing the current tone until env
+   * reaches 0, after which the channel is silent and skipped in calc_sample. */
+  channels[channel].env_target = 0;
   channels[channel].muted = true;
 }
 
