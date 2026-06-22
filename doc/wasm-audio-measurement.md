@@ -1,40 +1,42 @@
-# wasm Audio Measurement Tools
+# Audio Measurement Tools
 
-Headless spectral analysis tools for the PWM synth used in the wasm build. They
-capture a clean, continuous, underrun-free stream straight from the shared synth
-C code and run a DFT on it, so synth noise (quantization, aliasing) can be
-separated from noise added by the wasm-only playback path (JS resampler,
-AudioWorklet flow control). The synth C code in
-[pwm_audio.c](../mrbgems/picoruby-pwm-audio/src/pwm_audio.c) is shared with the
-board, so any synth-level finding applies to the RP2350 hardware as well.
+Tools (under [scripts/](../scripts)) for analyzing the PWM synth: one measures
+the compiled wasm synth's spectral purity, the other analyzes a recording of the
+real board's audio output. The synth C code in
+[pwm_audio.c](../mrbgems/picoruby-pwm-audio/src/pwm_audio.c) is shared between
+the board and the wasm build, so a synth-level finding from the wasm tool applies
+to the RP2350 hardware as well.
 
 ## Tools
 
-- [wasm/measure_audio.cjs](../wasm/measure_audio.cjs) — measures the actual
+- [scripts/measure_audio.cjs](../scripts/measure_audio.cjs) — measures the actual
   compiled synth (`build/wasm/harucom.js`) and reports, per tone, the
   fundamental / harmonic / non-harmonic energy split, the loudest non-harmonic
   spurs, a comparison to an ideal band-limited waveform (to quantify aliasing
   vs the numerical floor), and a simulation of the `index.html` JS resampler (to
-  see whether 22050 -> 44100/48000 resampling adds non-harmonic energy).
-- [wasm/proto_antialias.cjs](../wasm/proto_antialias.cjs) — a self-contained
-  prototype that reproduces the synth's exact 32-bit phase math (verified
-  bit-identical to `pwm_audio.c`) and compares anti-aliasing methods (naive,
-  PolyBLEP 2-point, BLEP-table, oversample Nx, ideal) across notes G3..C7. Used
-  to choose PolyBLEP 2-point as the cheapest method that reaches "Famicom clean"
-  without an ISR/DVI cost.
+  see whether 22050 -> 44100/48000 resampling adds non-harmonic energy). It
+  captures a clean, continuous, underrun-free stream straight from the shared
+  synth via the measurement-only C API below, so synth noise can be separated
+  from noise the wasm-only playback path adds.
+- [scripts/analyze_recording.py](../scripts/analyze_recording.py) — analyzes a
+  recording of the real board's audio output (any ffmpeg-readable file). It
+  reports periodic pop / underrun detection (constant-interval clicks point at a
+  periodic Core 0 stall starving the audio ISR), the fundamental and pitch, and
+  the non-harmonic energy (so PolyBLEP can be confirmed working on the board).
+  Used to diagnose the high-note clicks (audio-ISR timing jitter) and the pitch
+  error; needs `numpy` and `ffmpeg`.
 
 ## Running
 
 ```sh
-bundle exec rake wasm:build   # build build/wasm/harucom.js first
-node wasm/measure_audio.cjs    # measures the compiled synth
-node wasm/proto_antialias.cjs  # standalone, no build needed
+bundle exec rake wasm:build              # build build/wasm/harucom.js first
+node scripts/measure_audio.cjs           # measures the compiled wasm synth
+python3 scripts/analyze_recording.py recording.wav [--note-hz 440]
 ```
 
 `measure_audio.cjs` does not boot Ruby (it never calls `harucom_init`), so the
 picoruby-wasm gem's DOM-dependent JS init never runs and it works under plain
-node. `proto_antialias.cjs` reimplements the phase math in JS and needs no
-build.
+node. `analyze_recording.py` needs no build (it only reads a recording).
 
 ## C API
 
@@ -69,5 +71,5 @@ so the warmup region is deterministic.
 ## References
 
 - [doc/masterplan/wasm-resume-plan.md](masterplan/wasm-resume-plan.md): wasm
-  port status, including the audio architecture and the PolyBLEP anti-aliasing
-  decision these tools informed.
+  port status, including the audio architecture and the deferred board audio
+  work (ISR-jitter clicks, pitch error) that analyze_recording.py drives.
