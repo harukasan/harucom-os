@@ -125,11 +125,13 @@ namespace :wasm do
   desc "Generate rootfs C arrays (ruby_scripts.h) when rootfs/ changes"
   task rootfs: ROOTFS_DATA
 
-  # Copy the static page next to the built module so build/wasm/ is a
-  # self-contained directory the server can host.
+  # Copy the static page and its ES modules next to the built module so
+  # build/wasm/ is a self-contained directory the server can host.
   def stage_index!
     mkdir_p WASM_OUT
     cp File.join(WASM_DIR, "index.html"), WASM_INDEX
+    rm_rf File.join(WASM_OUT, "js")
+    cp_r File.join(WASM_DIR, "js"), File.join(WASM_OUT, "js")
   end
 
   desc "Build build/wasm/harucom.{js,wasm} (CLEAN=1 to rebuild presym/host from scratch)"
