@@ -31,6 +31,11 @@
 //  - C27/C28 = 100 uF AC coupling (~0.16 Hz high-pass with R30/R32): removes the
 //    DC. Model it as a DC-blocking one-pole high-pass (a fixed mid subtraction
 //    would not work, since silence sits at duty 0, leaving a huge -1.0 offset).
+//    The corner is set to ~3.5 Hz, not the board's 0.16 Hz: the synth waveform is
+//    unsigned (centered on a large DC), so the block must pull that DC out within
+//    a note or a loud voice rides up past +-1.0 and clips. The cost is that the
+//    DC step at an abrupt note-off (the synth has no release ramp) recovers in
+//    tens of ms, an audible click; a synth-side release would be the real fix.
 #define AUDIO_RC        (220.0f * 220e-9f)            // R28*C25 seconds
 #define AUDIO_DT        (1.0f / PWM_AUDIO_SAMPLE_RATE)
 #define AUDIO_LP_ALPHA  (AUDIO_DT / (AUDIO_RC + AUDIO_DT))
