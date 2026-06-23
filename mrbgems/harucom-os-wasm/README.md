@@ -29,17 +29,5 @@ This gem has no HAL. It reuses picoruby-wasm's `global_mrb` and
 the io-console / env / rng ports all come from picoruby's posix ports
 (auto-compiled under `PICORB_PLATFORM_POSIX`).
 
-## Build
-
-The rootfs C arrays (`ruby_scripts.h`) are generated into `build/` by the wasm
-`Rakefile` (the same path the board's CMake build uses), and `mrbgem.rake` adds
-`build/` to this gem's include path so `harucom_wasm.c` can `#include` it. Build
-and test with `rake wasm:build` / `rake wasm:test`; see
-[doc/masterplan/wasm-resume-plan.md](../../doc/masterplan/wasm-resume-plan.md) for
-the full wasm port design.
-
-## Files
-
-- `src/harucom_wasm.c` - `harucom_init()`, the ADC pad shim, rootfs deploy / prune.
-- `mrblib/dvi_wasm.rb` - the cooperative-yield overrides.
-- `mrbgem.rake` - gem spec and the `build/` include path.
+See [doc/masterplan/wasm-resume-plan.md](../../doc/masterplan/wasm-resume-plan.md)
+for the full wasm port design.
