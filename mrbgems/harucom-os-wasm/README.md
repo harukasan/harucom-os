@@ -19,6 +19,3 @@ in `src/main.c`. Built on the upstream picoruby-wasm gem
   a task-aware `sleep_ms`, and `DVI::Text` / `DVI::Graphics.commit` yield one frame,
   so the single browser thread stays responsive (the board uses real vsync / a
   timer interrupt instead).
-
-See [doc/masterplan/wasm-resume-plan.md](../../doc/masterplan/wasm-resume-plan.md)
-for the full wasm port design.
