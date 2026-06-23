@@ -13,7 +13,7 @@ to the RP2350 hardware as well.
   compiled synth (`build/wasm/harucom.js`) and reports, per tone, the
   fundamental / harmonic / non-harmonic energy split, the loudest non-harmonic
   spurs, a comparison to an ideal band-limited waveform (to quantify aliasing
-  vs the numerical floor), and a simulation of the `index.html` JS resampler (to
+  vs the numerical floor), and a simulation of the `js/audio.js` JS resampler (to
   see whether 22050 -> 44100/48000 resampling adds non-harmonic energy). It
   captures a clean, continuous, underrun-free stream straight from the shared
   synth via the measurement-only C API below, so synth noise can be separated

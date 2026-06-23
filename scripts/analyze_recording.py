@@ -2,7 +2,7 @@
 """
 Analyze a real-board audio recording of the Harucom OS PWM synth.
 
-    python3 wasm/analyze_recording.py recording.wav [--note-hz 440] [--start 0.5] [--dur 4]
+    python3 scripts/analyze_recording.py recording.wav [--note-hz 440] [--start 0.5] [--dur 4]
 
 Decodes any ffmpeg-readable file (wav/m4a/mp3/flac) to mono float and reports:
 

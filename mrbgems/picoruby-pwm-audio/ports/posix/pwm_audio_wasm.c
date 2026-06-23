@@ -109,7 +109,7 @@ harucom_audio_pull(float *out_l, float *out_r, int frames)
 }
 
 // --- Measurement-only helpers (headless spectral analysis) -------------------
-// These are not used by the browser run loop. They let wasm/measure_audio.cjs
+// These are not used by the browser run loop. They let scripts/measure_audio.cjs
 // capture a clean, continuous, underrun-free stream of synth output so a DFT can
 // separate the fundamental, harmonics, and non-harmonic noise. The goal is to
 // decide whether the residual noise is synth quantization/aliasing (identical on

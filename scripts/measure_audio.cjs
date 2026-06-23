@@ -1,7 +1,7 @@
 /*
  * Headless spectral analysis of the Harucom OS PWM synth (wasm build).
  *
- *   node wasm/measure_audio.cjs
+ *   node scripts/measure_audio.cjs
  *
  * Goal: decide whether the residual audible noise on sine AND square (e.g. G5)
  * is the synth's own quantization/aliasing (identical on the board, since the
@@ -16,7 +16,7 @@
  *   - compare to an IDEAL band-limited waveform (no aliasing) to quantify how
  *     much of the non-harmonic energy is aliasing vs numerical floor;
  *   - simulate the JS linear-interpolation resampler (22050 -> 44100 / 48000,
- *     the exact code from index.html) to see if it ADDS non-harmonic energy
+ *     the exact code from js/audio.js) to see if it ADDS non-harmonic energy
  *     (the wasm-only contribution, present only if the browser does not honor a
  *     22050 Hz AudioContext).
  */

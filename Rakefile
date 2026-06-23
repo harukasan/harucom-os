@@ -150,9 +150,9 @@ namespace :wasm do
     end
     # Link libmruby.a into the browser module. This intentionally differs from
     # the picoruby-wasm gem's own link task: it exports harucom_init (not
-    # picorb_init) and targets web,node without EXPORT_ES6 so wasm/run_node.cjs
-    # can require() it. harucom_init / mrb_run_step / mrb_tick_wasm are driven by
-    # the run loop in wasm/index.html.
+    # picorb_init) and targets web,node without EXPORT_ES6 so the node tests
+    # (wasm/tests/) can require() it. harucom_init / mrb_run_step / mrb_tick_wasm
+    # are driven by the run loop in wasm/js/runloop.js.
     exported = '["' + %w[
       _harucom_init _mrb_run_step _mrb_tick_wasm
       _harucom_dvi_framebuffer _harucom_dvi_width _harucom_dvi_height
