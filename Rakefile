@@ -105,13 +105,18 @@ WASM_JS       = File.join(WASM_OUT, "harucom.js")
 WASM_WASM     = File.join(WASM_OUT, "harucom.wasm")
 WASM_INDEX    = File.join(WASM_OUT, "index.html")
 ROOTFS_DIR    = File.join(PROJECT_DIR, "rootfs")
-ROOTFS_DATA   = File.join(PROJECT_DIR, "mrbgems", "harucom-os-wasm", "src", "ruby_scripts.h")
+# Generated into build/ (a build artifact), the same path the board's CMake build
+# uses (CMAKE_BINARY_DIR/ruby_scripts.h), so the header lives in one place and not
+# in the gem source tree. harucom-os-wasm/mrbgem.rake adds build/ to its include
+# path so harucom_wasm.c can #include it.
+ROOTFS_DATA   = File.join(BUILD_DIR, "ruby_scripts.h")
 GEN_RUBY_SCRIPTS = File.join(PROJECT_DIR, "scripts", "gen_ruby_scripts.rb")
 
 # Regenerate ruby_scripts.h only when a rootfs source (or the generator) is
 # newer, so an unchanged rootfs does not force harucom_wasm.c to recompile.
 file ROOTFS_DATA =>
      (FileList["#{ROOTFS_DIR}/**/*"].exclude { |f| File.directory?(f) } << GEN_RUBY_SCRIPTS) do
+  mkdir_p BUILD_DIR
   sh "ruby", GEN_RUBY_SCRIPTS, ROOTFS_DIR, ROOTFS_DATA
 end
 

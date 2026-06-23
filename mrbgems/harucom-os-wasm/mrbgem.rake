@@ -3,6 +3,11 @@ MRuby::Gem::Specification.new('harucom-os-wasm') do |spec|
   spec.author  = 'Harucom OS'
   spec.summary = 'WebAssembly boot entry for Harucom OS'
 
+  # ruby_scripts.h (rootfs C arrays) is generated into build/ by the wasm Rakefile
+  # (the same location the board's CMake build uses), so add build/ to the include
+  # path instead of generating the header inside this gem's src tree.
+  spec.cc.include_paths << File.expand_path('../../build', spec.dir)
+
   # Provides harucom_init(): deploy the rootfs into the emscripten in-memory
   # filesystem and boot mruby (reusing picoruby-wasm's global_mrb and
   # picorb_create_task). The hardware HAL, Machine_*, the task scheduler HAL and
