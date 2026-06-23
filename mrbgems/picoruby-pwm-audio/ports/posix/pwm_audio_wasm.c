@@ -1,17 +1,11 @@
-/*
- * Browser (emscripten) PWM audio port.
- *
- * The synth (src/pwm_audio.c) renders 3 channels into the shared ring buffer
- * pwm_audio_buf. On the board a 22050 Hz timer ISR drains one packed stereo
- * frame per tick into the PWM slices. The browser has no PWM and no ISR, so
- * JavaScript drains the ring instead: a Web Audio ScriptProcessorNode calls
- * harucom_audio_pull() to pop frames and advance the read pointer, while the
- * Ruby userland keeps calling PWMAudio.update (pwm_audio_fill_buffer) to refill.
- *
- * Guarded by __EMSCRIPTEN__ (the wasm build is emcc), matching the other
- * ports/posix wasm ports; picoruby auto-compiles ports/posix under POSIX while
- * ports/rp2350 (pico-sdk PWM) is excluded.
- */
+// Copyright (c) 2026 Shunsuke Michii
+//
+// Browser (emscripten) PWM audio port.
+//
+// The synth (src/pwm_audio.c) renders 3 channels into the ring buffer
+// pwm_audio_buf. The browser has no PWM and no ISR, so JavaScript drains the
+// ring: a Web Audio ScriptProcessorNode calls harucom_audio_pull() to pop
+// frames, while Ruby keeps calling PWMAudio.update to refill.
 
 #ifdef __EMSCRIPTEN__
 
@@ -19,23 +13,22 @@
 
 #include "pwm_audio.h"
 
-// The synth's PWM duty (0..PWM_AUDIO_PWM_WRAP) is an UNSIGNED waveform whose
-// silence is duty 0, not the mid level, so a tone is a positive-only swing with
-// a large DC component. Normalize to ~0..2 (full scale) here; the DC-blocking
-// high-pass below removes the offset (see AUDIO_DCBLOCK_R).
+// The synth's PWM duty (0..PWM_AUDIO_PWM_WRAP) is unsigned: silence is duty 0,
+// so a tone is a positive-only swing with a large DC component. Normalize to
+// ~0..2 here; the DC-blocking high-pass below removes the offset.
 #define AUDIO_NORM (PWM_AUDIO_PWM_WRAP / 2.0f)
 
 // Reproduce the board's analog output stage per channel:
 //  - R28/R29 = 220 ohm + C25/C26 = 220 nF: one-pole RC low-pass, ~3.3 kHz, the
 //    PWM reconstruction filter (alpha = dt / (R*C + dt), dt = 1/sample_rate).
-//  - C27/C28 = 100 uF AC coupling (~0.16 Hz high-pass with R30/R32): removes the
-//    DC. Model it as a DC-blocking one-pole high-pass (a fixed mid subtraction
-//    would not work, since silence sits at duty 0, leaving a huge -1.0 offset).
-//    The corner is set to ~3.5 Hz, not the board's 0.16 Hz: the synth waveform is
-//    unsigned (centered on a large DC), so the block must pull that DC out within
-//    a note or a loud voice rides up past +-1.0 and clips. The cost is that the
-//    DC step at an abrupt note-off (the synth has no release ramp) recovers in
-//    tens of ms, an audible click; a synth-side release would be the real fix.
+//  - C27/C28 = 100 uF AC coupling (~0.16 Hz high-pass with R30/R32): modeled as
+//    a DC-blocking one-pole high-pass (a fixed mid subtraction would not work,
+//    since silence sits at duty 0, leaving a huge -1.0 offset). The corner is set
+//    to ~3.5 Hz, not the board's 0.16 Hz: the synth waveform is unsigned, so the
+//    block must pull that DC out within a note or a loud voice rides up past
+//    +-1.0 and clips. The cost is that the DC step at an abrupt note-off (the
+//    synth has no release ramp) recovers in tens of ms, an audible click; a
+//    synth-side release would be the real fix.
 #define AUDIO_RC        (220.0f * 220e-9f)            // R28*C25 seconds
 #define AUDIO_DT        (1.0f / PWM_AUDIO_SAMPLE_RATE)
 #define AUDIO_LP_ALPHA  (AUDIO_DT / (AUDIO_RC + AUDIO_DT))
@@ -45,8 +38,7 @@ static float lp_l = 0.0f, lp_r = 0.0f;   // RC low-pass state
 static float dcx_l = 0.0f, dcy_l = 0.0f; // DC-block state (prev input/output), L
 static float dcx_r = 0.0f, dcy_r = 0.0f; // DC-block state, R
 
-// No PWM hardware in the browser. init only resets the ring (the synth state is
-// set up by the Ruby PWMAudio.tone/update calls); deinit silences the synth.
+// Reset the ring.
 void
 pwm_audio_init(uint8_t l_pin, uint8_t r_pin)
 {
@@ -56,6 +48,7 @@ pwm_audio_init(uint8_t l_pin, uint8_t r_pin)
   pwm_audio_wr = 0;
 }
 
+// Silence the synth.
 void
 pwm_audio_deinit(void)
 {
@@ -71,11 +64,11 @@ harucom_audio_sample_rate(void)
   return PWM_AUDIO_SAMPLE_RATE;
 }
 
-// Drain up to `frames` stereo frames into planar float channels (the layout a
+// Drain up to `frames` stereo frames into planar float channels (the layout
 // ScriptProcessorNode's getChannelData wants). Each packed sample holds L in the
-// high 16 bits and R in the low 16 bits, both 0..PWM_AUDIO_PWM_WRAP. On underrun
-// the remaining frames are silence. Returns the number of real frames produced.
-// JS owns the read pointer through this call (the wasm analogue of the board ISR).
+// high 16 bits and R in the low 16 bits. On underrun the rest is silence.
+// Returns the number of real frames produced. JS owns the read pointer, the
+// wasm analogue of the board ISR.
 EMSCRIPTEN_KEEPALIVE
 int
 harucom_audio_pull(float *out_l, float *out_r, int frames)
@@ -83,10 +76,9 @@ harucom_audio_pull(float *out_l, float *out_r, int frames)
   int produced = 0;
   for (int i = 0; i < frames; i++) {
     if (pwm_audio_wr == pwm_audio_rd) {
-      // Underrun: the caller asked for more than the ring holds (the JS pump
-      // over-pulls to refill its FIFO and discards these silence frames). Emit
-      // silence but do NOT advance the filters: running zeros through them would
-      // corrupt the lp/dc state and glitch the next real sample on resume.
+      // Underrun: the JS pump over-pulls to refill its FIFO and discards these
+      // silence frames. Emit silence but do NOT advance the filters; running
+      // zeros through them would glitch the next real sample on resume.
       out_l[i] = 0.0f;
       out_r[i] = 0.0f;
       continue;
@@ -109,29 +101,26 @@ harucom_audio_pull(float *out_l, float *out_r, int frames)
 }
 
 // --- Measurement-only helpers (headless spectral analysis) -------------------
-// These are not used by the browser run loop. They let scripts/measure_audio.cjs
-// capture a clean, continuous, underrun-free stream of synth output so a DFT can
-// separate the fundamental, harmonics, and non-harmonic noise. The goal is to
-// decide whether the residual noise is synth quantization/aliasing (identical on
-// the board, since the synth is shared) or something the wasm-only path adds.
+// Not used by the browser run loop. They let scripts/measure_audio.cjs capture a
+// clean, underrun-free stream of synth output so a DFT can separate the
+// fundamental, harmonics and noise, telling synth quantization/aliasing (shared
+// with the board) from something the wasm-only path adds.
 
 // Set a channel's tone directly (no Ruby boot needed for measurement).
 EMSCRIPTEN_KEEPALIVE
 void
 harucom_audio_measure_tone(int channel, int frequency, int waveform, int volume)
 {
-  // The ~2.9 ms attack ramp (env 0 -> MAX in 64 samples) is discarded by the
-  // analysis warmup region, so no need to snap the envelope here.
+  // The ~2.9 ms attack ramp is discarded by the analysis warmup region, so no
+  // need to snap the envelope here.
   pwm_audio_set_tone((uint8_t)channel, (uint32_t)frequency, (uint8_t)waveform,
                      (uint8_t)volume);
 }
 
 // Render `total` continuous mono frames (channel L of the mix) into `out` with
-// no ring underrun, so the captured waveform is gap-free. mode 0 = raw
-// normalized synth duty centered on 0 (pre-analog, the pure digital synth, which
-// is bit-identical to the board); mode 1 = the full analog model (RC LP + DC
-// block), i.e. the board-equivalent analog output. Filters are reset at the
-// start of each call so the warmup region is deterministic.
+// no ring underrun, so the capture is gap-free. mode 0 = raw normalized synth
+// duty centered on 0 (the pure digital synth, bit-identical to the board);
+// mode 1 = the full analog model (RC LP + DC block). Filters reset each call.
 EMSCRIPTEN_KEEPALIVE
 int
 harucom_audio_measure_pull(float *out, int total, int mode)
