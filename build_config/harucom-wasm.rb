@@ -97,4 +97,9 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   # The PicoRuby wasm runtime: JS interop plus the mrb_run_step / mrb_tick_wasm
   # entry points the JS run loop drives, and global_mrb.
   conf.gem core: "picoruby-wasm"
+
+  # funicular: a VDOM browser UI framework (pure mrblib, DOM via the picoruby-wasm
+  # JS bridge). wasm-only, for the reactive Shell that runs as a task alongside the
+  # OS in this same VM. The board build (harucom-os-pico2.rb) does not include it.
+  conf.gem core: "picoruby-funicular"
 end

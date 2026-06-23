@@ -17,12 +17,13 @@ Ruby で動く」。
 
 ## 現在の状態（branch: `wasm-funicular`）
 
-- `wasm-text-mode` から分岐。プラン文書のコミット(`d8c5237`)+ Phase 1 のコミット 1 件。
-- **Phase 1 実装・コミット済み(ブラウザ目視待ち)**。`rake wasm:build` 緑、
-  `rake wasm:test` = **28/28 PASS**(21 + 純ロジック 7)、emcc 6.0.0 / node / Tailwind v4.3.1 利用可。
-  wasm サイズはベースラインと同一(gem 変更なし)。
+- `wasm-text-mode` から分岐。プラン文書(`d8c5237`)+ Phase 1 + Phase 2 のコミット。
+- **Phase 1・2 完了・コミット済み**(Phase 1 はユーザー目視承認済み)。`rake wasm:build` 緑、
+  `rake wasm:test` = **30/30 PASS**(OS コア 21 + 純ロジック 7 + funicular 2)、
+  emcc 6.0.0 / node / Tailwind v4.3.1 利用可。funicular 入りで wasm = 4260558 bytes。
 - **計画は Phase 1〜4 まで確定済み**。前提調査も完了(下記「確認済みの事実」)。
-- **再開ポイント = Phase 2 未着手**(funicular gem 組み込み + `distclean` 再ビルド検証)。
+- **再開ポイント = Phase 3 未着手**(現 chrome の funicular 化。Phase 2 で
+  ヘッドレス UI テストが可能と判明したので、jsdom で各コンポーネントを検証しながら進められる)。
 - 確定した主な決定: 単一 VM(`picoruby-funicular` 組み込み)/ CSS は Tailwind v4 /
   Phase 4 は devtools 風のタブ付きパネル UI(ホスト `Harucom::UI::Panels`、機能は自己登録
   `Panel`、ドック位置 下/右 切替)/ UI Ruby は MEMFS ソース + `require` でホットリロード。
@@ -216,25 +217,44 @@ end
 
 受け入れ条件(Phase 1 完了ゲート):
 - [x] `rake wasm:build && rake wasm:test` が緑(28/28、OS コアの smoke 不変)。
-- [ ] `rake wasm:server` でブラウザの表示・入力・音声・パッドが現状と同一(目視 = **要ユーザー確認**)。
+- [x] `rake wasm:server` でブラウザの表示・入力・音声・パッドが現状と同一(目視 = ユーザー承認済み)。
 - [x] 抽出した純ロジックに node 単体テストを追加(`hid.test.cjs` / `pad-ladder.test.cjs`、DOM 不要)。
 
-## Phase 2: funicular の組み込み（素通しビルド検証）
+## Phase 2: funicular の組み込み（素通しビルド検証）— 完了
 
 目的: harucom.wasm の VM に funicular を載せ、ビルドと最小動作を確認する。
 
-- [ ] `build_config/harucom-wasm.rb` に `conf.gem core: "picoruby-funicular"` を追加。
-- [ ] `rake distclean && rake wasm:build`(funicular のクラスで `MRB_SYM` が増えるため
-      `distclean` 必須)。依存解決(json / mruby-*-ext)とリンク(EM_JS ブリッジ既存、
-      追加フラグ不要のはず)が通ることを確認。
-- [ ] `picoruby-indexeddb` を boot 時に参照しないこと(funicular mrblib が起動時に
-      ハード依存しない)を確認。必要になったら vendor する(Store 機能利用時のみ)。
-- [ ] wasm サイズの前後差を記録(funicular は純 Ruby mrblib なので増分は小さい想定)。
-- [ ] 最小スモーク: この build 上で `JS.global[:document]` が機能し、
-      `Funicular::Component` を 1 個生成して DOM ノードをマウントできることを確認
-      (canvas 上の IRB から Ruby 片を実行、または wasm 専用テストで)。
-      ブリッジ + funicular が harucom の VM で動く証明。jsdom が `JS` の DOM 操作を
-      満たすかはここで判断する(満たさなければ UI 検証は当面ブラウザ目視)。
+- [x] `build_config/harucom-wasm.rb` に `conf.gem core: "picoruby-funicular"` を追加(wasm 限定。
+      実機 config `harucom-os-pico2.rb` には入れない)。
+- [x] `rake distclean && rake wasm:build`。依存(json / mruby-*-ext)とリンク(EM_JS ブリッジ、
+      追加フラグなし)が通ることを確認。
+- [x] `picoruby-indexeddb` を boot 時に参照しないことを確認(funicular 入りで `wasm:test`
+      の OS コア smoke が緑のまま = mrblib が起動を壊さない)。
+- [x] wasm サイズ前後差: **4177389 → 4260558 bytes(+83,169 / 約 +81 KB)**。純 mrblib なので小。
+- [x] 最小スモーク(`wasm/tests/funicular.test.cjs`、jsdom): `Funicular::VERSION` が解決し、
+      `Funicular::Component` サブクラスが `Funicular.start(..., container: "app")` で DOM に
+      マウントできる(render → VDOM → JS ブリッジ → `getElementById` 往復で `textContent` 確認)。
+
+### Phase 2 で確定した事実（Phase 3 の前提）
+
+- **jsdom は `JS`/DOM ブリッジの操作を満たす**(`createElement`/`setAttribute`/`appendChild`/
+  `getElementById`/プロパティ get、さらに `Funicular.start` の Component マウントまでヘッドレスで成功)。
+  → **funicular UI はヘッドレス(node:test)で検証できる**。当面ブラウザ目視に限定する必要はない。
+- funicular の実体は harucom が pin する picoruby(`sekigahara`)に vendored 済みの
+  funicular `8304085f`(2026-05-03、upstream picoruby/master が指すのと同一コミット)。
+  submodule を進める必要はない(進めても同じ funicular)。
+- API: 名前空間 `Funicular`(`VERSION="0.1.0"`)。エントリ `Funicular.start(component_class,
+  container: "app", props: {})` → `getElementById(container)` → `instance.mount`。
+  Component の render DSL は HTML タグ別メソッド(`div(props) do ... end` 等、`component.rb`
+  の `HTML_TAGS`)。テキスト子はブロックの戻り値文字列。
+- harness 注意: キーボード打鍵パイプラインは `{ } |` を HID マップできず、長い 1 行は打鍵破損する。
+  funicular の Ruby は短い行に分割し、render ブロックは `do/end`、ブロック引数なしで書く。
+  funicular マウント先として harness の jsdom に `<div id="app">` を追加済み(実ページと対応)。
+
+### 未着手(Phase 3 で対応)
+
+- 実ページ `wasm/index.html` への `<div id="app">` 追加と funicular Shell の起動。
+- UI Ruby の置き場所(MEMFS ソース + `require`)と起動タスク。
 
 ## Phase 3: プロトタイプ（現 chrome の funicular 化）
 

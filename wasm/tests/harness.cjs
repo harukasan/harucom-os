@@ -20,7 +20,8 @@ let domReady = false;
 function setupDom() {
   if (domReady) return;
   const dom = new JSDOM(
-    '<!DOCTYPE html><canvas id="screen" width="640" height="480"></canvas>',
+    '<!DOCTYPE html><canvas id="screen" width="640" height="480"></canvas>' +
+    '<div id="app"></div>', // funicular mount point (mirrors the browser page)
     { pretendToBeVisual: true }
   );
   globalThis.window = dom.window;
