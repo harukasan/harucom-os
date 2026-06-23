@@ -49,7 +49,11 @@ static uint8_t graphics_buf[FB_WIDTH * FB_HEIGHT];
 static void
 render_text(void)
 {
-  uint8_t border_bg = (uint8_t)dvi_text_palette32[0]; // palette[0] (background)
+  // The board hardwires the border (rows past the text area and the right margin
+  // past cols*6) to black 0 regardless of the palette, so match it. Using
+  // palette[0] here would tint the margin differently from the board whenever
+  // palette[0] is remapped to a non-black background.
+  const uint8_t border_black = 0x00;
 
   for (int scan = 0; scan < FB_HEIGHT; scan++) {
     uint8_t *out = framebuffer + scan * FB_WIDTH;
@@ -57,7 +61,7 @@ render_text(void)
     int glyph_y = scan % TEXT_GLYPH_HEIGHT_12WIDE;
 
     if (text_row >= dvi_text_rows) {
-      memset(out, border_bg, FB_WIDTH);
+      memset(out, border_black, FB_WIDTH);
       continue;
     }
 
@@ -74,27 +78,28 @@ render_text(void)
       uint8_t fg = (uint8_t)dvi_text_palette32[(cell.attr >> 4) & 0x0F];
       uint8_t bg = (uint8_t)dvi_text_palette32[cell.attr & 0x0F];
 
-      if (cell.flags & DVI_CELL_FLAG_WIDE_L) {
-        // Full-width: 12px from the glyph bitmap (low byte = cols 0-7, high
-        // byte = cols 8-11), 1bpp MSB-first.
+      if (cell.flags & (DVI_CELL_FLAG_WIDE_L | DVI_CELL_FLAG_WIDE_R)) {
+        // Full-width: 12px from the glyph bitmap (low byte = cols 0-7, high byte
+        // = cols 8-11), 1bpp MSB-first, then consume the partner cell. The board
+        // dispatches WIDE_L and WIDE_R together and skips two cells, so a stray
+        // WIDE_R (its WIDE_L half overwritten by a half-width char) must render a
+        // 12px glyph and shift the row the same way, not a 6px gap that would
+        // drift from the hardware.
         uint8_t b0 = grow[col];
         uint8_t b1 = grow[col + 1];
         for (int px = 0; px < 8; px++) out[x++] = (b0 & (0x80 >> px)) ? fg : bg;
         for (int px = 0; px < 4; px++) out[x++] = (b1 & (0x80 >> px)) ? fg : bg;
-        col++; // consume the WIDE_R cell
-      } else if (cell.flags & DVI_CELL_FLAG_WIDE_R) {
-        // Stray right half (e.g. mid-glyph scroll); paint background.
-        for (int px = 0; px < TEXT_GLYPH_WIDTH_12WIDE; px++) out[x++] = bg;
+        col++; // consume the partner cell
       } else {
         // Half-width: 6px from the narrow cache (bold is encoded as ch|0x100,
         // which indexes the 256-511 region of the row cache).
-        uint8_t fb = nrow[cell.ch & 0x1FF];
+        uint8_t mask = nrow[cell.ch & 0x1FF];
         for (int px = 0; px < TEXT_GLYPH_WIDTH_12WIDE; px++)
-          out[x++] = (fb & (0x80 >> px)) ? fg : bg;
+          out[x++] = (mask & (0x80 >> px)) ? fg : bg;
       }
     }
-    // Right margin (640 - cols*6) stays background.
-    while (x < FB_WIDTH) out[x++] = border_bg;
+    // Right margin (640 - cols*6) stays black, like the board.
+    while (x < FB_WIDTH) out[x++] = border_black;
   }
 }
 
