@@ -20,8 +20,10 @@ const MAX_CATCHUP_TICKS = 8; // cap clock catch-up after a stall / background ta
 const STEPS_PER_FRAME = 16;
 
 // Start the rAF loop. blit/applyReleases/pump are the per-frame hooks from the
-// display, keyboard, and audio modules.
-export function startRunLoop(Module, { blit, applyReleases, pump }) {
+// display, keyboard, and audio modules. onFrame, when given, is called with the
+// new DVI frame count each time it advances (after the blit), so the facade can
+// surface a frame event.
+export function startRunLoop(Module, { blit, applyReleases, pump, onFrame }) {
   let lastFrame = -1;
   let lastTick = performance.now();
 
@@ -41,6 +43,7 @@ export function startRunLoop(Module, { blit, applyReleases, pump }) {
     if (frame !== lastFrame) {
       lastFrame = frame;
       blit();
+      if (onFrame) onFrame(frame);
     }
     requestAnimationFrame(step);
   }

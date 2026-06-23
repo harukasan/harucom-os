@@ -104,6 +104,9 @@ WASM_LIBMRUBY = File.join(WASM_BUILD, "lib", "libmruby.a")
 WASM_JS       = File.join(WASM_OUT, "harucom.js")
 WASM_WASM     = File.join(WASM_OUT, "harucom.wasm")
 WASM_INDEX    = File.join(WASM_OUT, "index.html")
+WASM_CSS_IN   = File.join(WASM_DIR, "css", "app.css")   # Tailwind input
+WASM_CSS_OUT  = File.join(WASM_OUT, "style.css")        # Tailwind output
+WASM_TAILWIND = File.join(WASM_DIR, "node_modules", ".bin", "tailwindcss")
 ROOTFS_DIR    = File.join(PROJECT_DIR, "rootfs")
 # Generated into build/ (a build artifact), the same path the board's CMake build
 # uses (CMAKE_BINARY_DIR/ruby_scripts.h), so the header lives in one place and not
@@ -127,8 +130,27 @@ namespace :wasm do
           "  source ~/emsdk/emsdk_env.sh"
   end
 
+  def require_tailwind!
+    return if File.executable?(WASM_TAILWIND)
+    abort "tailwindcss CLI not found at #{WASM_TAILWIND}.\n" \
+          "Run `npm install` in #{WASM_DIR} (adds @tailwindcss/cli)."
+  end
+
+  # Build the Tailwind CLI command (css/app.css -> build/wasm/style.css). Pass
+  # "--minify" for builds or "--watch" for the dev server.
+  def tailwind_command(*extra)
+    require_tailwind!
+    [WASM_TAILWIND, "-i", WASM_CSS_IN, "-o", WASM_CSS_OUT, *extra]
+  end
+
   desc "Generate rootfs C arrays (ruby_scripts.h) when rootfs/ changes"
   task rootfs: ROOTFS_DATA
+
+  desc "Build the Tailwind stylesheet (build/wasm/style.css) from css/app.css"
+  task :css do
+    mkdir_p WASM_OUT
+    sh(*tailwind_command("--minify"))
+  end
 
   # Copy the static page and its ES modules next to the built module so
   # build/wasm/ is a self-contained directory the server can host.
@@ -142,6 +164,7 @@ namespace :wasm do
   desc "Build build/wasm/harucom.{js,wasm} (CLEAN=1 to rebuild presym/host from scratch)"
   task build: [:rootfs, DICT_BIN] do
     require_emcc!
+    require_tailwind! # fail fast before the emcc link if the CSS tool is missing
     if %w[1 true yes].include?(ENV["CLEAN"].to_s.downcase)
       rm_rf WASM_BUILD
       rm_rf WASM_HOST
@@ -179,6 +202,7 @@ namespace :wasm do
        "--embed-file", "#{DICT_BIN}@/dict.bin",
        WASM_LIBMRUBY, "-o", WASM_JS
     stage_index!
+    sh(*tailwind_command("--minify")) # build/wasm/style.css from css/app.css
     puts "Built #{WASM_WASM} (#{File.size(WASM_WASM)} bytes)"
   end
 
@@ -187,7 +211,13 @@ namespace :wasm do
     unless File.exist?(WASM_WASM)
       abort "#{WASM_WASM} not found. Run `rake wasm:build` first."
     end
-    stage_index! # pick up any index.html edits without a full rebuild
+    stage_index! # pick up any index.html / js edits without a full rebuild
+    # Rebuild style.css from css/app.css edits while serving, so style tweaks show
+    # up on reload without a full wasm rebuild (--watch does an initial build on
+    # startup, so no separate one-shot is needed). index.html markup edits are
+    # staged once above, so changing the chrome structure needs a server restart.
+    watcher = spawn(*tailwind_command("--watch"))
+    at_exit { Process.kill("TERM", watcher) rescue nil }
     port = ENV["PORT"] || "8000"
     puts "Serving #{WASM_OUT} at http://localhost:#{port}/  (Ctrl-C to stop)"
     sh "python3", "-m", "http.server", port, "--bind", "127.0.0.1",

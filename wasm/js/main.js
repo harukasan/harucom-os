@@ -1,40 +1,42 @@
-// Entry point: boot the wasm VM and wire up the browser modules.
+// Entry point: boot the wasm VM and wire the Engine facade to the static chrome.
 //
 // harucom.js (loaded as a classic script before this module) defines the global
-// createHarucomModule factory. We create the module, init the VM, then hand it to
-// the display / keyboard / audio / pad modules and start the run loop.
+// createHarucomModule factory. We create the Module, hand it to createEngine
+// (which composes the device modules), bind the engine's events and commands to
+// the current static DOM (#out / #kbddbg / #pads), then start it (start() inits
+// the VM, so we subscribe to "print" first to catch init-time output). This is a
+// thin composition root; Phase 3 swaps the static DOM for a funicular Shell
+// without changing the Engine.
 
-import { createDisplay } from "./display.js";
-import { installKeyboard } from "./keyboard.js";
-import { installAudio } from "./audio.js";
-import { installPads } from "./pads.js";
-import { startRunLoop } from "./runloop.js";
-import { pruneRuntimeDirs } from "./fs.js";
+import { createEngine } from "./engine/index.js";
+import { installPadDom } from "./engine/pads.js";
 
 const outEl = document.getElementById("out");
-const append = (s) => { outEl.textContent += s; };
 
 // stdout / stderr arrive via the posix hal_write() (emscripten fd 1 / 2), which
-// emscripten routes to Module.print / Module.printErr.
+// emscripten routes to Module.print / Module.printErr. Those handlers must be set
+// at construction time, so they forward into the engine once it exists.
+let engine;
 window.createHarucomModule({
-  print: (s) => append(s + "\n"),
-  printErr: (s) => append(s + "\n"),
+  print: (s) => engine?.print(s + "\n"),
+  printErr: (s) => engine?.print(s + "\n"),
 }).then((Module) => {
-  if (Module._harucom_init() !== 0) {
-    append("\n[harucom_init failed]\n");
-    return;
-  }
-  pruneRuntimeDirs(Module); // drop the emscripten-only /home /tmp /proc dirs
-
   const canvas = document.getElementById("screen");
-  const display = createDisplay(Module, canvas);
-  const keyboard = installKeyboard(Module, canvas, document.getElementById("kbddbg"));
-  const audio = installAudio(Module, canvas);
-  installPads(Module, document.getElementById("pads"), audio.startAudio);
+  engine = createEngine(Module, { canvas });
 
-  startRunLoop(Module, {
-    blit: display.blit,
-    applyReleases: keyboard.applyReleases,
-    pump: audio.pump,
-  });
+  engine.on("print", (line) => { outEl.textContent += line; });
+
+  const kbddbgEl = document.getElementById("kbddbg");
+  if (kbddbgEl) engine.on("keys", (text) => { kbddbgEl.textContent = text; });
+
+  installPadDom(document.getElementById("pads"),
+    { setPad: engine.setPad, startAudio: engine.startAudio });
+
+  // start() inits the VM; subscribers above are already attached, so init-time
+  // stdout/stderr reaches #out. It throws if harucom_init fails.
+  try {
+    engine.start();
+  } catch (e) {
+    outEl.textContent += "\n[" + e.message + "]\n";
+  }
 });

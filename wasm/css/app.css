@@ -1,0 +1,58 @@
+/* Tailwind input for the wasm browser shell.
+ *
+ * Utility classes are authored in index.html (Phase 1) and, later, the funicular
+ * UI .rb (Phase 3). source(none) disables Tailwind's automatic scanning so only
+ * the listed @source files are read (keeps node_modules out and the output
+ * deterministic). rake wasm:css builds this into build/wasm/style.css. */
+@import "tailwindcss" source(none);
+
+@source "../index.html";
+
+/* Retro palette tokens. Phase 4 extends these (pad / tab / panel colors). */
+@theme {
+  --color-base: #111;
+  --color-fg: #eee;
+  --color-term-green: #0f0;
+}
+
+@layer base {
+  /* The DVI surface is 640x480; scale it up with crisp (nearest) pixels. Sizing
+   * and image-rendering are not utility-shaped, so they stay hand-written. */
+  #screen {
+    display: block;
+    width: 640px;
+    height: 480px;
+    background: #000;
+    border-radius: 4px;
+    image-rendering: pixelated;
+  }
+}
+
+@layer components {
+  /* On-screen D-pads are built by js/engine/pads.js. The pressed toggle moves to
+   * the funicular styles DSL in Phase 3; until then it stays a plain rule. */
+  .pad {
+    display: grid;
+    grid-template-columns: repeat(3, 2.4rem);
+    grid-auto-rows: 2.4rem;
+    gap: 2px;
+  }
+  .pad-title {
+    grid-column: 1 / -1;
+    color: #888;
+    font: 0.8rem monospace;
+  }
+  .padbtn {
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #333;
+    color: #eee;
+    font-size: 1.1rem;
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+  }
+  .padbtn.on {
+    background: #0a0;
+  }
+}

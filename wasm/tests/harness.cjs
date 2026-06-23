@@ -66,7 +66,7 @@ async function boot() {
 
   // Match the browser entry (wasm/js/main.js): drop the emscripten-only dirs so
   // tests see the same filesystem root the board has. Shared ESM helper.
-  const { pruneRuntimeDirs } = await import("../js/fs.js");
+  const { pruneRuntimeDirs } = await import("../js/engine/fs.js");
   pruneRuntimeDirs(Module);
 
   const printed = () => output.join("\n");

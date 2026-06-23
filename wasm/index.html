@@ -4,37 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Harucom OS (wasm)</title>
-  <style>
-    body { font-family: sans-serif; margin: 1.5rem; background: #111; color: #eee; }
-    h1 { font-size: 1.1rem; }
-    /* The DVI text surface is 640x480; scale it up with crisp (nearest) pixels. */
-    #screen { width: 640px; height: 480px; image-rendering: pixelated;
-              background: #000; border-radius: 4px; display: block; }
-    #out { background: #000; color: #0f0; padding: 1rem; border-radius: 4px;
-           white-space: pre-wrap; font-family: "Source Code Pro", monospace;
-           min-height: 4rem; margin-top: 1rem; }
-    #kbddbg { color: #888; font-family: monospace; font-size: 0.8rem;
-              margin-top: 0.5rem; min-height: 1rem; }
-    #pads { display: flex; gap: 2rem; margin-top: 0.5rem; }
-    .pad { display: grid; grid-template-columns: repeat(3, 2.4rem);
-           grid-auto-rows: 2.4rem; gap: 2px; }
-    .pad-title { color: #888; font: 0.8rem monospace; grid-column: 1 / -1; }
-    .padbtn { font-size: 1.1rem; background: #333; color: #eee;
-              border: 1px solid #555; border-radius: 4px; cursor: pointer;
-              user-select: none; touch-action: none; }
-    .padbtn.on { background: #0a0; }
-  </style>
+  <!-- style.css is built from css/app.css by `rake wasm:css` (Tailwind v4). -->
+  <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <h1>Harucom OS (wasm): Phase 2 (DVI text on canvas)</h1>
+<body class="m-6 bg-base font-sans text-fg">
+  <h1 class="text-[1.1rem]">Harucom OS (wasm): Phase 2 (DVI text on canvas)</h1>
   <canvas id="screen" width="640" height="480"></canvas>
-  <div id="kbddbg"></div>
-  <div id="pads"></div>
-  <pre id="out"></pre>
+  <div id="kbddbg" class="mt-2 min-h-[1rem] font-mono text-[0.8rem] text-[#888]"></div>
+  <div id="pads" class="mt-2 flex gap-8"></div>
+  <pre id="out" class="mt-4 min-h-[4rem] whitespace-pre-wrap rounded bg-black p-4 font-mono text-term-green"></pre>
 
   <!-- harucom.js (classic script) defines the global createHarucomModule factory;
-       main.js (ES module) boots the VM and wires the display / keyboard / audio /
-       pad modules under js/. -->
+       main.js (ES module) boots the VM and wires the Engine facade under js/. -->
   <script src="harucom.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>

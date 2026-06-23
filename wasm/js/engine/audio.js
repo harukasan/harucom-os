@@ -11,8 +11,9 @@
 // Install audio. Returns { startAudio, pump }: startAudio boots the AudioContext
 // (must be called from a user gesture), and pump is called once per frame by the
 // run loop (a no-op until the worklet is running). Also starts itself on a canvas
-// click or any keydown.
-export function installAudio(Module, canvas) {
+// click or any keydown. onDiag, when given, is called about once a second with
+// { level, underruns } so the facade can surface worklet buffer health.
+export function installAudio(Module, canvas, { onDiag } = {}) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let audioCtx = null, audioNode = null; // kept alive so the node is not GC'd
   let pumpFn = () => {};                  // real pump installed once the worklet loads
@@ -98,6 +99,7 @@ export function installAudio(Module, canvas) {
       setInterval(() => {
         console.log("audio diag: level=" + workletLevel + " underruns=" + workletUnder +
                     " pumps/s=" + pumpCount + " maxWant=" + maxWant);
+        if (onDiag) onDiag({ level: workletLevel, underruns: workletUnder });
         pumpCount = 0; maxWant = 0;
       }, 1000);
     });

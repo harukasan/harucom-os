@@ -17,16 +17,38 @@ Ruby で動く」。
 
 ## 現在の状態（branch: `wasm-funicular`）
 
-- `wasm-text-mode` から分岐。**コミットはまだ無い**(このプラン文書のみ未追跡。作業ツリーは
-  他に変更なし)。ベースラインは緑(`build/wasm/` ビルド済み、`rake wasm:test` = **21/21 PASS**、
-  emcc 6.0.0 / node 利用可)。
-- **計画は Phase 1〜4 まで確定済み**。前提調査も完了(下記「確認済みの事実」)。新セッションは
-  再調査・再設計不要で、Phase 1 から実装に入れる。
-- **再開ポイント = Phase 1 未着手**。コードは現状(488 行のブラウザ JS + index.html の
-  インライン CSS)のまま。
+- `wasm-text-mode` から分岐。プラン文書のコミット(`d8c5237`)+ Phase 1 のコミット 1 件。
+- **Phase 1 実装・コミット済み(ブラウザ目視待ち)**。`rake wasm:build` 緑、
+  `rake wasm:test` = **28/28 PASS**(21 + 純ロジック 7)、emcc 6.0.0 / node / Tailwind v4.3.1 利用可。
+  wasm サイズはベースラインと同一(gem 変更なし)。
+- **計画は Phase 1〜4 まで確定済み**。前提調査も完了(下記「確認済みの事実」)。
+- **再開ポイント = Phase 2 未着手**(funicular gem 組み込み + `distclean` 再ビルド検証)。
 - 確定した主な決定: 単一 VM(`picoruby-funicular` 組み込み)/ CSS は Tailwind v4 /
   Phase 4 は devtools 風のタブ付きパネル UI(ホスト `Harucom::UI::Panels`、機能は自己登録
   `Panel`、ドック位置 下/右 切替)/ UI Ruby は MEMFS ソース + `require` でホットリロード。
+
+### Phase 1 で確定した実装事実（再開時の前提）
+
+- ブラウザ JS は `wasm/js/engine/`(命令的 Engine 層)+ 薄い `wasm/js/main.js`(合成ルート)に分離。
+  Engine は `createEngine(Module, { canvas })`(`engine/index.js`)が facade で、デバイス系
+  (`display` `keyboard` `audio` `audio-worklet` `pads` `runloop` `fs`)を内包。
+- facade の公開面: コマンド `start()` / `setPad(pad,dir,down)` / `startAudio()` / `print(line)` /
+  プロパティ `canvas`、購読 `on(event, cb)`。イベントは `print`(stdout/stderr 1 行) /
+  `frame`(DVI frame count) / `audio`({ level, underruns }) / `keys`(キーボードデバッグ文字列)。
+  `print` は双方向(emcc が `Module.print` を構築時に確定するため、main が `Module.print` を
+  `engine.print()` に転送 → facade が `print` イベントで再放出)。
+- 純ロジックは DOM 非依存に抽出: `engine/hid.js`(`HID`/`MOD`/`usageFor`)、
+  `engine/pad-ladder.js`(`PAD_CAL`/`PAD_G`/`padRaw`)。node 単体テスト
+  (`tests/hid.test.cjs` / `tests/pad-ladder.test.cjs`)あり。
+- イベントバスは `engine/events.js`(`createEventBus()` → `{ on, emit }`)。
+- pads は状態(`createPads`)と DOM 構築(`installPadDom`)を分離。Phase 1 の `#pads` は
+  main が `installPadDom` で構築し `engine.setPad` を駆動。Phase 3 で funicular Pads に置換予定。
+- CSS は Tailwind v4 standalone CLI。入力 `wasm/css/app.css`(`@import "tailwindcss" source(none);`
+  + `@source "../index.html"` + `@theme` トークン `--color-base/-fg/-term-green` + `@layer base` の
+  `#screen` + `@layer components` の `.pad`/`.padbtn`/`.padbtn.on`)。出力 `build/wasm/style.css`。
+  `rake wasm:css`(`wasm:build` から呼ばれる)で生成、`wasm:server` は `--watch`。
+  `index.html` の静的 chrome はユーティリティクラス化済み(`@tailwindcss/cli` は wasm/package.json の devDeps)。
+- テスト harness の fs import は `../js/engine/fs.js` に更新済み。wasm export 名・export 契約は不変。
 
 ## ユーザー方針 / 決定事項
 
@@ -167,39 +189,35 @@ end
 作る。**挙動は現状と完全に同一**に保つ。現状の `wasm/js/` は責務分割が良好なので、
 束ねる facade と純ロジック抽出が主作業。
 
-- [ ] `wasm/js/engine/` を作り、デバイス系モジュールを移動
+- [x] `wasm/js/engine/` を作り、デバイス系モジュールを移動
       (`display.js` `keyboard.js` `audio.js` `audio-worklet.js` `pads.js`
       `runloop.js` `fs.js`)。
-- [ ] 純ロジックを DOM 非依存モジュールに抽出(host テスト可能に):
+- [x] 純ロジックを DOM 非依存モジュールに抽出(host テスト可能に):
   - `engine/hid.js`: `HID` / `MOD` テーブル + `usageFor`(`keyboard.js` より)。
-    テストハーネスの `hidForChar` と将来共有可能。
   - `engine/pad-ladder.js`: `PAD_CAL` / `PAD_G` / `padRaw`(`pads.js` より)。
-- [ ] `engine/index.js` に facade `createEngine(Module, { canvas })` を実装:
-  - 内部で display/keyboard/audio/pads/runloop を合成。
-  - 公開 API: `start()` / `setPad(pad, dir, down)` / `startAudio()` /
-    `on(event, cb)` / `canvas`。
+- [x] `engine/index.js` に facade `createEngine(Module, { canvas })` を実装:
+  - 内部で display/keyboard/audio/pads/runloop を合成(VM init + prune も内包)。
+  - 公開 API: `start()` / `setPad(pad, dir, down)` / `startAudio()` / `print(line)` /
+    `on(event, cb)` / `canvas`。イベントバスは `engine/events.js`。
   - イベント: `print`(stdout/stderr 1 行) / `frame`(frame count) /
-    `audio`(level/underruns 診断)。`print` は今 `main.js` が `Module.print` で
-    `#out` に直書きしている経路を facade のイベントに移す。
-- [ ] `main.js` を薄い合成ルートにする: Module 生成 → `createEngine` →
-      **現状の静的 DOM**(`#out` `#kbddbg` `#pads`)に結線。挙動は不変
+    `audio`({ level, underruns }) / `keys`(キーボードデバッグ)。`print` は双方向
+    (`Module.print` を `engine.print()` に転送 → facade が `print` イベントで再放出)。
+- [x] `main.js` を薄い合成ルートにする: Module 生成 → `createEngine` →
+      **現状の静的 DOM**(`#out` `#kbddbg` `#pads`)に結線。挙動不変
       (Phase 3 でこの DOM 結線を funicular Shell に差し替える)。
-- [ ] テスト整合: `tests/harness.cjs` は `../js/fs.js` と wasm exports を直接参照。
-      `fs.js` の import パス(移動するなら 1 行修正)と export 契約を維持。
-      **wasm export 名は不変**。
-- [ ] CSS をインライン `<style>` から抽出し **Tailwind を導入**:
-  - `wasm/package.json` に `@tailwindcss/cli` を追加。`wasm/css/app.css`
-    (`@import "tailwindcss";` + `@theme` トークン + canvas 基盤の `@layer base`)を作成。
-    `@source` に `wasm/index.html` を指定。
-  - `Rakefile` に `wasm:css`(`tailwindcss -i wasm/css/app.css -o build/wasm/style.css
-    --minify`)を追加し `wasm:build` から呼ぶ。`stage_index!` が `style.css` を配置、
-    `wasm:server` は `--watch`。`index.html` から `<link>` 参照。
-  - 現状の静的 chrome をユーティリティクラス化(見た目不変)。
+- [x] テスト整合: `tests/harness.cjs` の fs import を `../js/engine/fs.js` に更新。
+      export 契約・**wasm export 名は不変**。
+- [x] CSS をインライン `<style>` から抽出し **Tailwind を導入**:
+  - `wasm/package.json` に `@tailwindcss/cli`(v4.3.1)。`wasm/css/app.css`
+    (`@import "tailwindcss" source(none);` + `@source` + `@theme` + `@layer base`/`components`)。
+  - `Rakefile` に `wasm:css` を追加し `wasm:build`/`wasm:server` から呼ぶ
+    (`tailwind_command` ヘルパ)。`wasm:server` は `--watch`。`index.html` から `<link>`。
+  - 静的 chrome をユーティリティクラス化(見た目不変)。
 
 受け入れ条件(Phase 1 完了ゲート):
-- [ ] `rake wasm:build && rake wasm:test` が緑(OS コアの smoke 不変)。
-- [ ] `rake wasm:server` でブラウザの表示・入力・音声・パッドが現状と同一(目視)。
-- [ ] 抽出した純ロジックに node 単体テストを追加(DOM 不要)。
+- [x] `rake wasm:build && rake wasm:test` が緑(28/28、OS コアの smoke 不変)。
+- [ ] `rake wasm:server` でブラウザの表示・入力・音声・パッドが現状と同一(目視 = **要ユーザー確認**)。
+- [x] 抽出した純ロジックに node 単体テストを追加(`hid.test.cjs` / `pad-ladder.test.cjs`、DOM 不要)。
 
 ## Phase 2: funicular の組み込み（素通しビルド検証）
 

@@ -1,32 +1,31 @@
-// ADC pads: on-screen D-pads -> resistor-ladder value -> wasm.
+// ADC pads: D-pad direction state -> resistor-ladder value -> wasm.
 //
-// The board has two resistor-ladder pads read over ADC (Board::Pad). Each
-// on-screen D-pad button maps to a direction; the pressed set is converted to
-// the ADC value the ladder would produce (parallel resistance), matching
-// Board::Pad's calibration table so its decode returns the right buttons.
+// The board has two resistor-ladder pads read over ADC (Board::Pad). The
+// pad-ladder math (padRawValue) lives in pad-ladder.js (pure, testable). createPads
+// owns the per-pad pressed mask and pushes the decoded ADC value to wasm; it is
+// the single source of pad state. installPadDom builds the on-screen D-pads and
+// drives createPads' setPad (Phase 3 replaces the DOM with a funicular Pads
+// component that calls the same setPad).
 
-const PAD_CAL = [2000, 2760, 3300, 3646]; // single RIGHT/UP/DOWN/LEFT raw
-const PAD_G = PAD_CAL.map((c) => 4095 / c - 1);
+import { padRawValue } from "./pad-ladder.js";
 
-function padRaw(mask) {
-  if (!mask) return 4095; // idle: pulled to 3V3
-  let s = 0;
-  for (let i = 0; i < 4; i++) if (mask & (1 << i)) s += PAD_G[i];
-  return Math.round(4095 / (s + 1));
-}
-
-// Build the on-screen D-pads under padsEl and feed their state to the wasm ADC
-// shim. startAudio is invoked on a press so a pad tap also satisfies the audio
-// user-gesture requirement.
-export function installPads(Module, padsEl, startAudio) {
-  if (!padsEl) return;
-
+// Own the pad state. Returns { setPad(pad, dir, down) } that updates the pressed
+// mask and writes the ladder's raw ADC value to the wasm pad shim.
+export function createPads(Module) {
   const padMask = [0, 0];
-  function setPadButton(pad, dir, down) {
+  function setPad(pad, dir, down) {
     if (down) padMask[pad] |= (1 << dir);
     else padMask[pad] &= ~(1 << dir);
-    Module._harucom_pad_set(pad, padRaw(padMask[pad]));
+    Module._harucom_pad_set(pad, padRawValue(padMask[pad]));
   }
+  return { setPad };
+}
+
+// Build the on-screen D-pads under padsEl and drive setPad from their press
+// state. startAudio is invoked on a press so a pad tap also satisfies the audio
+// user-gesture requirement.
+export function installPadDom(padsEl, { setPad, startAudio }) {
+  if (!padsEl) return;
 
   // dir constants: RIGHT=0, UP=1, DOWN=2, LEFT=3; arranged as a cross.
   const LAYOUT = [
@@ -51,12 +50,12 @@ export function installPads(Module, padsEl, startAudio) {
       const press = (e) => {
         e.preventDefault();
         startAudio(); // a pad tap is a user gesture too
-        setPadButton(pad, b.dir, true);
+        setPad(pad, b.dir, true);
         btn.classList.add("on");
       };
       const release = (e) => {
         e.preventDefault();
-        setPadButton(pad, b.dir, false);
+        setPad(pad, b.dir, false);
         btn.classList.remove("on");
       };
       btn.addEventListener("pointerdown", press);
