@@ -7,7 +7,7 @@ const assert = require("node:assert/strict");
 const { boot } = require("./harness.cjs");
 
 describe("audio synth + pull port", () => {
-  let got, spread, maxDelta, sineMaxDelta, offMaxDelta;
+  let got, spread, rSpread, maxDelta, sineMaxDelta, offMaxDelta;
   before(async () => {
     const { Module, typeString, hidType, drive, ENTER } = await boot();
 
@@ -22,6 +22,7 @@ describe("audio synth + pull port", () => {
     got = Module._harucom_audio_pull(lPtr, rPtr, N);
     const H = Module.HEAPF32;
     let min = Infinity, max = -Infinity;
+    let rmin = Infinity, rmax = -Infinity;
     maxDelta = 0;
     let prev = H[lPtr >> 2];
     for (let i = 0; i < N; i++) {
@@ -31,8 +32,12 @@ describe("audio synth + pull port", () => {
       const d = Math.abs(v - prev);
       if (d > maxDelta) maxDelta = d;
       prev = v;
+      const rv = H[(rPtr >> 2) + i];
+      if (rv < rmin) rmin = rv;
+      if (rv > rmax) rmax = rv;
     }
     spread = max - min;
+    rSpread = rmax - rmin;
 
     // Regression: the JS pump pulls a full block each frame, over-pulling the
     // ring, so harucom_audio_pull hits an underrun every call. It must not run
@@ -91,6 +96,12 @@ describe("audio synth + pull port", () => {
   });
   it("oscillates (square wave amplitude spread)", () => {
     assert.ok(spread > 0.5, `expected spread >0.5, got ${spread.toFixed(2)}`);
+  });
+  // Regression: pwm_audio_init must center channel pan like the board. A
+  // zero-initialized pan is L-only, so the right channel stays silent and audio
+  // plays from the left speaker only.
+  it("outputs the right channel (centered pan, not L-only)", () => {
+    assert.ok(rSpread > 0.5, `expected R spread >0.5, got ${rSpread.toFixed(2)}`);
   });
   // The RC low-pass rounds the square's edges, so the largest sample-to-sample
   // step is well below the peak-to-peak swing; an unfiltered square would jump

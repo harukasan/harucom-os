@@ -38,12 +38,15 @@ static float lp_l = 0.0f, lp_r = 0.0f;   // RC low-pass state
 static float dcx_l = 0.0f, dcy_l = 0.0f; // DC-block state (prev input/output), L
 static float dcx_r = 0.0f, dcy_r = 0.0f; // DC-block state, R
 
-// Reset the ring.
+// Center all channels (the zero-initialized pan is L-only) and reset the ring.
 void
 pwm_audio_init(uint8_t l_pin, uint8_t r_pin)
 {
   (void)l_pin;
   (void)r_pin;
+  for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
+    pwm_audio_set_pan(i, 8);
+  }
   pwm_audio_rd = 0;
   pwm_audio_wr = 0;
 }
