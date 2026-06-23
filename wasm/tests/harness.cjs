@@ -64,6 +64,11 @@ async function boot() {
   });
   assert.equal(Module._harucom_init(), 0, "harucom_init (VM + MEMFS rootfs + scheduler)");
 
+  // Match the browser entry (wasm/js/main.js): drop the emscripten-only dirs so
+  // tests see the same filesystem root the board has. Shared ESM helper.
+  const { pruneRuntimeDirs } = await import("../js/fs.js");
+  pruneRuntimeDirs(Module);
+
   const printed = () => output.join("\n");
 
   // Drive the cooperative scheduler the way the browser run loop does: tick the

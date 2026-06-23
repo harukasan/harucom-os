@@ -104,6 +104,12 @@ a58fd24 Make the wasm scheduler preemptive like the board
   fallback してタブを固める）ため、ブート/IRB/poll ループは全て `Task.new` 内で回る。
 - **FS**: emscripten MEMFS（mruby-io の File/Dir）。`harucom_wasm.c::deploy_rootfs` が
   毎ロード rootfs を再 deploy。**littlefs/VFS は使わない**（ブートで mount しない）。
+  emscripten が自動生成する `/home`・`/tmp`・`/proc` は実機の LittleFS root に無いので、
+  `wasm/js/fs.js::pruneRuntimeDirs` が起動直後に除去（`main.js` と test の `harness.cjs`
+  両方が呼ぶ。FS は emcc の `EXPORTED_RUNTIME_METHODS` に追加済み）。`/proc/self/fd` は
+  emscripten の procfs マウントで POSIX rmdir 不可だが `FS.rmdir` を bottom-up で呼べば除ける。
+  **`/dev` は残す**: posix RNG/mbedtls が `/dev/urandom` を読む（実機は HW RNG なので `/dev` 無し）。
+  これが wasm と実機の唯一の root 差分。`wasm/tests/rootfs.test.cjs` で検証。
 - **ブート連鎖**: `harucom_init`（C）→ `picorb_create_task(ruby_bootstrap)` →
   `$LOAD_PATH=["/lib"]; load "/system.rb"`。`load` は picoruby-require 経由で
   **Sandbox タスク**内で system.rb を実行し、ブートタスクは `Sandbox#wait` の

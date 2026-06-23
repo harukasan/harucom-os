@@ -9,6 +9,7 @@ import { installKeyboard } from "./keyboard.js";
 import { installAudio } from "./audio.js";
 import { installPads } from "./pads.js";
 import { startRunLoop } from "./runloop.js";
+import { pruneRuntimeDirs } from "./fs.js";
 
 const outEl = document.getElementById("out");
 const append = (s) => { outEl.textContent += s; };
@@ -23,6 +24,7 @@ window.createHarucomModule({
     append("\n[harucom_init failed]\n");
     return;
   }
+  pruneRuntimeDirs(Module); // drop the emscripten-only /home /tmp /proc dirs
 
   const canvas = document.getElementById("screen");
   const display = createDisplay(Module, canvas);

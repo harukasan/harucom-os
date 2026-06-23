@@ -163,7 +163,7 @@ namespace :wasm do
       _harucom_pad_set
       _malloc _free
     ].join('","') + '"]'
-    runtime  = '["' + %w[ccall cwrap UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8 HEAPF32].join('","') + '"]'
+    runtime  = '["' + %w[ccall cwrap UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8 HEAPF32 FS].join('","') + '"]'
     sh "emcc", "-g0", "-O2",
        "-sWASM=1", "-sMODULARIZE=1", "-sEXPORT_NAME=createHarucomModule",
        "-sEXPORTED_RUNTIME_METHODS=#{runtime}",
