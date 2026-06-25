@@ -8,14 +8,14 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="m-6 bg-base font-sans text-fg">
-  <h1 class="text-[1.1rem]">Harucom OS (wasm): Phase 2 (DVI text on canvas)</h1>
+  <h1 class="text-[1.1rem]">Harucom OS (wasm)</h1>
+  <!-- #screen is the Engine-owned DVI canvas; #app is the funicular Shell mount
+       point (Console / KbdDebug / Pads), a sibling of the canvas. -->
   <canvas id="screen" width="640" height="480"></canvas>
-  <div id="kbddbg" class="mt-2 min-h-[1rem] font-mono text-[0.8rem] text-[#888]"></div>
-  <div id="pads" class="mt-2 flex gap-8"></div>
-  <pre id="out" class="mt-4 min-h-[4rem] whitespace-pre-wrap rounded bg-black p-4 font-mono text-term-green"></pre>
+  <div id="app"></div>
 
   <!-- harucom.js (classic script) defines the global createHarucomModule factory;
-       main.js (ES module) boots the VM and wires the Engine facade under js/. -->
+       main.js (ES module) boots the VM, exposes the bridge, and starts the UI. -->
   <script src="harucom.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>

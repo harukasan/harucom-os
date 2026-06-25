@@ -7,6 +7,7 @@
 @import "tailwindcss" source(none);
 
 @source "../index.html";
+@source "../ruby";
 
 /* Retro palette tokens. Phase 4 extends these (pad / tab / panel colors). */
 @theme {
@@ -29,8 +30,33 @@
 }
 
 @layer components {
-  /* On-screen D-pads are built by js/engine/pads.js. The pressed toggle moves to
-   * the funicular styles DSL in Phase 3; until then it stays a plain rule. */
+  /* The funicular Shell chrome (mrblib at wasm/ruby/lib/shell.rb). These mirror
+   * the former static #out / #kbddbg / #pads styling. */
+  .console {
+    margin-top: 1rem;
+    min-height: 4rem;
+    max-height: 18rem;
+    overflow: auto;
+    padding: 1rem;
+    border-radius: 4px;
+    background: #000;
+    color: #0f0;
+    white-space: pre-wrap;
+    font-family: ui-monospace, monospace;
+  }
+  .kbddbg {
+    margin-top: 0.5rem;
+    min-height: 1rem;
+    color: #888;
+    font: 0.8rem ui-monospace, monospace;
+  }
+  .pads {
+    margin-top: 0.5rem;
+    display: flex;
+    gap: 2rem;
+  }
+
+  /* On-screen D-pads. The pressed toggle is a Phase 4 styles-DSL item. */
   .pad {
     display: grid;
     grid-template-columns: repeat(3, 2.4rem);

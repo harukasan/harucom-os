@@ -159,6 +159,9 @@ namespace :wasm do
     cp File.join(WASM_DIR, "index.html"), WASM_INDEX
     rm_rf File.join(WASM_OUT, "js")
     cp_r File.join(WASM_DIR, "js"), File.join(WASM_OUT, "js")
+    # funicular UI sources: main.js fetches these and writes them into MEMFS /_web.
+    rm_rf File.join(WASM_OUT, "ruby")
+    cp_r File.join(WASM_DIR, "ruby"), File.join(WASM_OUT, "ruby")
   end
 
   desc "Build build/wasm/harucom.{js,wasm} (CLEAN=1 to rebuild presym/host from scratch)"
