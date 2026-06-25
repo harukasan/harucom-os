@@ -17,16 +17,18 @@ Ruby で動く」。
 
 ## 現在の状態（branch: `wasm-funicular`）
 
-- `wasm-text-mode` から分岐。プラン文書(`d8c5237`)+ Phase 1 + Phase 2 のコミット。
-- **Phase 1・2 完了・コミット済み**(Phase 1 はユーザー目視承認済み)。`rake wasm:build` 緑、
-  `rake wasm:test` = **30/30 PASS**(OS コア 21 + 純ロジック 7 + funicular 2)、
-  emcc 6.0.0 / node / Tailwind v4.3.1 利用可。funicular 入りで wasm = 4260558 bytes。
+- `wasm-text-mode` から分岐。プラン文書(`d8c5237`)+ Phase 1〜3 のコミット。
+- **Phase 1・2・3 完了・コミット済み**(Phase 1/3 はユーザー目視承認済み)。`rake wasm:build` 緑、
+  `rake wasm:test` = **35/35 PASS**、emcc 6.0.0 / node / Tailwind v4.3.1 利用可。
+  コミット: Phase 1 `d317351`(Engine facade + Tailwind v4)/ Phase 2 `c1ae2da`(funicular リンク)/
+  Phase 3a `b615c51`(`/_web` から Shell ロード + bridge ポーリング)/
+  Phase 3b `519ef0f`(ブラウザ結線 + コンポーネント分割)。
 - **計画は Phase 1〜4 まで確定済み**。前提調査も完了(下記「確認済みの事実」)。
-- **再開ポイント = Phase 3 未着手**(現 chrome の funicular 化。Phase 2 で
-  ヘッドレス UI テストが可能と判明したので、jsdom で各コンポーネントを検証しながら進められる)。
-- 確定した主な決定: 単一 VM(`picoruby-funicular` 組み込み)/ CSS は Tailwind v4 /
-  Phase 4 は devtools 風のタブ付きパネル UI(ホスト `Harucom::UI::Panels`、機能は自己登録
-  `Panel`、ドック位置 下/右 切替)/ UI Ruby は MEMFS ソース + `require` でホットリロード。
+- **再開ポイント = Phase 4 未着手**(devtools 風タブ付きパネル UI)。Phase 3 で funicular UI が
+  ブラウザで動き headless テストも整ったので、Phase 4 は Panel 化のリファクタが中心。
+- 確定した主な決定: 単一 VM(`picoruby-funicular`)/ CSS は Tailwind v4 / Phase 4 = devtools 風
+  タブ付きパネル UI(ホスト `Harucom::UI::Panels`、自己登録 `Panel`、ドック 下/右 切替)/
+  **UI Ruby は `/_web/` に置き `require`(可視のまま許容、FSRoot/chroot は不採用 — 「決定事項」節)**。
 
 ### Phase 1 で確定した実装事実（再開時の前提）
 
@@ -256,33 +258,43 @@ end
 - 実ページ `wasm/index.html` への `<div id="app">` 追加と funicular Shell の起動。
 - UI Ruby の置き場所(MEMFS ソース + `require`)と起動タスク。
 
-## Phase 3: プロトタイプ（現 chrome の funicular 化）
+## Phase 3: プロトタイプ（現 chrome の funicular 化）— 完了
 
 目的: 現状の chrome(コンソール + パッド + キーボードデバッグ)を funicular の
 Ruby コンポーネントで再実装し、同一 VM で OS + UI が同居することを示す。
 
-- [ ] UI Ruby の置き場所と起動を決定(下「未決事項」)。第一候補: wasm 専用 mrbgem
-      `harucom-ui-wasm`(または `harucom-os-wasm` の mrblib)に置き、wasm の libmruby
-      にのみコンパイル。**ボード build には含めない**。OS 起動後に別の mruby Task として起動。
-- [ ] Engine↔Shell イベント橋を実装:
-  - Engine→Shell: `print` / `frame` / `audio` を `picoruby-wasm` のコールバック
-    (`js_register_generic_callback` 等)で Ruby に push、または毎フレームポーリングする
-    JS グローバルで渡す。
-  - Shell→Engine: パッド押下 → `Engine.setPad`、音声開始、reset を JS bridge で呼ぶ。
-- [ ] コンポーネント実装:
-  - `ConsolePane`: `print` を購読して行を追記、自動スクロール。
-  - `KbdDebug`: 最後のキー/HID/held を表示。
-  - `Pads`: `pads.js` の DOM 生成を置換。押下で `Engine.setPad`。
-  - (任意) `StatusBar`: frame / fps / audio underruns。
-- [ ] canvas を Engine 所有の安定リーフとして据え置き、Shell はその兄弟コンテナに描画。
-- [ ] Tailwind の `@source` に funicular UI の `.rb` 配置先を追加し、状態トグル
-      (`.padbtn.on` 等)を `styles` DSL の `base:/active:` へ移して JS の `classList`
-      操作を置換。CSS ルール自体は Tailwind 生成の `style.css` に残す。
+- [x] UI Ruby の置き場所と起動を決定 → **`/_web/lib/*.rb`(可視のまま許容)を `require`**。
+      `wasm/ruby/` を静的配信 → `main.js` fetch → `engine/ui.js` が MEMFS `/_web/lib` へ書込 →
+      C export **`harucom_run_ruby(code)`** でタスク起動して `load`。emcc 再ビルド不要で反復。
+- [x] Engine↔Shell イベント橋を実装(`engine/bridge.js` の `window.__harucomBridge`):
+  - Engine→Shell: **ポーリング**。`print`/`keys` をバッファ、Shell の `ui_poll` タスクが毎パス
+    `shell.tick` で drain → `patch`。(`print` は mid-`mrb_run_step` 発火 → 同期 JS→Ruby は VM 再入で
+    不可、ゆえポーリング。funicular の DOM イベントコールバックは enqueue されるので安全。)
+  - Shell→Engine: 直呼び(`bridge.setPad` / `bridge.startAudio`)。
+- [x] コンポーネント実装(`wasm/ruby/lib/`、ファイル分割):
+  - `ConsolePane`(`console_pane.rb`): `props[:lines]` を `pre-wrap` で表示(`pre` タグが無いので `div`)。
+  - `KbdDebug`(`kbd_debug.rb`): `props[:info]` を表示。
+  - `Pads`(`pads.rb`): `onpointerdown/up` → `bridge.setPad`。クロス配置。
+  - 入口 `shell.rb`: 上記を `require`、`Shell` ルート(`tick` で drain)、`Funicular.start` + `ui_poll` タスク。
+  - (任意) `StatusBar`: 未実装。
+- [x] canvas(`#screen`)は Engine 所有のまま、Shell は兄弟コンテナ `#app` に描画。`index.html` の
+      静的 `#out`/`#kbddbg`/`#pads` は撤去。
+- [x] Tailwind `@source` に `wasm/ruby` を追加。pane のスタイルは `app.css` `@layer components`
+      (`.console`/`.kbddbg`/`.pads`)。`.padbtn.on` の `styles` DSL 化は Phase 4 へ持ち越し。
 
 受け入れ条件:
-- [ ] 見た目・操作感が現状と等価で、chrome が Ruby 記述・OS と同一 VM で動く。
-- [ ] `rake wasm:test` の OS コアテストは緑のまま。
-- [ ] `rake wasm:server` で目視等価。
+- [x] 見た目・操作感が現状と等価で、chrome が Ruby 記述・OS と同一 VM で動く(ユーザー目視承認)。
+- [x] `rake wasm:test` の OS コアテストは緑のまま(35/35)。
+- [x] `rake wasm:server` で目視等価(コンソール二重改行のみ修正済み)。
+
+### Phase 3 の残課題 / メモ（Phase 4 へ）
+
+- `engine/pads.js` の `installPadDom` は funicular Pads で置換され**未使用(dead)**。Phase 4 で整理候補
+  (`createPads` は `engine.setPad` で使用中、残す)。
+- `main.js` の UI ファイル一覧はハードコード。コンポーネント増減が増えるならマニフェスト化を検討。
+- `Pads`/`Shell` の `bridge` アクセサは重複。Phase 4 の Engine Ruby facade(`Harucom.engine`)へ寄せる。
+- harness 注意: `JS.global` は `window`(test では `globalThis.window` に bridge を置く)。funicular の
+  DOM イベントは enqueue なので dispatch 後に `drive` が要る。
 
 ## Phase 4: UI とスタイルの整理（タブ付きパネル UI / devtools 風）
 
@@ -609,12 +621,12 @@ funicular / ブリッジ(submodule、組み込み対象):
 
 ## 未決事項（着手時に決める）
 
-- Engine→Shell のイベント転送(コールバック push かポーリングか)。
-- `#out` デバッグ枠を funicular コンポーネントとして残すか、リッチなコンソールに統合するか。
-- `picoruby-indexeddb` の vendor(Store 機能を使う場合のみ)。
-- Tailwind の `@source` 走査対象となる funicular UI `.rb` のソースが、css ビルド時に
-  ディスク上に存在すること(mrbc コンパイル後もソースは残る)を Phase 3 で確認。
-- レトロ配色を `@theme` トークンでどこまでモデル化するか(Phase 1 で確定)。
+- `picoruby-indexeddb` の vendor(funicular Store 機能を使う場合のみ。現状未使用)。
+- (Phase 4)Panel 間のスプリッタ・リサイズ、タブの `Funicular.router` 連動は任意拡張。
+- (Phase 4)レトロ配色 `@theme` トークンの拡張範囲(タブ/パネル/ドック色)。
+
+Phase 3 で解決済み: Engine→Shell の転送 = **ポーリング**(同期コールバックは VM 再入で不可)/
+`#out` デバッグ枠 = `ConsolePane` に置換 / `@source` に `wasm/ruby` 追加済み(`.rb` はディスク上に残る)。
 
 ## 進め方
 
