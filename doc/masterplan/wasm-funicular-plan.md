@@ -593,11 +593,22 @@ funicular / ブリッジ(submodule、組み込み対象):
   wasm build のみ)。
 - **jsdom + funicular DOM の不確実性**。ヘッドレスで UI を検証できない可能性(Phase 2 で判断)。
 
+## 決定事項（UI Ruby の置き場所）
+
+- **UI Ruby は MEMFS の `/_web/` に配置し `require` で読む(可視のまま許容)**。
+  `$LOAD_PATH` に `/_web/lib` を足す。funicular framework 自体は gem として libmruby に入る
+  (FS 不要)。emcc 再ビルド不要で反復(rootfs と同じ仕組み)。OS の `ls /` に `/_web` が出るが許容
+  (`_web` は Web ツール慣例: Jekyll `_site` / Next `_next` と同じく「ブラウザ側フロントエンド」の合図)。
+  別 Task としての起動フックは要設計。
+- **FSRoot/chroot 案は調査の上で不採用**。OS の Ruby File/Dir/IO を全て wrap して `/system`
+  配下に閉じ込める方式は、包み漏れ(`Dir.exists?`/`rmdir`/`unlink` alias、`FileTest`、`File::Stat` …)
+  が一つでもあると confinement が漏れる、挙動の footprint が大きく壊れやすい。emscripten/WasmFS に
+  chroot は無く、仮にあっても「プロセス全体・一方向」で「OS は閉じ込め / C(RNG・dict)と特権 UI ローダは
+  外も見える」という選択的可視性を表現できない。よって「明示ディレクトリ + 可視許容」を採用。
+  /dev・/dict.bin も従来どおり可視(prune が /dev を残す。元々許容)。
+
 ## 未決事項（着手時に決める）
 
-- UI Ruby の置き場所と起動方法。**Phase 4-F の推奨 = MEMFS ソース配置 + `require`**
-  (rootfs と同じ仕組み、emcc 再ビルド不要で反復)。funicular framework 自体は gem として
-  libmruby に入る。別 Task としての起動フックは要設計。
 - Engine→Shell のイベント転送(コールバック push かポーリングか)。
 - `#out` デバッグ枠を funicular コンポーネントとして残すか、リッチなコンソールに統合するか。
 - `picoruby-indexeddb` の vendor(Store 機能を使う場合のみ)。

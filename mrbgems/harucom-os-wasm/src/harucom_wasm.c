@@ -195,3 +195,14 @@ harucom_init(void)
    * returns 0 on success and -1 on error. */
   return picorb_create_task(ruby_bootstrap);
 }
+
+/* Enqueue a Ruby code string as a task on the same VM. The browser Engine calls
+ * this (after writing the funicular UI sources into MEMFS under /_web) to start
+ * and hot-reload the UI. Returns 0 on success, -1 on error. */
+EMSCRIPTEN_KEEPALIVE
+int
+harucom_run_ruby(const char *code)
+{
+  if (!global_mrb) return -1;
+  return picorb_create_task(code);
+}

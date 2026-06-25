@@ -182,7 +182,7 @@ namespace :wasm do
     # (wasm/tests/) can require() it. harucom_init / mrb_run_step / mrb_tick_wasm
     # are driven by the run loop in wasm/js/runloop.js.
     exported = '["' + %w[
-      _harucom_init _mrb_run_step _mrb_tick_wasm
+      _harucom_init _harucom_run_ruby _mrb_run_step _mrb_tick_wasm
       _harucom_dvi_framebuffer _harucom_dvi_width _harucom_dvi_height
       _harucom_dvi_frame_count
       _harucom_kbd_set_state
