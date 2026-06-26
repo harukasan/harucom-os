@@ -268,8 +268,9 @@ namespace :wasm do
     restager.abort_on_exception = false
     port = ENV["PORT"] || "8000"
     puts "Serving #{WASM_OUT} at http://localhost:#{port}/  (Ctrl-C to stop)"
-    sh "python3", "-m", "http.server", port, "--bind", "127.0.0.1",
-       "--directory", WASM_OUT
+    # devserver.py sends Cache-Control: no-store so a plain reload always picks up
+    # the restaged css / ruby / js (stock http.server caches them).
+    sh "python3", File.join(WASM_DIR, "devserver.py"), port, WASM_OUT
   end
 
   desc "Smoke-test the wasm build headlessly under Node (node:test runner)"

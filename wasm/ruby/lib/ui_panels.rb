@@ -20,11 +20,11 @@ module Harucom
       end
 
       styles do
-        bar "flex items-stretch border-b border-tab-border bg-panel-bg"
+        bar "flex items-stretch bg-bar-bg border-b border-border select-none"
         tabs "flex overflow-x-auto"
-        tab base: "px-3 py-1 text-xs cursor-pointer text-tab-inactive hover:text-fg whitespace-nowrap border-b-2 border-transparent",
-            active: "text-tab-active border-tab-border"
-        dockbtn "px-2 text-tab-inactive hover:text-fg cursor-pointer leading-none"
+        tab base: "px-3 py-1.5 text-xs uppercase cursor-pointer text-tab-inactive hover:text-fg hover:bg-panel-bg whitespace-nowrap",
+            active: "text-tab-active! bg-panel-bg"
+        dockbtn "px-2 flex items-center text-sm text-tab-inactive hover:text-fg cursor-pointer leading-none"
         body "flex-1 overflow-auto bg-panel-bg min-h-0"
       end
 
@@ -52,10 +52,13 @@ module Harucom
               end
             end
             div(class: "ml-auto flex items-center") do
-              button(class: s.dockbtn, onclick: -> { dock(:bottom) }) do
+              button(class: s.dockbtn, title: "Undocked", onclick: -> { dock(:undocked) }) do
+                "▢"
+              end
+              button(class: s.dockbtn, title: "Dock bottom", onclick: -> { dock(:bottom) }) do
                 "⊥"
               end
-              button(class: s.dockbtn, onclick: -> { dock(:right) }) do
+              button(class: s.dockbtn, title: "Dock right", onclick: -> { dock(:right) }) do
                 "⊣"
               end
             end

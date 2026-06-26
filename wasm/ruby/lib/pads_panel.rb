@@ -11,9 +11,11 @@ class PadsPanel < Harucom::UI::Panel
   LAYOUT = [["↑", 1, 2, 1], ["←", 3, 1, 2], ["→", 0, 3, 2], ["↓", 2, 2, 3]]
 
   styles do
-    wrap "flex gap-8 p-2"
-    pad "grid gap-0.5"
-    btn "w-10 h-10 rounded bg-pad text-fg text-lg select-none touch-none border border-gray-600 active:bg-pad-on"
+    wrap "flex gap-8 p-3"
+    col "flex flex-col items-center gap-1"
+    title "text-fg-dim text-xs"
+    grid "grid gap-1"
+    btn "w-10 h-10 rounded bg-pad text-fg text-lg flex items-center justify-center select-none touch-none border border-border hover:bg-border-hover active:bg-pad-on active:text-[#16161e]"
   end
 
   def press(pad, dir)
@@ -38,12 +40,15 @@ class PadsPanel < Harucom::UI::Panel
   end
 
   def render_pad(pad)
-    div(class: s.pad, style: "grid-template-columns:repeat(3,2.5rem);grid-auto-rows:2.5rem") do
-      i = 0
-      while i < LAYOUT.length
-        r = LAYOUT[i]
-        pad_button(pad, r[0], r[1], r[2], r[3])
-        i += 1
+    div(class: s.col) do
+      div(class: s.title) { "PAD#{pad}" }
+      div(class: s.grid, style: "grid-template-columns:repeat(3,2.5rem);grid-auto-rows:2.5rem") do
+        i = 0
+        while i < LAYOUT.length
+          r = LAYOUT[i]
+          pad_button(pad, r[0], r[1], r[2], r[3])
+          i += 1
+        end
       end
     end
   end

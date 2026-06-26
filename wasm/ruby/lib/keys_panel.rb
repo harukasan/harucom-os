@@ -5,7 +5,7 @@ class KeysPanel < Harucom::UI::Panel
   order 20
 
   styles do
-    pane "text-tab-inactive font-mono text-xs h-full overflow-auto p-2"
+    pane "text-fg-dim font-mono text-xs h-full overflow-auto p-2"
   end
 
   def initialize_state

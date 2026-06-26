@@ -7,9 +7,9 @@ class StatusPanel < Harucom::UI::Panel
   order 40
 
   styles do
-    pane "font-mono text-xs h-full overflow-auto p-2 text-fg"
-    row "py-0.5"
-    label "text-tab-inactive"
+    pane "font-mono text-xs h-full overflow-auto p-3 text-fg"
+    row "flex gap-2 py-0.5"
+    label "w-20 text-fg-dim"
   end
 
   def initialize_state
@@ -21,16 +21,17 @@ class StatusPanel < Harucom::UI::Panel
     on_engine(:audio) { |u| patch(underruns: u) }
   end
 
+  def stat(name, value)
+    div(class: s.row) do
+      span(class: s.label) { name }
+      span { value }
+    end
+  end
+
   def render
     div(id: "status", class: s.pane) do
-      div(class: s.row) do
-        span(class: s.label) { "frame " }
-        span { state.frame.to_s }
-      end
-      div(class: s.row) do
-        span(class: s.label) { "underruns " }
-        span { state.underruns.to_s }
-      end
+      stat("frame", state.frame.to_s)
+      stat("underruns", state.underruns.to_s)
     end
   end
 end

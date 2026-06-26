@@ -33,6 +33,21 @@ function findTab(label) {
   );
 }
 
+// A dock-mode button is a <button> whose text is the glyph (Float ⧉ / bottom ⊥ / right ⊣).
+function dockBtn(glyph) {
+  return [...globalThis.document.querySelectorAll("#app button")].find((b) => b.textContent === glyph);
+}
+
+// Dispatch a pointer event carrying client coordinates (jsdom's Event lacks them).
+function pointer(type, x, y) {
+  const e = new globalThis.window.Event(type, { bubbles: true });
+  Object.defineProperty(e, "clientX", { value: x });
+  Object.defineProperty(e, "clientY", { value: y });
+  e.pointerId = 1;
+  e.preventDefault = () => {};
+  return e;
+}
+
 describe("funicular Panel UI from /_web", () => {
   let h;
   const padCalls = [];
@@ -101,19 +116,60 @@ describe("funicular Panel UI from /_web", () => {
     assert.deepEqual(padCalls[0], [0, 1, true], JSON.stringify(padCalls));
   });
 
-  it("docks to the right, keeping the canvas and the active panel", () => {
-    // Switching dock re-renders App; Screen and Panels are preserved (preserve:
-    // true), so the canvas keeps its 2D context and the active tab (Pads, from
-    // the previous test) survives.
-    const dockRight = [...globalThis.document.querySelectorAll("#app button")]
-      .find((b) => b.textContent === "⊣");
-    assert.ok(dockRight, "right-dock button present");
-    dockRight.dispatchEvent(new globalThis.window.Event("click"));
+  it("resizes the bottom dock with the edge splitter", () => {
+    // The undocked default box resizes via CSS (no JS, untestable here); the
+    // bottom/right docks resize via the splitter, which is what this checks.
+    dockBtn("⊥").dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    const dock = globalThis.document.getElementById("dock");
+    const grip = globalThis.document.querySelector("#app .cursor-row-resize");
+    assert.ok(grip, "bottom splitter present");
+    grip.setPointerCapture = () => {};
+    grip.releasePointerCapture = () => {};
+
+    const before = dock.getAttribute("style"); // height:256px
+    grip.dispatchEvent(pointer("pointerdown", 0, 400));
+    h.drive(200);
+    grip.dispatchEvent(pointer("pointermove", 0, 360)); // drag up 40px -> +40 height
+    h.drive(200);
+    grip.dispatchEvent(pointer("pointerup", 0, 360));
+    h.drive(300);
+
+    assert.notEqual(dock.getAttribute("style"), before, "dock resized");
+    assert.match(dock.getAttribute("style"), /height:\d+px/, dock.getAttribute("style"));
+  });
+
+  it("switches docks (bottom then right), keeping the canvas and active panel", () => {
+    // Undocked -> bottom remounts Panels, so re-select Pads; bottom -> right is an
+    // edge-to-edge switch that preserves Panels (active tab survives), and the
+    // canvas (Screen) is preserved across every switch.
+    dockBtn("⊥").dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    findTab("Pads").dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    dockBtn("⊣").dispatchEvent(new globalThis.window.Event("click"));
     h.drive(800);
 
     const outer = globalThis.document.querySelector("#app > div");
     assert.match(outer.getAttribute("class"), /flex-row/, outer.getAttribute("class"));
     assert.ok(globalThis.document.querySelector("#app #screen-host canvas"), "canvas preserved");
-    assert.ok(globalThis.document.querySelector("#app #pads"), "active Pads panel preserved");
+    assert.ok(globalThis.document.querySelector("#app #pads"), "active Pads panel preserved across bottom->right");
+  });
+
+  it("clears the undocked box's CSS-resize size when docking (no giant splitter)", () => {
+    // Back to undocked, simulate a CSS resize leaving an inline size, then dock:
+    // the splitter reuses that DOM node and must not inherit width/height.
+    dockBtn("▢").dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    const box = globalThis.document.querySelector("#app .undock-box");
+    assert.ok(box, "undocked box present");
+    box.setAttribute("style", "width:700px;height:430px");
+
+    dockBtn("⊥").dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    const grip = globalThis.document.querySelector("#app .cursor-row-resize");
+    assert.ok(grip, "splitter present");
+    const style = grip.getAttribute("style") || "";
+    assert.doesNotMatch(style, /width|height/, `splitter inherited the box size: "${style}"`);
   });
 });
