@@ -152,6 +152,22 @@ namespace :wasm do
     sh(*tailwind_command("--minify"))
   end
 
+  # Write ruby/manifest.json listing the UI sources to stage and the panel
+  # modules to require. main.js fetches it, so adding a wasm/ruby/lib/*_panel.rb
+  # file makes a new tab appear without touching JS. Globs the staged tree.
+  def stage_ruby_manifest!
+    require "json"
+    lib = File.join(WASM_OUT, "ruby", "lib")
+    files = Dir.glob(File.join(lib, "*.rb")).sort.map { |f| "lib/#{File.basename(f)}" }
+    # Feature panels are *_panel.rb; the ui_* files are framework (the ui_panel.rb
+    # base would match the glob, so reject the ui_ prefix).
+    panels = Dir.glob(File.join(lib, "*_panel.rb")).sort
+                .map { |f| File.basename(f, ".rb") }
+                .reject { |n| n.start_with?("ui_") }
+    File.write(File.join(WASM_OUT, "ruby", "manifest.json"),
+               JSON.generate("files" => files, "panels" => panels))
+  end
+
   # Copy the static page and its ES modules next to the built module so
   # build/wasm/ is a self-contained directory the server can host.
   def stage_index!
@@ -162,6 +178,17 @@ namespace :wasm do
     # funicular UI sources: main.js fetches these and writes them into MEMFS /_web.
     rm_rf File.join(WASM_OUT, "ruby")
     cp_r File.join(WASM_DIR, "ruby"), File.join(WASM_OUT, "ruby")
+    stage_ruby_manifest!
+  end
+
+  # A coarse mtime signature of the staged source trees, so the dev server can
+  # restage when a .js / .rb / index.html edit changes it.
+  def stage_signature
+    Dir.glob([File.join(WASM_DIR, "index.html"),
+              File.join(WASM_DIR, "js", "**", "*"),
+              File.join(WASM_DIR, "ruby", "**", "*")]).sort.map do |f|
+      File.file?(f) ? File.mtime(f).to_f : 0.0
+    end
   end
 
   desc "Build build/wasm/harucom.{js,wasm} (CLEAN=1 to rebuild presym/host from scratch)"
@@ -214,13 +241,31 @@ namespace :wasm do
     unless File.exist?(WASM_WASM)
       abort "#{WASM_WASM} not found. Run `rake wasm:build` first."
     end
-    stage_index! # pick up any index.html / js edits without a full rebuild
+    stage_index! # pick up any index.html / js / ruby edits without a full rebuild
     # Rebuild style.css from css/app.css edits while serving, so style tweaks show
     # up on reload without a full wasm rebuild (--watch does an initial build on
-    # startup, so no separate one-shot is needed). index.html markup edits are
-    # staged once above, so changing the chrome structure needs a server restart.
+    # startup, so no separate one-shot is needed).
     watcher = spawn(*tailwind_command("--watch"))
     at_exit { Process.kill("TERM", watcher) rescue nil }
+    # Restage index.html / js / ruby on change, so editing the UI Ruby or the
+    # browser glue shows up on a plain reload (no emcc rebuild, no restart). The
+    # manifest is regenerated too, so dropping in a new *_panel.rb adds a tab.
+    restager = Thread.new do
+      sig = stage_signature
+      loop do
+        sleep 1
+        now = stage_signature
+        next if now == sig
+        sig = now
+        begin
+          stage_index!
+          puts "Restaged wasm/ (js/ruby/index.html change)"
+        rescue => e
+          warn "Restage failed: #{e.message}"
+        end
+      end
+    end
+    restager.abort_on_exception = false
     port = ENV["PORT"] || "8000"
     puts "Serving #{WASM_OUT} at http://localhost:#{port}/  (Ctrl-C to stop)"
     sh "python3", "-m", "http.server", port, "--bind", "127.0.0.1",

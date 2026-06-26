@@ -1,30 +1,29 @@
 // Entry point: boot the wasm VM, wire the Engine to a JS bridge, and start the
-// funicular Shell.
+// funicular UI.
 //
 // harucom.js (loaded as a classic script before this module) defines the global
 // createHarucomModule factory. We create the Module, hand it to createEngine
-// (which composes the device modules), expose an Engine <-> Shell bridge on the
+// (which composes the device modules), expose an Engine <-> UI bridge on the
 // window, start the VM, then write the funicular UI sources into MEMFS /_web and
-// run them. The Shell (Console / KbdDebug / Pads) renders the chrome; the canvas
-// (#screen) stays an Engine-owned sibling of the Shell container (#app).
+// run them. The App (Screen + a tabbed Panels dock) renders the chrome; the
+// canvas (#screen) is an Engine-owned leaf the Screen panel adopts.
+//
+// The UI source list is data-driven: rake stage writes ruby/manifest.json by
+// globbing wasm/ruby/lib, so adding a panel file needs no change here.
 
 import { createEngine } from "./engine/index.js";
 import { createBridge } from "./engine/bridge.js";
-import { installUI } from "./engine/ui.js";
+import { installUI, startUI } from "./engine/ui.js";
 
-// The funicular UI sources to load into /_web (fetched relative to the page).
-// shell.rb is the entry (loaded by ui.js); it requires the panes, so they must
-// be present in /_web/lib too. Order does not matter (all are written first).
-const UI_FILES = [
-  "lib/shell.rb",
-  "lib/console_pane.rb",
-  "lib/kbd_debug.rb",
-  "lib/pads.rb",
-];
+// Fetch the manifest (the files to stage and the panel modules to require).
+async function fetchManifest() {
+  const res = await fetch("ruby/manifest.json");
+  return res.json(); // { files: ["lib/..."], panels: ["console_panel", ...] }
+}
 
-async function fetchUI() {
+async function fetchFiles(fileList) {
   const files = {};
-  for (const rel of UI_FILES) {
+  for (const rel of fileList) {
     const res = await fetch("ruby/" + rel);
     files[rel] = await res.text();
   }
@@ -34,7 +33,7 @@ async function fetchUI() {
 // stdout / stderr arrive via the posix hal_write() (emscripten fd 1 / 2), which
 // emscripten routes to Module.print / Module.printErr per line (no trailing
 // newline). Those handlers must be set at construction time, so they forward
-// each bare line into the engine once it exists; the ConsolePane joins lines
+// each bare line into the engine once it exists; the ConsolePanel joins lines
 // with newlines itself, so adding one here would double-space the console.
 let engine;
 window.createHarucomModule({
@@ -45,16 +44,18 @@ window.createHarucomModule({
   engine = createEngine(Module, { canvas });
 
   // Expose the bridge before start() so init-time prints buffer into it (the
-  // Shell drains them once it mounts). JS.global is window in picoruby-wasm.
+  // Engine drains them once the UI mounts). JS.global is window in picoruby-wasm.
   window.__harucomBridge = createBridge(engine);
 
   // Fetch the UI sources before starting, so the run loop is free to schedule the
   // UI task right after start.
-  const files = await fetchUI();
+  const manifest = await fetchManifest();
+  const files = await fetchFiles(manifest.files);
 
   try {
-    engine.start();          // inits the VM (global_mrb) and the run loop
-    installUI(Module, files); // write /_web/lib + enqueue the shell task
+    engine.start();                       // inits the VM (global_mrb) and run loop
+    installUI(Module, files);             // write /_web/lib
+    startUI(Module, { panels: manifest.panels }); // load shell + boot the App
   } catch (e) {
     console.error("harucom:", e.message);
   }

@@ -1,64 +1,37 @@
-# Harucom browser Shell (funicular UI). wasm only. Entry point: the Engine writes
-# this and the panes into MEMFS /_web/lib and loads this file (harucom_run_ruby).
-# funicular itself is a gem in libmruby, so no require is needed for it. The OS
-# sees /_web in `ls /`; that is accepted (see the wasm-funicular plan).
+# Entry point for the funicular browser UI (wasm only). The Engine writes the
+# /_web/lib sources into MEMFS and loads this file (harucom_run_ruby), then calls
+# Harucom::UI.boot with the panel list discovered at stage time. funicular itself
+# is a gem in libmruby, so it needs no require. The OS sees /_web in `ls /`; that
+# is accepted (see the wasm-funicular plan).
 #
-# Engine <-> Shell bridge: the Engine exposes window.__harucomBridge carrying
-# engine events (stdout lines via takePrints, keyboard debug via keyInfo) and
-# commands. Engine -> Shell is poll-based: stdout fires mid-mrb_run_step, so a
-# synchronous JS -> Ruby callback would re-enter the VM; instead a background task
-# drains the bridge each scheduler pass and patches the Shell. Shell -> Engine
-# (commands) is a direct JS call, which is safe (it only touches C state).
+# Engine <-> UI bridge: the Engine exposes window.__harucomBridge. Engine -> UI is
+# poll-based (stdout fires mid-mrb_run_step, so a synchronous JS -> Ruby callback
+# would re-enter the VM); the ui_poll task drains it each scheduler pass via
+# Harucom.engine.poll. UI -> Engine commands are direct JS calls.
+require "engine"
+require "ui_component"
+require "ui_panels"
+require "ui_panel"
+require "ui_screen"
+require "app"
 
-require "console_pane"
-require "kbd_debug"
-require "pads"
-
-# Root component: drains the engine state and feeds it to the panes.
-class Shell < Funicular::Component
-  def initialize_state
-    { lines: [], key_info: "" }
-  end
-
-  def bridge
-    b = JS.global[:__harucomBridge]
-    b.is_a?(JS::Object) ? b : nil
-  end
-
-  # Drain the engine bridge and patch only on change, so funicular re-renders
-  # sparingly. Called each scheduler pass by the ui_poll task.
-  def tick
-    b = bridge
-    return unless b
-    changes = {}
-    fresh = b.takePrints.to_a
-    if fresh.length > 0
-      merged = state.lines
+module Harucom
+  module UI
+    # Require the panel files (each self-registers with Panels), mount the App,
+    # and start the task that drains the Engine bridge each scheduler pass.
+    def self.boot(panel_names)
       i = 0
-      while i < fresh.length
-        merged = merged + [fresh[i].to_s]
+      while i < panel_names.length
+        require panel_names[i]
         i += 1
       end
-      changes[:lines] = merged.last(500)
+      Funicular.start(App, container: "app")
+      Task.new(name: "ui_poll") do
+        loop do
+          Harucom.engine.poll
+          Task.pass
+        end
+      end
     end
-    info = b.keyInfo.to_s
-    changes[:key_info] = info if info != state.key_info
-    patch(changes) unless changes.empty?
-  end
-
-  def render
-    div(id: "shell", class: "shell") do
-      component(ConsolePane, { lines: state.lines })
-      component(KbdDebug, { info: state.key_info })
-      component(Pads)
-    end
-  end
-end
-
-shell = Funicular.start(Shell, container: "app")
-Task.new(name: "ui_poll") do
-  loop do
-    shell.tick
-    Task.pass
   end
 end

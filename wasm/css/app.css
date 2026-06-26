@@ -1,24 +1,34 @@
 /* Tailwind input for the wasm browser shell.
  *
- * Utility classes are authored in index.html (Phase 1) and, later, the funicular
- * UI .rb (Phase 3). source(none) disables Tailwind's automatic scanning so only
- * the listed @source files are read (keeps node_modules out and the output
- * deterministic). rake wasm:css builds this into build/wasm/style.css. */
+ * Utility classes are authored in index.html and the funicular UI .rb files.
+ * source(none) disables Tailwind's automatic scanning so only the listed @source
+ * files are read (keeps node_modules out and the output deterministic). rake
+ * wasm:css builds this into build/wasm/style.css. */
 @import "tailwindcss" source(none);
 
 @source "../index.html";
 @source "../ruby";
 
-/* Retro palette tokens. Phase 4 extends these (pad / tab / panel colors). */
+/* Retro palette and the devtools-style tab/panel/dock tokens. These name the
+ * colors so each panel's utility classes (bg-panel-bg, text-tab-inactive, ...)
+ * stay semantic. */
 @theme {
   --color-base: #111;
   --color-fg: #eee;
   --color-term-green: #0f0;
+  --color-pad: #333;
+  --color-pad-on: #0a0;
+  --color-tab-active: #eee;
+  --color-tab-inactive: #888;
+  --color-tab-border: #0f0;
+  --color-panel-bg: #1a1a1a;
+  --color-focus: #0f0;
 }
 
 @layer base {
   /* The DVI surface is 640x480; scale it up with crisp (nearest) pixels. Sizing
-   * and image-rendering are not utility-shaped, so they stay hand-written. */
+   * and image-rendering are not utility-shaped, so they stay hand-written. The
+   * Screen panel moves this canvas into its host on mount. */
   #screen {
     display: block;
     width: 640px;
@@ -26,59 +36,5 @@
     background: #000;
     border-radius: 4px;
     image-rendering: pixelated;
-  }
-}
-
-@layer components {
-  /* The funicular Shell chrome (mrblib at wasm/ruby/lib/shell.rb). These mirror
-   * the former static #out / #kbddbg / #pads styling. */
-  .console {
-    margin-top: 1rem;
-    min-height: 4rem;
-    max-height: 18rem;
-    overflow: auto;
-    padding: 1rem;
-    border-radius: 4px;
-    background: #000;
-    color: #0f0;
-    white-space: pre-wrap;
-    font-family: ui-monospace, monospace;
-  }
-  .kbddbg {
-    margin-top: 0.5rem;
-    min-height: 1rem;
-    color: #888;
-    font: 0.8rem ui-monospace, monospace;
-  }
-  .pads {
-    margin-top: 0.5rem;
-    display: flex;
-    gap: 2rem;
-  }
-
-  /* On-screen D-pads. The pressed toggle is a Phase 4 styles-DSL item. */
-  .pad {
-    display: grid;
-    grid-template-columns: repeat(3, 2.4rem);
-    grid-auto-rows: 2.4rem;
-    gap: 2px;
-  }
-  .pad-title {
-    grid-column: 1 / -1;
-    color: #888;
-    font: 0.8rem monospace;
-  }
-  .padbtn {
-    border: 1px solid #555;
-    border-radius: 4px;
-    background: #333;
-    color: #eee;
-    font-size: 1.1rem;
-    cursor: pointer;
-    user-select: none;
-    touch-action: none;
-  }
-  .padbtn.on {
-    background: #0a0;
   }
 }

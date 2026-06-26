@@ -7,11 +7,11 @@
   <!-- style.css is built from css/app.css by `rake wasm:css` (Tailwind v4). -->
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="m-6 bg-base font-sans text-fg">
-  <h1 class="text-[1.1rem]">Harucom OS (wasm)</h1>
-  <!-- #screen is the Engine-owned DVI canvas; #app is the funicular Shell mount
-       point (Console / KbdDebug / Pads), a sibling of the canvas. -->
-  <canvas id="screen" width="640" height="480"></canvas>
+<body class="bg-base text-fg">
+  <!-- #screen is the Engine-owned DVI canvas. It starts in a hidden holder; the
+       funicular Screen panel moves it into the layout on mount (so funicular
+       never recreates it and drops the 2D context). #app is the App mount. -->
+  <div hidden><canvas id="screen" width="640" height="480"></canvas></div>
   <div id="app"></div>
 
   <!-- harucom.js (classic script) defines the global createHarucomModule factory;

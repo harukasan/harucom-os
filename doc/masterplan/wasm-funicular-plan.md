@@ -18,14 +18,15 @@ Ruby で動く」。
 ## 現在の状態（branch: `wasm-funicular`）
 
 - `wasm-text-mode` から分岐。プラン文書(`d8c5237`)+ Phase 1〜3 のコミット。
-- **Phase 1・2・3 完了・コミット済み**(Phase 1/3 はユーザー目視承認済み)。`rake wasm:build` 緑、
-  `rake wasm:test` = **35/35 PASS**、emcc 6.0.0 / node / Tailwind v4.3.1 利用可。
+- **Phase 1・2・3 完了・コミット済み**(Phase 1/3 はユーザー目視承認済み)。
   コミット: Phase 1 `d317351`(Engine facade + Tailwind v4)/ Phase 2 `c1ae2da`(funicular リンク)/
   Phase 3a `b615c51`(`/_web` から Shell ロード + bridge ポーリング)/
   Phase 3b `519ef0f`(ブラウザ結線 + コンポーネント分割)。
-- **計画は Phase 1〜4 まで確定済み**。前提調査も完了(下記「確認済みの事実」)。
-- **再開ポイント = Phase 4 未着手**(devtools 風タブ付きパネル UI)。Phase 3 で funicular UI が
-  ブラウザで動き headless テストも整ったので、Phase 4 は Panel 化のリファクタが中心。
+- **Phase 4 実装完了・`rake wasm:test` = 36/36 PASS・未コミット**(目視確認待ち)。
+  devtools 風タブ付きパネル UI に再編。`Harucom::Engine` facade / `Harucom::UI::{Component,Panel,
+  Panels,Screen,App}` / 4 Panel(Console/Keys/Pads/Status)/ マニフェスト駆動ロード /
+  dock 下右切替(`preserve: true` で canvas・active タブ保持)。emcc 6.0.0 / node / Tailwind v4.3.1 利用可。
+- **計画は Phase 1〜4 まで完了**。前提調査も完了(下記「確認済みの事実」)。
 - 確定した主な決定: 単一 VM(`picoruby-funicular`)/ CSS は Tailwind v4 / Phase 4 = devtools 風
   タブ付きパネル UI(ホスト `Harucom::UI::Panels`、自己登録 `Panel`、ドック 下/右 切替)/
   **UI Ruby は `/_web/` に置き `require`(可視のまま許容、FSRoot/chroot は不採用 — 「決定事項」節)**。
@@ -509,25 +510,35 @@ JS/TS 製コンポーネントキットは Panda と同じ理由で不適。VS C
 
 ### タスク
 
-- [ ] `Harucom::Engine` Ruby facade を実装(JS Engine 購読/コマンドの薄いラッパ、
-      unmount で購読解除)。
-- [ ] `Harucom::UI::Component` 基底 + `Panel` 基底 + `Panels` ホスト(タブバー +
-      自己登録レジストリ)を実装。
-- [ ] 現 chrome を Panel 化(`ConsolePanel` / `KbdDebugPanel` / `PadsPanel` /
-      `StatusPanel`)。Phase 3 の素朴な実装をここに寄せる。
-- [ ] `@theme` デザイントークン + 共通 style mixin を定義し、各 Panel の class を
-      トークン経由に。
-- [ ] `Harucom::UI::App`(Screen + Panels ドック、**ドック位置 下/右 切替**)+
-      `Funicular.start` 入口に集約。(任意: スプリッタでリサイズ、タブの `Funicular.router` 連動)
-- [ ] UI Ruby を MEMFS ソース配置 + `require` 化し、`rake wasm:server` を
-      `.rb`/`.css` ホットリロード対応に。
+- [x] `Harucom::Engine` Ruby facade を実装(`engine.rb`)。JS bridge を内包し、
+      購読(`on`)/コマンド(`pad_set`/`start_audio`)の薄いラッパ。`Harucom::UI::Component`
+      が `on_engine` で登録したトークンを unmount で自動解除。コンソール行バッファは
+      Engine 側に持ち(panel unmount で履歴が消えない)、`poll` で bridge を drain。
+- [x] `Harucom::UI::Component` 基底(`ui_component.rb`)+ `Panel` 基底
+      (`ui_panel.rb`、`title/slug/order` DSL + `inherited` 自己登録)+ `Panels` ホスト
+      (`ui_panels.rb`、タブバー + dock ボタン + レジストリ)を実装。
+- [x] 現 chrome を Panel 化: `ConsolePanel` / `KeysPanel`(旧 KbdDebug)/ `PadsPanel`
+      (押下は `active:bg-pad-on` の CSS :active)/ `StatusPanel`(frame/underruns、
+      30 フレーム間引き patch)。各 `*_panel.rb` が自己登録。
+- [x] `@theme` デザイントークン(pad/tab/panel/dock 色)を定義し、各 Panel の class を
+      トークン経由(`bg-panel-bg`/`text-tab-inactive` 等)に。共通 style mixin は
+      各 Panel の `styles` DSL で足りたため不採用。
+- [x] `Harucom::UI::App`(`app.rb`。Screen + Panels ドック、**下/右 切替**。Screen/Panels は
+      `preserve: true` で再 render を跨いで instance 保持 → canvas/active タブ/履歴が残る)+
+      `Funicular.start` 入口を `shell.rb` の `Harucom::UI.boot` に集約。
+      (スプリッタ・`Funicular.router` 連動は任意拡張として未実装)
+- [x] UI Ruby は MEMFS ソース配置 + `require`(`shell.rb` が framework を require、
+      `boot` が panel を require)。マニフェスト駆動: `rake` が `lib/*_panel.rb` を glob →
+      `build/wasm/ruby/manifest.json` → `main.js` が消費。`rake wasm:server` は js/ruby/
+      index.html を mtime 監視して再ステージ(emcc 再ビルドなしで編集 → リロード)。
 
 受け入れ条件:
-- [ ] **新機能 = Panel を 1 ファイル足すだけでタブに出る**(JS / wasm ビルド / 他 Panel に
-      触れず)。
-- [ ] **ドックを下/右に切り替えられ**、canvas 側がそれに追従してレイアウトされる。
-- [ ] UI/スタイルの反復が emcc 再ビルドなしで回る(編集 → リロード)。
-- [ ] `rake wasm:test` の OS コアテストは緑のまま。
+- [x] **新機能 = Panel を 1 ファイル足すだけでタブに出る**(JS / wasm ビルド / 他 Panel に
+      触れず)。`*_panel.rb` を置く → マニフェスト glob → 自己登録 → タブ。ヘッドレステストで確認。
+- [x] **ドックを下/右に切り替えられ**、canvas 側がそれに追従してレイアウトされる
+      (`flex-col`↔`flex-row`、dock サイズ class。canvas は `preserve` で保持)。dock テストで確認。
+- [x] UI/スタイルの反復が emcc 再ビルドなしで回る(編集 → 再ステージ → リロード)。
+- [x] `rake wasm:test` の OS コアテストは緑のまま(36/36、うち funicular Panel UI 6 本)。
 
 ## テスト戦略
 
