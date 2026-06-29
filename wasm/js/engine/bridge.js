@@ -45,5 +45,15 @@ export function createBridge(engine) {
     startAudio() {
       engine.startAudio();
     },
+    // On-screen keyboard: a momentary key (down/up) and the Shift/Ctrl overlay.
+    keyDown(usage) {
+      engine.keyDown(usage);
+    },
+    keyUp(usage) {
+      engine.keyUp(usage);
+    },
+    setKeyModifier(mask) {
+      engine.setKeyModifier(mask);
+    },
   };
 }

@@ -47,6 +47,11 @@ window.createHarucomModule({
   // Engine drains them once the UI mounts). JS.global is window in picoruby-wasm.
   window.__harucomBridge = createBridge(engine);
 
+  // Ctrl-Alt-Delete reboot: the wasm shim (usb_host_wasm.c) calls this when that
+  // chord appears in the HID report. The board watchdog_reboots; the browser
+  // reloads, which recreates the Module and reruns harucom_init from scratch.
+  window.__harucomReboot = () => location.reload();
+
   // Fetch the UI sources before starting, so the run loop is free to schedule the
   // UI task right after start.
   const manifest = await fetchManifest();

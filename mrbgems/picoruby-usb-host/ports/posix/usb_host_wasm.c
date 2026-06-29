@@ -18,6 +18,12 @@ static bool keyboard_connected_flag = true;
 static uint8_t keyboard_modifier_state = 0;
 static uint8_t keyboard_keycodes_state[6] = {0};
 
+// HID modifier bits and the Delete usage for the Ctrl-Alt-Delete reboot, mirroring
+// the board's tuh_hid_report_received_cb. Each mask covers the left and right key.
+#define HID_MOD_CTRL (0x01 | 0x10)
+#define HID_MOD_ALT  (0x04 | 0x40)
+#define HID_KEY_DELETE 0x4C
+
 void usb_host_init(void) {}
 
 void usb_host_task(void) {}
@@ -55,6 +61,20 @@ harucom_kbd_set_state(uint8_t modifier, uint8_t k0, uint8_t k1, uint8_t k2,
   keyboard_keycodes_state[3] = k3;
   keyboard_keycodes_state[4] = k4;
   keyboard_keycodes_state[5] = k5;
+
+  // Ctrl-Alt-Delete reboots. The board watchdog_reboots; the browser reboots by
+  // reloading the page (window.__harucomReboot, set in main.js), which recreates
+  // the wasm Module and reruns harucom_init from scratch.
+  if ((modifier & HID_MOD_CTRL) && (modifier & HID_MOD_ALT)) {
+    for (int i = 0; i < 6; i++) {
+      if (keyboard_keycodes_state[i] == HID_KEY_DELETE) {
+        EM_ASM({
+          if (typeof window !== "undefined" && window.__harucomReboot) window.__harucomReboot();
+        });
+        break;
+      }
+    }
+  }
 }
 
 #endif /* __EMSCRIPTEN__ */

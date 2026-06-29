@@ -51,6 +51,8 @@ function pointer(type, x, y) {
 describe("funicular Panel UI from /_web", () => {
   let h;
   const padCalls = [];
+  const keyCalls = [];
+  const modCalls = [];
   before(async () => {
     h = await boot();
     const { installUI, startUI } = await import("../js/engine/ui.js");
@@ -64,6 +66,9 @@ describe("funicular Panel UI from /_web", () => {
       audio: () => ({ underruns: 0, level: 0 }),
       setPad: (pad, dir, down) => { padCalls.push([pad, dir, down]); },
       startAudio: () => {},
+      keyDown: (usage) => { keyCalls.push(["down", usage]); },
+      keyUp: (usage) => { keyCalls.push(["up", usage]); },
+      setKeyModifier: (mask) => { modCalls.push(mask); },
     };
     const { files, panels } = readUiSources();
     installUI(h.Module, files);
@@ -80,6 +85,7 @@ describe("funicular Panel UI from /_web", () => {
     const html = globalThis.document.getElementById("app").innerHTML;
     assert.match(html, /Console/, html);
     assert.match(html, /Keys/, html);
+    assert.match(html, /Keyboard/, html);
     assert.match(html, /Pads/, html);
     assert.match(html, /Status/, html);
   });
@@ -98,6 +104,43 @@ describe("funicular Panel UI from /_web", () => {
     const keys = globalThis.document.querySelector("#app #keys");
     assert.ok(keys, "Keys panel mounted");
     assert.match(keys.textContent, /code=KeyZ/, keys.textContent);
+  });
+
+  it("types keys and latches Shift from the Keyboard panel", () => {
+    findTab("Keyboard").dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    const btns = () => [...globalThis.document.querySelectorAll("#app #keyboard button")];
+
+    const a = btns().find((b) => b.textContent === "A"); // HID usage 0x04
+    assert.ok(a, "A key present");
+    a.dispatchEvent(new globalThis.window.Event("pointerdown"));
+    h.drive(400);
+    assert.deepEqual(keyCalls.at(-1), ["down", 0x04], JSON.stringify(keyCalls.slice(-2)));
+    a.dispatchEvent(new globalThis.window.Event("pointerup"));
+    h.drive(400);
+    assert.deepEqual(keyCalls.at(-1), ["up", 0x04]);
+
+    // Shift latches the LeftShift overlay and highlights the key.
+    btns().find((b) => b.textContent === "Shift").dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    assert.equal(modCalls.at(-1), 0x02, JSON.stringify(modCalls));
+    const shift = btns().find((b) => b.textContent === "Shift");
+    assert.match(shift.getAttribute("class"), /bg-pad-on/, shift.getAttribute("class"));
+    // Tapping Shift again unlatches it.
+    shift.dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    assert.equal(modCalls.at(-1), 0x00);
+
+    // Function keys and Del send their HID usages; Alt latches the LeftAlt bit.
+    btns().find((b) => b.textContent === "F5").dispatchEvent(new globalThis.window.Event("pointerdown"));
+    h.drive(400);
+    assert.deepEqual(keyCalls.at(-1), ["down", 0x3e], JSON.stringify(keyCalls.slice(-2)));
+    btns().find((b) => b.textContent === "Del").dispatchEvent(new globalThis.window.Event("pointerdown"));
+    h.drive(400);
+    assert.deepEqual(keyCalls.at(-1), ["down", 0x4c]);
+    btns().find((b) => b.textContent === "Alt").dispatchEvent(new globalThis.window.Event("click"));
+    h.drive(800);
+    assert.equal(modCalls.at(-1), 0x04, JSON.stringify(modCalls));
   });
 
   it("switches tabs and drives bridge.setPad from a pad button press", () => {

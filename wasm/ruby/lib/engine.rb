@@ -87,6 +87,23 @@ module Harucom
       b.startAudio if b
     end
 
+    # On-screen keyboard (KeyboardPanel): a momentary key press/release and the
+    # Shift/Ctrl modifier overlay. usage/mask are HID values.
+    def key_down(usage)
+      b = bridge
+      b.keyDown(usage) if b
+    end
+
+    def key_up(usage)
+      b = bridge
+      b.keyUp(usage) if b
+    end
+
+    def set_key_modifier(mask)
+      b = bridge
+      b.setKeyModifier(mask) if b
+    end
+
     private
 
     def emit(event, value)
