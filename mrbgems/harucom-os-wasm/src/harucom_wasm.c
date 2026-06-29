@@ -151,10 +151,21 @@ preempt_hook(mrb_state *mrb, const struct mrb_irep *irep, const mrb_code *pc, mr
   (void)pc;
   (void)regs;
   static uint32_t ops = 0;
-  if (++ops >= PREEMPT_OP_BUDGET) {
-    ops = 0;
-    mrb->task.switching = TRUE; /* yield at the next opcode, like the timer tick */
+  if (++ops < PREEMPT_OP_BUDGET) return;
+
+  /* Only switch at a safe point: never across a C function boundary. A task
+   * switch yields by returning from mrb_vm_exec (RETURN_IF_TASK_STOPPED). When
+   * mrb_vm_exec was entered re-entrantly from a C function, that early return
+   * corrupts the C caller and, under emscripten setjmp/longjmp, escapes as a
+   * fatal throw. Task.pass guards the same way ("can't pass across C function
+   * boundary"). The funicular UI mounts and renders through such re-entrant calls
+   * (the JS/DOM bridge), so without this guard a preempt landing mid-render
+   * crashes. Keep ops at the budget and retry once we unwind to pure Ruby. */
+  for (mrb_callinfo *ci = mrb->c->ci; ci >= mrb->c->cibase; ci--) {
+    if (ci->cci > 0) return;
   }
+  ops = 0;
+  mrb->task.switching = TRUE; /* yield at the next opcode, like the timer tick */
 }
 
 EMSCRIPTEN_KEEPALIVE
