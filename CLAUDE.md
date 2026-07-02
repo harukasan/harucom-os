@@ -119,11 +119,12 @@ Guidelines:
 
 ## Hardware notes
 
-- **Flash: 128 Mbit (16 MB).** The linker script currently limits FLASH to
-  4 MB, but the actual chip capacity is much larger. Flash storage size is
-  not a constraint. Prefer data structures that minimize flash read count
-  (e.g. direct lookup tables) over compact representations that require
-  many accesses (e.g. binary search).
+- **Flash: 128 Mbit (16 MB).** The firmware linker FLASH window is 6 MB
+  (`PICO_FLASH_SIZE_BYTES` in CMakeLists.txt), ending exactly at the
+  dictionary region at `0x600000`. The actual chip capacity is much larger.
+  Flash storage size is not a constraint. Prefer data structures that
+  minimize flash read count (e.g. direct lookup tables) over compact
+  representations that require many accesses (e.g. binary search).
 - **PSRAM: 8 MB (APS6404L).** Mapped via QMI CS1 at `0x11000000`. Used for
   the mruby heap.
 
