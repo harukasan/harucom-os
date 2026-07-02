@@ -65,6 +65,16 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
 
   ruby_cmd = "ruby"
 
+  # M PLUS 1 Medium: full JIS X 0208, 4bpp anti-aliased, compressed
+  # (canonical Huffman + zero-run). Rendered at 20px with the baseline forced
+  # to row 22 so it aligns with FONT_OUTFIT_22 (ascender 22) in PicoRabbit.
+  mplus1_dir = "#{dir}/lib/fonts/mplus-1"
+  mplus1_ttf = "#{mplus1_dir}/MPLUS1-Medium.ttf"
+  mplus1_dst = "#{include_dir}/font_mplus_1_medium_22.h"
+  file mplus1_dst => [mplus1_ttf, ttf2c, include_dir] do
+    sh "#{ruby_cmd} #{ttf2c} #{mplus1_ttf} -s 20 --ascent 22 --jis --aa --compress -n mplus_1_medium_22 -o #{mplus1_dst}"
+  end
+
   # Inter anti-aliased fonts (4bpp)
   inter_fonts = [
     { src: "#{inter_dir}/Inter-Regular.ttf",
@@ -170,6 +180,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { header: "font_spleen_8x16.h",           var: "font_spleen_8x16",          sym: "FONT_SPLEEN_8X16" },
     { header: "font_spleen_12x24.h",          var: "font_spleen_12x24",         sym: "FONT_SPLEEN_12X24" },
     { header: "font_mplus_j12_combined.h",    var: "font_mplus_j12_wide",       sym: "FONT_MPLUS_J12" },
+    { header: "font_mplus_1_medium_22.h",     var: "font_mplus_1_medium_22",    sym: "FONT_MPLUS_1_MEDIUM_22" },
     { header: "font_inter_18.h",              var: "font_inter_18",             sym: "FONT_INTER_18" },
     { header: "font_inter_bold_18.h",         var: "font_inter_bold_18",        sym: "FONT_INTER_BOLD_18" },
     { header: "font_inter_24.h",              var: "font_inter_24",             sym: "FONT_INTER_24" },
@@ -243,6 +254,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
   if (tasks & %w(default all picoruby:debug picoruby:prod microruby:debug microruby:prod)).any?
     fonts.each { |font| Rake::Task[font[:dst]].invoke }
     Rake::Task[font8x8_dst].invoke
+    Rake::Task[mplus1_dst].invoke
     inter_fonts.each { |font| Rake::Task[font[:dst]].invoke }
     outfit_fonts.each { |font| Rake::Task[font[:dst]].invoke }
     source_code_pro_fonts.each { |font| Rake::Task[font[:dst]].invoke }
