@@ -59,6 +59,7 @@ class DVI
     FONT_MPLUS_J12: Integer
     FONT_DENKICHIP_J: Integer
     FONT_MPLUS_1_MEDIUM_22: Integer
+    FONT_MPLUS_1_EXTRABOLD_32: Integer
 
     BLEND_REPLACE: Integer
     BLEND_ADD: Integer
