@@ -7,6 +7,8 @@ module PicoRabbit
       def title_font; G::FONT_OUTFIT_EXTRABOLD_32; end
       def body_font; G::FONT_OUTFIT_22; end
       def bold_font; G::FONT_OUTFIT_BOLD_22; end
+      # Japanese (JIS X 0208) glyphs for body/bold text, baseline-matched to Outfit 22.
+      def body_wide_font; G::FONT_MPLUS_1_MEDIUM_22; end
 
       # Colors
       def background_color; 0xFF; end
@@ -41,13 +43,13 @@ module PicoRabbit
 
         bottom_y = ty - leading + 12
         if metadata["subtitle"]
-          p5.text_font(body_font)
+          p5.text_font(body_font, body_wide_font)
           p5.text_color(0xDB)
           p5.text(metadata["subtitle"], 320, bottom_y)
           bottom_y += body_font_height + 8
         end
         if metadata["author"]
-          p5.text_font(body_font)
+          p5.text_font(body_font, body_wide_font)
           p5.text_color(0xDB)
           p5.text(metadata["author"], 320, bottom_y)
         end
@@ -81,7 +83,7 @@ module PicoRabbit
           p5.text_font(G::FONT_INTER_SYMBOLS_22)
           p5.text_color(ACCENT)
           p5.text(bullet_char, indent, y)
-          p5.text_font(body_font)
+          p5.text_font(body_font, body_wide_font)
           draw_rich_text(p5, element.text, indent + bullet_width, y)
         else
           super
@@ -121,18 +123,18 @@ module PicoRabbit
           total_w = 0
           segments.each do |seg|
             if seg[0] == :bold
-              p5.text_font(bold_font)
+              p5.text_font(bold_font, body_wide_font)
             else
-              p5.text_font(body_font)
+              p5.text_font(body_font, body_wide_font)
             end
             total_w += p5.text_width(seg[1])
           end
           cx = 320 - total_w / 2
           segments.each do |seg|
             if seg[0] == :bold
-              p5.text_font(bold_font)
+              p5.text_font(bold_font, body_wide_font)
             else
-              p5.text_font(body_font)
+              p5.text_font(body_font, body_wide_font)
             end
             p5.text_color(0xDB)
             p5.text(seg[1], cx, y)

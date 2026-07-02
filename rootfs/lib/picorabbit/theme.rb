@@ -48,7 +48,7 @@ module PicoRabbit
       # Subtitle
       bottom_y = ty - leading + 12
       if metadata["subtitle"]
-        p5.text_font(body_font)
+        p5.text_font(body_font, body_wide_font)
         p5.text_color(text_color)
         p5.text(metadata["subtitle"], 320, bottom_y)
         bottom_y += body_font_height + 8
@@ -56,7 +56,7 @@ module PicoRabbit
 
       # Author
       if metadata["author"]
-        p5.text_font(body_font)
+        p5.text_font(body_font, body_wide_font)
         p5.text_color(separator_color)
         p5.text(metadata["author"], 320, bottom_y)
       end
@@ -123,14 +123,14 @@ module PicoRabbit
         y
       when :bullet
         indent = x + element.level * bullet_indent
-        p5.text_font(body_font)
+        p5.text_font(body_font, body_wide_font)
         p5.text_color(text_color)
         p5.text(bullet_char, indent, y)
         draw_rich_text(p5, element.text, indent + bullet_width, y)
       when :numbered
         @numbered_counter += 1
         indent = x + element.level * bullet_indent
-        p5.text_font(body_font)
+        p5.text_font(body_font, body_wide_font)
         p5.text_color(text_color)
         label = "#{@numbered_counter}."
         p5.text(label, indent, y)
@@ -172,7 +172,7 @@ module PicoRabbit
       segments.each do |seg|
         case seg[0]
         when :bold
-          p5.text_font(bold_font)
+          p5.text_font(bold_font, body_wide_font)
           p5.text_color(text_color)
           p5.text(seg[1], cx, y)
           cx += p5.text_width(seg[1])
@@ -183,7 +183,7 @@ module PicoRabbit
           p5.text(seg[1], cx, code_y)
           cx += p5.text_width(seg[1])
         else
-          p5.text_font(body_font)
+          p5.text_font(body_font, body_wide_font)
           p5.text_color(text_color)
           p5.text(seg[1], cx, y)
           cx += p5.text_width(seg[1])
@@ -243,7 +243,7 @@ module PicoRabbit
       p5.no_stroke
       p5.rect(bar_x, y, 3, body_font_height)
       p5.no_fill
-      p5.text_font(body_font)
+      p5.text_font(body_font, body_wide_font)
       p5.text_color(blockquote_color)
       p5.text(text, text_x, y)
       y + body_font_height + leading
@@ -346,6 +346,8 @@ module PicoRabbit
     def body_font; G::FONT_INTER_18; end
     def body_font_height; G.font_height(body_font); end
     def body_font_ascent; 22; end
+    # Wide (CJK) fallback font paired with body/bold text. nil = none.
+    def body_wide_font; nil; end
     def bold_font; G::FONT_INTER_BOLD_18; end
     def inline_code_font; G::FONT_SOURCE_CODE_PRO_18; end
     def inline_code_font_ascent; 12; end
