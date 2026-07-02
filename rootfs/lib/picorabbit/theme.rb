@@ -35,7 +35,7 @@ module PicoRabbit
 
     def render_title_slide(p5, slide, metadata)
       # Title centered vertically (supports multi-line via \n)
-      p5.text_font(title_font)
+      p5.text_font(title_font, title_wide_font)
       p5.text_color(title_color)
       p5.text_align(:center)
       title_lines = slide.title.split("\n")
@@ -72,7 +72,7 @@ module PicoRabbit
 
     def render_title(p5, title)
       return body_y unless title
-      p5.text_font(title_font)
+      p5.text_font(title_font, title_wide_font)
       p5.text_color(title_color)
       p5.text_align(:left)
       title_lines = title.split("\n")
@@ -343,6 +343,8 @@ module PicoRabbit
 
     def title_font; G::FONT_INTER_BOLD_24; end
     def title_font_height; G.font_height(title_font); end
+    # Wide (CJK) fallback font paired with the title. nil = none.
+    def title_wide_font; nil; end
     def body_font; G::FONT_INTER_18; end
     def body_font_height; G.font_height(body_font); end
     def body_font_ascent; 22; end

@@ -9,6 +9,8 @@ module PicoRabbit
       def bold_font; G::FONT_OUTFIT_BOLD_22; end
       # Japanese (JIS X 0208) glyphs for body/bold text, baseline-matched to Outfit 22.
       def body_wide_font; G::FONT_MPLUS_1_MEDIUM_22; end
+      # Japanese glyphs for the title, baseline-matched to Outfit ExtraBold 32.
+      def title_wide_font; G::FONT_MPLUS_1_EXTRABOLD_32; end
 
       # Colors
       def background_color; 0xFF; end
@@ -31,7 +33,7 @@ module PicoRabbit
         bmp = load_image("/data/rubykaigi2026_title.bmp")
         p5.image(bmp.data, 0, 0, bmp.width, bmp.height)
 
-        p5.text_font(title_font)
+        p5.text_font(title_font, title_wide_font)
         p5.text_color(0xFF)
         p5.text_align(:center)
         title_lines = slide.title.split("\n")
@@ -109,7 +111,7 @@ module PicoRabbit
         y = (480 - total_height) / 2
 
         # Title
-        p5.text_font(title_font)
+        p5.text_font(title_font, title_wide_font)
         p5.text_color(0xFF)
         p5.text_align(:center)
         p5.text(slide.title, 320, y)
