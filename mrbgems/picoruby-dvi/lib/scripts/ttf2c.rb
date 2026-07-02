@@ -16,13 +16,252 @@ require "optparse"
 require "freetype"
 require "erb"
 
+# --- Compressed JIS font support (canonical Huffman + zero-run RLE) ---
+#
+# Symbol alphabet (must match the decoder in dvi_graphics_text.c):
+#   0        : unused
+#   1..15    : literal 4bpp nibble value
+#   16..31   : run of (symbol - 15) zero pixels (length 1..16)
+#
+# Each glyph is trimmed to its ink bounding box, its 4bpp pixels are scanned
+# row-major into zero-run/literal tokens, and the tokens are written as a
+# canonical Huffman bitstream (MSB first, byte-aligned per glyph). One shared
+# Huffman table (code lengths per symbol) is emitted for the whole font.
+HUFF_ALPHABET = 32
+HUFF_MAXBITS  = 24
+
+# Tight ink bounding box of a 4bpp pixel grid. Returns [x, y, w, h] or nil.
+def ink_bbox(pixels, gw, gh)
+  top = nil; bottom = 0; left = gw; right = 0
+  gh.times do |r|
+    row = pixels[r]
+    gw.times do |c|
+      next if row[c] == 0
+      top = r if top.nil?
+      bottom = r
+      left = c if c < left
+      right = c if c > right
+    end
+  end
+  return nil if top.nil?
+  [left, top, right - left + 1, bottom - top + 1]
+end
+
+# Tokenize the trimmed bbox region into symbols (row-major).
+def tokenize_bbox(pixels, bx, by, bw, bh)
+  toks = []
+  bh.times do |r|
+    row = pixels[by + r]
+    c = 0
+    while c < bw
+      v = row[bx + c]
+      if v == 0
+        run = 0
+        run += 1 while (c + run) < bw && row[bx + c + run] == 0
+        rem = run
+        while rem > 0
+          m = rem > 16 ? 16 : rem
+          toks << (15 + m) # zero-run symbol (16..31)
+          rem -= m
+        end
+        c += run
+      else
+        toks << v          # literal nibble (1..15)
+        c += 1
+      end
+    end
+  end
+  toks
+end
+
+# Huffman code lengths from symbol frequencies.
+def huffman_lengths(freq)
+  lengths = Array.new(freq.length, 0)
+  present = (0...freq.length).select { |s| freq[s] > 0 }
+  return lengths if present.empty?
+  if present.length == 1
+    lengths[present[0]] = 1
+    return lengths
+  end
+  nodes = present.map { |s| { w: freq[s], sym: s } }
+  until nodes.length == 1
+    nodes.sort_by! { |n| n[:w] }
+    a = nodes.shift
+    b = nodes.shift
+    nodes << { w: a[:w] + b[:w], l: a, r: b }
+  end
+  stack = [[nodes[0], 0]]
+  until stack.empty?
+    node, depth = stack.pop
+    if node[:sym]
+      lengths[node[:sym]] = depth
+    else
+      stack << [node[:l], depth + 1]
+      stack << [node[:r], depth + 1]
+    end
+  end
+  lengths
+end
+
+# Canonical Huffman codes (RFC 1951 3.2.2) from code lengths.
+def canonical_codes(lengths, maxbits)
+  bl_count = Array.new(maxbits + 1, 0)
+  lengths.each { |l| bl_count[l] += 1 if l > 0 }
+  code = 0
+  next_code = Array.new(maxbits + 1, 0)
+  (1..maxbits).each do |bits|
+    code = (code + bl_count[bits - 1]) << 1
+    next_code[bits] = code
+  end
+  codes = Array.new(lengths.length, 0)
+  lengths.each_index do |s|
+    l = lengths[s]
+    next if l == 0
+    codes[s] = next_code[l]
+    next_code[l] += 1
+  end
+  codes
+end
+
+# MSB-first bit accumulator producing byte-aligned output.
+class BitBuffer
+  def initialize
+    @bytes = []
+    @cur = 0
+    @n = 0
+  end
+
+  def put(code, len)
+    (len - 1).downto(0) do |i|
+      @cur = (@cur << 1) | ((code >> i) & 1)
+      @n += 1
+      if @n == 8
+        @bytes << @cur
+        @cur = 0
+        @n = 0
+      end
+    end
+  end
+
+  def finish
+    if @n > 0
+      @cur <<= (8 - @n)
+      @bytes << @cur
+      @cur = 0
+      @n = 0
+    end
+    @bytes
+  end
+end
+
+# Build the canonical decode table (count/symbol) exactly as the C decoder does.
+def build_decode_table(lengths, maxbits)
+  count = Array.new(maxbits + 1, 0)
+  lengths.each { |l| count[l] += 1 }
+  count[0] = 0
+  offs = Array.new(maxbits + 2, 0)
+  (1..maxbits - 1).each { |len| offs[len + 1] = offs[len] + count[len] }
+  symbol = Array.new(lengths.length, 0)
+  lengths.each_index do |s|
+    next if lengths[s] == 0
+    symbol[offs[lengths[s]]] = s
+    offs[lengths[s]] += 1
+  end
+  [count, symbol]
+end
+
+# Decode a glyph the same way the C renderer will. Returns w*h nibbles.
+def decode_glyph(blob, offset, npixels, count, symbol, maxbits)
+  out = []
+  bytepos = offset
+  bitpos = 0
+  while out.length < npixels
+    code = 0; first = 0; index = 0; sym = nil
+    len = 1
+    while len <= maxbits
+      bit = (blob[bytepos] >> (7 - bitpos)) & 1
+      bitpos += 1
+      if bitpos == 8
+        bitpos = 0
+        bytepos += 1
+      end
+      code |= bit
+      cnt = count[len]
+      if code - first < cnt
+        sym = symbol[index + (code - first)]
+        break
+      end
+      index += cnt
+      first = (first + cnt) << 1
+      code <<= 1
+      len += 1
+    end
+    raise "decode failure" if sym.nil?
+    if sym < 16
+      out << sym
+    else
+      (sym - 15).times { out << 0 }
+    end
+  end
+  out
+end
+
+COMPRESSED_TEMPLATE = ERB.new(<<~'TEMPLATE', trim_mode: "-")
+  // Generated by ttf2c.rb (<%= generator_comment %>)
+  #ifndef <%= guard %>
+  #define <%= guard %>
+
+  #include "dvi_font.h"
+
+  static const uint8_t font_<%= font_name %>_blob[] = {
+  <% blob.each_slice(20) do |chunk| -%>
+      <%= chunk.map { |b| "0x%02x" % b }.join(",") %>,
+  <% end -%>
+  };
+
+  static const uint32_t font_<%= font_name %>_offsets[<%= num_chars %>] = {
+  <% offsets.each_slice(12) do |chunk| -%>
+      <%= chunk.join(", ") %>,
+  <% end -%>
+  };
+
+  static const uint8_t font_<%= font_name %>_bbox[<%= num_chars * 4 %>] = {
+  <% glyph_bbox.each_slice(8) do |chunk| -%>
+      <%= chunk.map { |b| "%d,%d,%d,%d" % [b[0], b[1], b[2], b[3]] }.join(", ") %>,
+  <% end -%>
+  };
+
+  static const uint8_t font_<%= font_name %>_huff[<%= HUFF_ALPHABET %>] = {
+      <%= lengths.join(", ") %>
+  };
+
+  static const dvi_font_t font_<%= font_name %> = {
+      .glyph_width   = <%= full_advance %>,
+      .glyph_height  = <%= glyph_height %>,
+      .first_char    = 0,
+      .num_chars     = <%= num_chars %>,
+      .bitmap        = font_<%= font_name %>_blob,
+      .glyph_stride  = 0,
+      .bpp           = 4,
+      .bitmap_left   = <%= min_left %>,
+      .compression   = 1,
+      .glyph_offsets = font_<%= font_name %>_offsets,
+      .glyph_bbox    = font_<%= font_name %>_bbox,
+      .huff_table    = font_<%= font_name %>_huff,
+  };
+
+  #endif
+TEMPLATE
+
 options = {
   name: nil,
   output: nil,
   size: 12,
   range: "0x20-0x7f",
   jis: false,
-  aa: false
+  aa: false,
+  compress: false,
+  ascent: nil
 }
 
 OptionParser.new do |opts|
@@ -33,6 +272,8 @@ OptionParser.new do |opts|
   opts.on("-r RANGE", "Character range (e.g., 0x20-0x7f)") { |r| options[:range] = r }
   opts.on("--jis", "JIS X 0208 mode") { options[:jis] = true }
   opts.on("--aa", "Anti-aliased 4bpp rendering") { options[:aa] = true }
+  opts.on("--compress", "Compress glyphs (Huffman + zero-run, JIS+AA only)") { options[:compress] = true }
+  opts.on("--ascent N", Integer, "Force baseline row (align with another font)") { |n| options[:ascent] = n }
 end.parse!
 
 input_path = ARGV[0] or abort "Error: no input TTF file specified"
@@ -248,6 +489,9 @@ if options[:jis]
 
   jis_codepoints = uni2jis.keys
   glyph_width, glyph_height, ascender, min_left = scan_dimensions(font, jis_codepoints, options[:size], mono: !options[:aa])
+  # Force the baseline row to align with another font (keep the taller cell so
+  # nothing is clipped; the ink bounding box trims the extra rows anyway).
+  ascender = options[:ascent] if options[:ascent]
   bitmap_left_value = min_left if options[:aa]
   bytes_per_row = options[:aa] ? (glyph_width + 1) / 2 : (glyph_width + 7) / 8
   bytes_per_glyph = bytes_per_row * glyph_height
@@ -259,6 +503,8 @@ if options[:jis]
   rendered = {}
   advances = {}
   jis2uni.each do |idx, cp|
+    # Leave characters the font lacks blank instead of rendering .notdef (tofu).
+    next if FreeType::C::FT_Get_Char_Index(font.face, cp) == 0
     if options[:aa]
       r = render_glyph_aa(font, cp, glyph_height, glyph_width, ascender: ascender, left_offset: min_left)
       rendered[idx] = r
@@ -269,6 +515,90 @@ if options[:jis]
       rendered[idx] = r
       advances[idx] = r[:advance]
     end
+  end
+
+  if options[:compress]
+    abort "--compress requires --aa" unless options[:aa]
+
+    # Fixed full-width advance = the most common per-glyph advance.
+    adv_hist = Hash.new(0)
+    advances.each_value { |a| adv_hist[a] += 1 }
+    full_advance = adv_hist.max_by { |_, n| n }[0]
+
+    # Pass 1: trim to ink bbox, tokenize, gather symbol frequencies.
+    freq = Array.new(HUFF_ALPHABET, 0)
+    glyph_tokens = Array.new(num_chars)
+    glyph_bbox = Array.new(num_chars) { [0, 0, 0, 0] }
+    num_chars.times do |idx|
+      r = rendered[idx]
+      next unless r
+      bbox = ink_bbox(r[:pixels], glyph_width, glyph_height)
+      next unless bbox
+      bx, by, bw, bh = bbox
+      toks = tokenize_bbox(r[:pixels], bx, by, bw, bh)
+      glyph_tokens[idx] = toks
+      glyph_bbox[idx] = bbox
+      toks.each { |t| freq[t] += 1 }
+    end
+
+    lengths = huffman_lengths(freq)
+    maxlen = lengths.max
+    abort "Huffman code length #{maxlen} exceeds #{HUFF_MAXBITS}" if maxlen > HUFF_MAXBITS
+    codes = canonical_codes(lengths, HUFF_MAXBITS)
+
+    # Pass 2: encode each glyph (byte-aligned), sharing identical bitstreams.
+    blob = []
+    offsets = Array.new(num_chars, 0)
+    dedup = {}
+    num_chars.times do |idx|
+      toks = glyph_tokens[idx]
+      next if toks.nil? # blank glyph: offset unused (bbox w==0)
+      buf = BitBuffer.new
+      toks.each { |t| buf.put(codes[t], lengths[t]) }
+      bytes = buf.finish
+      key = [glyph_bbox[idx], bytes]
+      if (off = dedup[key])
+        offsets[idx] = off
+      else
+        offsets[idx] = blob.length
+        blob.concat(bytes)
+        dedup[key] = offsets[idx]
+      end
+    end
+
+    # Self-test: decode every glyph exactly as the C renderer will.
+    # The FNV-1a digest over decoded pixels lets a host C build confirm its
+    # decoder matches this one (see the cross-check in the build docs).
+    count, symbol = build_decode_table(lengths, HUFF_MAXBITS)
+    populated = 0
+    fnv = 1469598103934665603
+    mask = (1 << 64) - 1
+    num_chars.times do |idx|
+      next if glyph_tokens[idx].nil?
+      populated += 1
+      bx, by, bw, bh = glyph_bbox[idx]
+      expected = []
+      bh.times { |r| bw.times { |c| expected << rendered[idx][:pixels][by + r][bx + c] } }
+      got = decode_glyph(blob, offsets[idx], bw * bh, count, symbol, HUFF_MAXBITS)
+      abort "self-test mismatch at glyph #{idx}" unless got == expected
+      got.each { |v| fnv = ((fnv ^ v) * 1099511628211) & mask }
+    end
+    $stderr.puts "self-test OK, FNV=#{fnv}"
+
+    guard = "DVI_FONT_#{font_name.upcase}_H"
+    generator_comment = "compressed JIS X 0208, 4bpp AA, canonical Huffman + zero-run"
+    result = COMPRESSED_TEMPLATE.result(binding)
+    if options[:output]
+      File.write(options[:output], result)
+      $stderr.puts "Wrote #{options[:output]}"
+    else
+      print result
+    end
+    raw = populated * ((glyph_width + 1) / 2) * glyph_height
+    $stderr.puts "compressed JIS: #{populated} glyphs, blob=#{blob.length}B " \
+                 "(raw 4bpp #{raw}B, #{"%.1f" % (100.0 * blob.length / raw)}%), " \
+                 "advance=#{full_advance}, cell=#{glyph_width}x#{glyph_height}, huffmax=#{maxlen}"
+    exit 0
   end
 
   is_proportional = advances.values.uniq.length > 1

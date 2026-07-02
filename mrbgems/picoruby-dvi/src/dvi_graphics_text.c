@@ -114,11 +114,132 @@ blend_aa_pixel(uint8_t bg, uint8_t fg, uint8_t alpha4)
   return (uint8_t)((rr << 5) | (rg << 2) | rb);
 }
 
+// --- Compressed 4bpp glyph decoding (canonical Huffman + zero-run RLE) ---
+//
+// The encoder is ttf2c.rb (--compress). Symbol alphabet:
+//   1..15  = literal 4bpp nibble, 16..31 = run of (symbol - 15) zero pixels.
+// One shared canonical Huffman table (code lengths per symbol) per font.
+// These constants must match ttf2c.rb.
+#define HUFF_ALPHABET 32
+#define HUFF_MAXBITS  24
+#define GLYPH_SCRATCH_MAX (48 * 48)
+
+typedef struct {
+  uint16_t count[HUFF_MAXBITS + 1];
+  uint8_t symbol[HUFF_ALPHABET];
+} huff_table_t;
+
+// Build the canonical decode table from per-symbol code lengths.
+static void
+huff_build(huff_table_t *h, const uint8_t *lengths)
+{
+  for (int i = 0; i <= HUFF_MAXBITS; i++) h->count[i] = 0;
+  for (int s = 0; s < HUFF_ALPHABET; s++) h->count[lengths[s]]++;
+  h->count[0] = 0;
+  int offs[HUFF_MAXBITS + 2];
+  offs[1] = 0;
+  for (int len = 1; len < HUFF_MAXBITS; len++)
+    offs[len + 1] = offs[len] + h->count[len];
+  for (int s = 0; s < HUFF_ALPHABET; s++)
+    if (lengths[s]) h->symbol[offs[lengths[s]]++] = (uint8_t)s;
+}
+
+typedef struct {
+  const uint8_t *p;
+  int bit;
+} bitreader_t;
+
+static inline int
+bitreader_get(bitreader_t *br)
+{
+  int b = (*br->p >> (7 - br->bit)) & 1;
+  if (++br->bit == 8) { br->bit = 0; br->p++; }
+  return b;
+}
+
+// Decode one symbol (MSB-first canonical Huffman). Returns -1 on error.
+static inline int
+huff_decode(bitreader_t *br, const huff_table_t *h)
+{
+  int code = 0, first = 0, index = 0;
+  for (int len = 1; len <= HUFF_MAXBITS; len++) {
+    code |= bitreader_get(br);
+    int cnt = h->count[len];
+    if (code - first < cnt) return h->symbol[index + (code - first)];
+    index += cnt;
+    first = (first + cnt) << 1;
+    code <<= 1;
+  }
+  return -1;
+}
+
+// One decoded glyph (4bpp nibbles, one byte each) plus a cache of the last
+// font's Huffman table. All rendering runs on Core 0, so plain statics are safe.
+static uint8_t glyph_scratch[GLYPH_SCRATCH_MAX];
+static huff_table_t cached_huff;
+static const uint8_t *cached_huff_src = NULL;
+
+// Render one compressed 4bpp glyph. Decodes into glyph_scratch, then blits the
+// tight bounding box at (char_x + bitmap_left + bbox_x, y + bbox_y).
+static int
+draw_glyph_4bpp_compressed(uint8_t *framebuffer, int fb_width, int fb_height, int char_x, int y, int idx,
+                           uint8_t color, const dvi_font_t *font)
+{
+  int advance = (font->widths) ? font->widths[idx] : font->glyph_width;
+  const uint8_t *bb = &font->glyph_bbox[idx * 4];
+  int bx = bb[0], by = bb[1], bw = bb[2], bh = bb[3];
+  if (bw == 0 || bh == 0) return advance; // blank glyph
+  int total = bw * bh;
+  if (total > GLYPH_SCRATCH_MAX) return advance;
+
+  if (cached_huff_src != font->huff_table) {
+    huff_build(&cached_huff, font->huff_table);
+    cached_huff_src = font->huff_table;
+  }
+
+  bitreader_t br = { font->bitmap + font->glyph_offsets[idx], 0 };
+  int produced = 0;
+  while (produced < total) {
+    int sym = huff_decode(&br, &cached_huff);
+    if (sym < 0) break;
+    if (sym < 16) {
+      glyph_scratch[produced++] = (uint8_t)sym;
+    } else {
+      int run = sym - 15;
+      while (run-- > 0 && produced < total) glyph_scratch[produced++] = 0;
+    }
+  }
+
+  for (int r = 0; r < bh; r++) {
+    int py = y + by + r;
+    if (py < 0) continue;
+    if (py >= fb_height) break;
+    const uint8_t *srow = &glyph_scratch[r * bw];
+    for (int c = 0; c < bw; c++) {
+      uint8_t v = srow[c];
+      if (v == 0) continue;
+      int px = char_x + font->bitmap_left + bx + c;
+      if (px < 0) continue;
+      if (px >= fb_width) break;
+      int offset = py * fb_width + px;
+      if (v == 15)
+        framebuffer[offset] = color;
+      else
+        framebuffer[offset] = blend_aa_pixel(framebuffer[offset], color, v);
+    }
+  }
+
+  return advance;
+}
+
 // Render one 4bpp anti-aliased glyph at (char_x, y) and return its advance width.
 static int
 draw_glyph_4bpp(uint8_t *framebuffer, int fb_width, int fb_height, int char_x, int y, int idx,
                 uint8_t color, const dvi_font_t *font)
 {
+  if (font->compression)
+    return draw_glyph_4bpp_compressed(framebuffer, fb_width, fb_height, char_x, y, idx, color, font);
+
   int gw = font->glyph_width;
   int gh = font->glyph_height;
   int bytes_per_row = (gw + 1) / 2;
@@ -323,7 +444,9 @@ dvi_graphics_draw_text_affine(uint8_t *framebuffer, int fb_width, int fb_height,
     }
 
     int advance = char_advance(cp, font, wide_font);
-    if (use_font && idx >= 0) {
+    // Affine (rotated/scaled) rendering samples a flat bitmap; compressed fonts
+    // are not supported here, so skip the glyph but keep its advance.
+    if (use_font && idx >= 0 && !use_font->compression) {
       text_affine_glyph_t *g = &glyphs[num_glyphs];
       g->bitmap = &use_font->bitmap[glyph_offset(use_font, idx)];
       g->width = use_font->glyph_width;
