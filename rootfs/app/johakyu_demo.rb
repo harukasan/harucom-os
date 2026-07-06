@@ -100,6 +100,15 @@ def johakyu_demo
       DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   ticks: #{scheduler.tick_count}      ", attr_normal)
       DVI::Text.put_string(0, 9, "fired: #{scheduler.fired_count}   pending: #{scheduler.pending_count}   late max: #{scheduler.fire_delay_ms_max} ms      ", attr_normal)
       DVI::Text.put_string(0, 11, "dimmer ch6: #{DMX.get(6)}   ch19: #{DMX.get(19)}      ", attr_normal)
+      step = ((position - position_int) * 8).to_i
+      step = 7 if step > 7
+      bar = ""
+      cell = 0
+      while cell < 8
+        bar = bar + (cell == step ? "#" : ".")
+        cell += 1
+      end
+      DVI::Text.put_string(0, 13, "step: [#{bar}]  kick = 0/4, snare = 2/6", attr_normal)
       DVI::Text.commit
     end
 

@@ -27,9 +27,11 @@ module Johakyu
     attr_reader :clock, :scheduler
 
     # Voice table: name -> [channel, frequency, waveform, gate_ms].
-    # Tone-based stand-ins until WAV playback lands (M5).
+    # Tone-based stand-ins until WAV playback lands (M5). The kick sits
+    # at 110 Hz: small speakers barely reproduce anything lower, and an
+    # inaudible kick makes the light look off-beat.
     VOICES = {
-      bd: [0, 65, :square, 90],
+      bd: [0, 110, :square, 90],
       sn: [1, 240, :triangle, 60],
       hh: [2, 2200, :square, 25],
     }
