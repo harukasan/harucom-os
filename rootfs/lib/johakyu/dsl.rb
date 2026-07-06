@@ -40,8 +40,11 @@ module Johakyu
     # becomes audible only after the ring buffer (1024 samples, about
     # 46 ms) drains, while a DMX write lands within one 25 ms frame.
     # Sound events therefore fire early by this amount so beats and
-    # light land together. Tune by ear with audio_latency_ms=.
-    def initialize(audio: nil, bpm: 120, audio_latency_ms: 35)
+    # light land together. The default was calibrated by ear against
+    # the SHEHDS rig (the fixture dimmer adds its own lag, so the best
+    # value sits below the raw buffer delay). Tune per venue with
+    # audio_latency_ms=.
+    def initialize(audio: nil, bpm: 120, audio_latency_ms: 20)
       @clock = Clock.new(bpm: bpm)
       @scheduler = Scheduler.new(@clock)
       @audio = audio
