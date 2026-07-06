@@ -16,6 +16,8 @@ rake          # configure + build + combined UF2 (default)
 rake uf2      # firmware UF2 only (no dictionary)
 rake dict_uf2 # dictionary UF2 only (vendor/harucom-os-dict)
 rake flash    # flash combined UF2 via picotool
+rake test     # run host tests for rootfs scripts (tests/)
+rake test_vm  # (re)build the host test VM
 rake clean    # remove build/
 rake distclean # remove build/, PicoRuby build, and dictionary build
 ```
@@ -32,6 +34,20 @@ or adding new `MRB_SYM()` identifiers in C code, you must run
 `rake distclean` before `rake`.** `rake clean` only removes the CMake build
 directory; it does not rebuild `libmruby.a` or regenerate the presym table.
 The PicoRuby build cache is separate and only cleared by `distclean`.
+
+## Testing
+
+Host tests for `rootfs/` scripts live in `tests/` and are never flashed
+to the board. `rake test` runs them through picoruby's Picotest: a CRuby
+orchestrator (`tests/runner.rb`) discovers `tests/*_test.rb` files and
+executes each test class on a host microruby VM built from
+[build_config/harucom-os-host-test.rb](build_config/harucom-os-host-test.rb),
+which uses the same VM class and defines (`MRB_INT64` etc.) as the
+firmware, so mruby incompatibilities surface in tests instead of on the
+board. Hardware modules (`Machine`, `DMX`, `PWMAudio`) are replaced by
+[tests/stubs.rb](tests/stubs.rb); tests control time via
+`Machine.millis=`. `rake distclean` removes the test VM; `rake test`
+rebuilds it on demand.
 
 ## Documentation
 

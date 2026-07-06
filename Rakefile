@@ -61,6 +61,21 @@ task flash: :full_uf2 do
   sh "picotool load -f -x #{FULL_UF2}"
 end
 
+PICORUBY_DIR = File.join(PROJECT_DIR, "lib", "picoruby")
+HOST_TEST_CONFIG = File.join(PROJECT_DIR, "build_config", "harucom-os-host-test.rb")
+HOST_TEST_VM = File.join(PICORUBY_DIR, "build", "harucom-host-test", "bin", "microruby")
+
+desc "Build the host test VM (microruby with board-parity defines)"
+task :test_vm do
+  sh({ "MRUBY_CONFIG" => HOST_TEST_CONFIG }, "rake all", chdir: PICORUBY_DIR)
+end
+
+desc "Run host tests for rootfs scripts (tests/, never flashed)"
+task :test do
+  Rake::Task[:test_vm].invoke unless File.executable?(HOST_TEST_VM)
+  sh "ruby #{File.join(PROJECT_DIR, "tests", "runner.rb")}"
+end
+
 desc "Clean build directory"
 task :clean do
   rm_rf BUILD_DIR
