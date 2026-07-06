@@ -125,10 +125,25 @@ research 04 で計測した 1 tick query コストを、実際の DSL (複数バ
 - 既存 (research 04): `pattern.rb`/`signal.rb`/`clock.rb`/`scheduler.rb` を利用。
 - 依存: `fixture.rb` (research 03)、`DMX`/`Audio` (research 01/02)。
 
-## 実装メモ (2026-07-06, 段階A 実装済み・実機確認待ち)
+## 実装メモ (2026-07-07 更新, 段階A 実機確認済み・段階B 実装済み)
 
-段階A を `rootfs/lib/johakyu/dsl.rb` の `Johakyu::Session` として実装 (M4 分のみ。
-段階B/C は未着手):
+段階A は M4 として実機確認済み (research 04 参照)。段階B (M7) を実装、実機確認待ち:
+
+- `rootfs/lib/johakyu/mini.rb`: 手書き再帰下降パーサ + strudel-rb 移植の「サイクル番号 →
+  イベント列」インタープリタ。表のサブセット全対応 (列 / `*n` / `!n` / `/n` / `[...]` /
+  `<...>` / `,` スタック / `:n` / `~` `-` / `_` ホールド)。ホストで strudel-rb の
+  Mini::Parser と Hap 列差分 29 ケース全一致。コンビネータ合成でなくインタープリタ移植
+  なのは `_` と `!` の意味論保持と割り当て削減のため。
+- `Pattern.reify` をフックし、パターンを受ける所ならどこでも String がミニ記法になる
+  (struct/mask/演算の右辺も含む)。
+- `Session#sound("bd ~ sn ~, hh*8")`: 値 (ボイス名 or `{s:, n:}`) を VOICES で発音。
+  `:n` は WAV (M5) まで無視。track 名 `:sound`、latency 補正対象。
+- `Session#dmx(:s1).dimmer("1 0 0.5 0").color("<red blue>")`: チェーン可能な per-target
+  バインダ。track 名は dmx_seq と同一なので配列スタイルとミニ記法スタイルは同じ track を
+  境界量子化で置き換え合える。ミニ記法の数値文字列は正規化 Float、それ以外は名前テーブル。
+- 確認用: `johakyu_demo` プリセット 4 がミニ記法駆動 (sound + 両灯体の dimmer/color)。
+
+段階A の記録 (M4 時点):
 
 - `session.tempo(bpm)` / `session.seq(:bd, [1,0,0,0])` /
   `session.dmx_seq(:s1, :dimmer, [1.0, 0, 0.5, 0])` /
