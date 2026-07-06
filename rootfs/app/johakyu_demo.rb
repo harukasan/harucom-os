@@ -82,16 +82,34 @@ def johakyu_demo
   scheduler = session.scheduler
   running = true
   frame = 0
+
+  # Prebuilt step cursor rows so the per-iteration redraw allocates
+  # nothing. The cursor updates every iteration (about 10 ms); the
+  # remaining lag is the display pipeline itself.
+  step_rows = []
+  s = 0
+  while s < 8
+    bar = ""
+    cell = 0
+    while cell < 8
+      bar = bar + (cell == s ? "#" : ".")
+      cell += 1
+    end
+    step_rows << "step: [#{bar}]  kick = 0/4, snare = 2/6"
+    s += 1
+  end
+
   while running
     session.update
     DMX.keepalive
 
-    # Redraw at roughly 20 Hz. Drawing every iteration makes the loop
-    # longer, which delays event firing and starves the audio buffer.
+    position = session.clock.position
+    position_int = position.to_i
+
+    # Full status redraw at roughly 20 Hz. Building all the strings
+    # every iteration would lengthen the loop and delay event firing.
     frame += 1
     if frame % 5 == 0
-      position = session.clock.position
-      position_int = position.to_i
       position_frac = ((position - position_int) * 100).to_i
       frac_text = position_frac < 10 ? "0#{position_frac}" : "#{position_frac}"
       tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
@@ -100,17 +118,12 @@ def johakyu_demo
       DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   ticks: #{scheduler.tick_count}      ", attr_normal)
       DVI::Text.put_string(0, 9, "fired: #{scheduler.fired_count}   pending: #{scheduler.pending_count}   late max: #{scheduler.fire_delay_ms_max} ms      ", attr_normal)
       DVI::Text.put_string(0, 11, "dimmer ch6: #{DMX.get(6)}   ch19: #{DMX.get(19)}      ", attr_normal)
-      step = ((position - position_int) * 8).to_i
-      step = 7 if step > 7
-      bar = ""
-      cell = 0
-      while cell < 8
-        bar = bar + (cell == step ? "#" : ".")
-        cell += 1
-      end
-      DVI::Text.put_string(0, 13, "step: [#{bar}]  kick = 0/4, snare = 2/6", attr_normal)
-      DVI::Text.commit
     end
+
+    step = ((position - position_int) * 8).to_i
+    step = 7 if step > 7
+    DVI::Text.put_string(0, 13, step_rows[step], attr_normal)
+    DVI::Text.commit
 
     k = keyboard.read_char
     if k
