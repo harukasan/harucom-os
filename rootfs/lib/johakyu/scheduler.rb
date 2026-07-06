@@ -19,7 +19,8 @@ module Johakyu
   class Scheduler
     LOOKAHEAD_MS = 50
 
-    attr_reader :tick_count, :tick_ms_total, :tick_ms_max, :fired_count
+    attr_reader :tick_count, :tick_ms_total, :tick_ms_max, :fired_count,
+                :fire_delay_ms_max
 
     def initialize(clock)
       @clock = clock
@@ -31,6 +32,7 @@ module Johakyu
       @tick_ms_total = 0
       @tick_ms_max = 0
       @fired_count = 0
+      @fire_delay_ms_max = 0
       @errors = {}
     end
 
@@ -111,6 +113,8 @@ module Johakyu
     end
 
     # Fire pending events that are due. Returns the number fired.
+    # fire_delay_ms_max records how late events fire relative to their
+    # target time; large values point at loop stalls (GC, slow drawing).
     def pump
       now = Machine.board_millis
       fired = 0
@@ -119,6 +123,8 @@ module Johakyu
         event = @pending[i]
         if event[0] <= now
           @pending.delete_at(i)
+          delay = now - event[0]
+          @fire_delay_ms_max = delay if delay > @fire_delay_ms_max
           event[1].call(event[2], event[0])
           fired += 1
         else

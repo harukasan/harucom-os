@@ -81,21 +81,27 @@ def johakyu_demo
 
   scheduler = session.scheduler
   running = true
+  frame = 0
   while running
     session.update
     DMX.keepalive
 
-    position = session.clock.position
-    position_int = position.to_i
-    position_frac = ((position - position_int) * 100).to_i
-    frac_text = position_frac < 10 ? "0#{position_frac}" : "#{position_frac}"
-    tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
-    DVI::Text.put_string(0, 4, "preset: #{preset_name}     bpm: #{bpm}      ", attr_active)
-    DVI::Text.put_string(0, 6, "cycle: #{position_int}.#{frac_text}    frames: #{DMX.frame_count}      ", attr_normal)
-    DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   ticks: #{scheduler.tick_count}      ", attr_normal)
-    DVI::Text.put_string(0, 9, "fired: #{scheduler.fired_count}   pending: #{scheduler.pending_count}      ", attr_normal)
-    DVI::Text.put_string(0, 11, "dimmer ch6: #{DMX.get(6)}   ch19: #{DMX.get(19)}      ", attr_normal)
-    DVI::Text.commit
+    # Redraw at roughly 20 Hz. Drawing every iteration makes the loop
+    # longer, which delays event firing and starves the audio buffer.
+    frame += 1
+    if frame % 5 == 0
+      position = session.clock.position
+      position_int = position.to_i
+      position_frac = ((position - position_int) * 100).to_i
+      frac_text = position_frac < 10 ? "0#{position_frac}" : "#{position_frac}"
+      tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
+      DVI::Text.put_string(0, 4, "preset: #{preset_name}     bpm: #{bpm}      ", attr_active)
+      DVI::Text.put_string(0, 6, "cycle: #{position_int}.#{frac_text}    frames: #{DMX.frame_count}      ", attr_normal)
+      DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   ticks: #{scheduler.tick_count}      ", attr_normal)
+      DVI::Text.put_string(0, 9, "fired: #{scheduler.fired_count}   pending: #{scheduler.pending_count}   late max: #{scheduler.fire_delay_ms_max} ms      ", attr_normal)
+      DVI::Text.put_string(0, 11, "dimmer ch6: #{DMX.get(6)}   ch19: #{DMX.get(19)}      ", attr_normal)
+      DVI::Text.commit
+    end
 
     k = keyboard.read_char
     if k

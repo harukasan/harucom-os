@@ -116,8 +116,24 @@ module Johakyu
       level = 1.0 if level > 1.0
       volume = (level * 15.0 + 0.5).to_i
       return if volume == 0
-      @audio.tone(voice[0], voice[1], waveform: waveform(voice[2]), volume: volume)
-      @gates << [at_ms + voice[3], voice[0]]
+      channel = voice[0]
+      # Drop any pending gate for this channel so a stale note-off
+      # cannot silence the note we are about to start.
+      i = 0
+      while i < @gates.length
+        if @gates[i][1] == channel
+          @gates.delete_at(i)
+        else
+          i += 1
+        end
+      end
+      @audio.tone(channel, voice[1], waveform: waveform(voice[2]), volume: volume)
+      # Gate from the actual start time, not the scheduled target. When
+      # the event fires late (GC or a slow loop iteration), a gate based
+      # on at_ms would already be due and stop the note immediately.
+      now = Machine.board_millis
+      start = at_ms > now ? at_ms : now
+      @gates << [start + voice[3], channel]
     end
 
     def pump_gates
