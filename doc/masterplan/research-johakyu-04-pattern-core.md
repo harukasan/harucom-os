@@ -216,9 +216,14 @@ deadman 500ms に近く危険だった。
 - 新規 bind は初回チャンクを同期 staging し、初拍が staging 順で遅れないようにする。
 
 ホスト計測 (preset 3 相当、10ms 刻み 2000 iteration): 旧 94.1 µs/iteration →
-新 4.7 µs/iteration (**20 倍**)。実機の再計測は残項目 (johakyu_demo の tick avg/max と
-late max 表示で確認する。staging チャンクの単発コストが tick max に出る想定。大きい
-場合は STAGE_CHUNK を 1/2 サイクルに下げる)。
+新 4.7 µs/iteration (**20 倍**)。
+
+実機再計測 (2026-07-07、johakyu_demo): **tick 平均 3.1ms / 最大 109ms /
+発火遅延最大 67ms** (旧: 58ms / 342ms / 412ms)。平均はホスト予測どおり約 19 倍改善。
+tick 最大は staging チャンク 1 回の query コスト + GC スパイクで、発火遅延は最大 67ms
+に収まり deadman 500ms に対し安全圏。さらに詰める場合の手: STAGE_CHUNK を 1/2 サイクル化
+(単発 staging コスト半減)、query 内の Fraction 割り当て削減、GC チューニング。M8/M10 の
+負荷再評価 (R15/R17 再評価) で必要なら続ける。
 
 音抜けの既知バグも修正済み: ゲートオフを目標時刻基準で積んでいたため、発火遅延が
 ゲート長を超えるとノートが即殺されていた。実発火時刻基準に変更し、再トリガ時に同
