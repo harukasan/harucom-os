@@ -32,6 +32,15 @@ set(PICO_BOARD harucom_board CACHE STRING "Board type")
 set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/include/boards)
 set(PICO_PLATFORM rp2350-arm-s CACHE STRING "Platform")
 
+# Firmware linker FLASH window. The chip holds 16 MB, but the firmware region
+# is capped so it never reaches the dictionary at 0x600000 or the LittleFS
+# filesystem at 0x800000. 6 MB ends exactly at 0x600000, giving the firmware
+# the full span up to the dictionary. Overrides the RP2350 default of 4 MB
+# (PICO_DEFAULT_FLASH_SIZE_BYTES in rp2350-arm-s.cmake). This only sizes the
+# linker region; the runtime chip size stays 16 MB via PICO_FLASH_SIZE_BYTES
+# in the board header.
+set(PICO_FLASH_SIZE_BYTES "6 * 1024 * 1024")
+
 # Pico-PIO-USB (must be set before pico_sdk_init)
 set(PICO_PIO_USB_PATH ${CMAKE_CURRENT_LIST_DIR}/lib/Pico-PIO-USB)
 
