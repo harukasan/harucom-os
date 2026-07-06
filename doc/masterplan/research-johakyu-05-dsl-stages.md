@@ -125,6 +125,27 @@ research 04 で計測した 1 tick query コストを、実際の DSL (複数バ
 - 既存 (research 04): `pattern.rb`/`signal.rb`/`clock.rb`/`scheduler.rb` を利用。
 - 依存: `fixture.rb` (research 03)、`DMX`/`Audio` (research 01/02)。
 
+## 実装メモ (2026-07-06, 段階A 実装済み・実機確認待ち)
+
+段階A を `rootfs/lib/johakyu/dsl.rb` の `Johakyu::Session` として実装 (M4 分のみ。
+段階B/C は未着手):
+
+- `session.tempo(bpm)` / `session.seq(:bd, [1,0,0,0])` /
+  `session.dmx_seq(:s1, :dimmer, [1.0, 0, 0.5, 0])` /
+  `session.dmx_signal(:all, :pan, Johakyu.sine.slow(4))` (連続バインド)。
+- 配列は `fastcat` の Pattern に変換して Scheduler に乗せるので、段階B/C は同じ track に
+  ミニ記法/変換済み Pattern を渡すだけで積み増せる。
+- 休符規約: seq は 0/nil が休符。dmx_seq は nil のみ休符で 0 は実値 (dimmer 0 =
+  そのステップで消灯)。Integer は raw 0-255、Float は正規化 0.0-1.0、Symbol は名前テーブル。
+- 音は `Board::PWMAudio` の tone をボイス表 (bd/sn/hh: ch/周波数/波形/ゲート ms) で代用し、
+  ゲート終了は Session が pending で管理 (WAV 化は M5/M6)。
+- 同名 track の再バインドは次サイクル境界で量子化スワップ (research 04)。
+- リグ変更 (同一機種 2 台) により本ファイルの例の `:smalls`/`:bigs` は `:all`/`:s1`/`:s2`
+  に読み替える (research 03)。
+
+M4 の実機確認手順は research 04 の「ベンチ確認の残項目」を参照
+(`run app/johakyu_demo.rb`、プリセット 1 が DoD の「キックで dimmer が立つ」)。
+
 ## 次のハンドオフ先
 
 - [research-johakyu-06-editor-ui.md](research-johakyu-06-editor-ui.md) (M9: この DSL を

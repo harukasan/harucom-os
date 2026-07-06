@@ -157,6 +157,59 @@ end
 - ホストスパイク: strudel-rb のローカルクローン (リポジトリ外) に dispatch 拡張を当てる。
 - 参照: strudel-rb `lib/strudel/core/*`、`lib/strudel/scheduler/cyclist.rb`。
 
+## 実装メモ (2026-07-06, コア実装完了・ホスト検証済み)
+
+`rootfs/lib/johakyu/{pattern,signal,clock,scheduler}.rb` と段階A DSL
+(`dsl.rb`、research 05)、確認アプリ `rootfs/app/johakyu_demo.rb` を実装。実機確認は未実施。
+
+### R16 (同期スパイク) の結果: ホストで確証済み
+
+strudel-rb の Cyclist 拡張ではなく、実装した Scheduler 本体をホスト ruby (DMX/Machine/
+PWMAudio スタブ) で駆動して確認した。こちらの方が移植の不確実性を直接消せる:
+
+- 音シンクと DMX シンクが同一ステップ列から **完全に同一の目標時刻** (0/1000/2000/... ms)
+  で発火する (kick の tone と dimmer 255 の書き込みが同時刻)。
+- 連続 signal (sine) が毎 tick サンプリングされ 0-1 の値が滑らかに流れる。
+- 量子化スワップ: サイクル途中の再バインドは次の整数サイクル境界まで旧パターンが
+  発火し続け、境界から新パターンに切り替わる (2 区間クエリで境界内スワップも正確)。
+- 異常系: query が raise する track は last-good へフォールバックし、他 track は影響なし。
+- テンポ変更は origin リベースで position が連続 (ジャンプなし)。
+
+### strudel-rb 互換の確認
+
+ホストで同一クエリを両実装に投げて Hap 列を突き合わせる差分テストを実施、35 項目全一致:
+pure / fastcat / slowcat / stack / euclid(3,8)(5,8)(回転) / fast / slow / rev (サイクル跨ぎ
+クエリ含む) / every / struct / mask / range / add / mul / degrade_by (決定的乱数含む) /
+sine.segment。
+
+### 設計の要点と strudel-rb からの変更
+
+- **Fraction は整数 num/den の軽量有理数**。mruby に Rational が無いため。正確な有理数を
+  保つのは `has_onset?` の begin 一致比較が浮動小数点では壊れるから (R15 の固定小数点案は
+  境界一致が保証できず不採用)。Float は分母 3840 で量子化して取り込む。
+- query は TimeSpan を直接受ける (State/controls 層は省略)。
+- ホットパスは while ループ (picoruby に flat_map/filter_map が無い前提)。
+- `every` は変換結果をビルド時に 1 回だけ生成 (asonas は query 毎に func 呼び出し)。
+- `rev` は外側で split_queries する Strudel JS 方式 (サイクル跨ぎクエリでも正しい)。
+- Scheduler: LOOKAHEAD_MS=50 の先読み query → pending キュー (board_millis 目標時刻) →
+  `pump` が期日到来分を発火。連続 track は毎 tick 現在値をサンプリングして即書き込み。
+- Clock: `Machine.board_millis` ベース、bpm/cpm/cps 変更は origin リベースで連続。
+
+### R15 の現状
+
+Fraction は上記の軽量有理数で決定。1 tick の query コストと GC 影響は実機計測が残って
+おり、`johakyu_demo` の画面に tick 平均 (µs) / 最大 (ms) を常時表示するようにしてある。
+段階A 規模 (離散 5-6 track) で問題が出たら Hap 再利用や割り当て削減を検討する。
+
+### ベンチ確認の残項目 (M4 DoD)
+
+`run app/johakyu_demo.rb` で確認する:
+
+1. プリセット 1 でキックの瞬間に両灯体の dimmer が立つ (音光同期、M4 DoD)。
+2. プリセット切替 (1/2/3) が次のサイクル境界で切り替わる (量子化スワップ)。
+3. -/= でテンポ変更してもビートが飛ばない (連続リベース)。
+4. tick 平均/最大の値を記録 (R15)。DMX rate 40Hz と画面更新が維持されること。
+
 ## 次のハンドオフ先
 
 - [research-johakyu-05-dsl-stages.md](research-johakyu-05-dsl-stages.md) (M4 段階A / M7 / M8)。
