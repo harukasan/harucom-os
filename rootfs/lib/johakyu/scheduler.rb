@@ -47,14 +47,23 @@ module Johakyu
 
     # Bind a discrete pattern. The sink receives (value, at_ms) for each
     # onset. Rebinding an existing name swaps at the next cycle boundary.
-    def bind(name, pattern, &sink)
-      add_track(name, pattern, false, sink)
+    # latency_ms fires the sink early to compensate a slow output path
+    # (e.g. the PWM audio ring buffer), aligning it with faster sinks.
+    def bind(name, pattern, latency_ms: 0, &sink)
+      add_track(name, pattern, false, sink, latency_ms)
     end
 
     # Bind a continuous pattern. The sink receives the current value
     # once per tick.
     def bind_continuous(name, pattern, &sink)
-      add_track(name, pattern, true, sink)
+      add_track(name, pattern, true, sink, 0)
+    end
+
+    # Change the output latency compensation of a track. Call restage
+    # afterwards so already staged events pick up the new offset.
+    def set_latency(name, latency_ms)
+      track = @tracks[name]
+      track[:latency_ms] = latency_ms if track
     end
 
     def remove(name)
@@ -165,7 +174,7 @@ module Johakyu
 
     private
 
-    def add_track(name, pattern, continuous, sink)
+    def add_track(name, pattern, continuous, sink, latency_ms)
       track = @tracks[name]
       if track
         # Quantize the swap to the next integer cycle boundary. Events
@@ -173,13 +182,14 @@ module Johakyu
         # drop them so the new pattern fills that range instead.
         swap_at = Fraction.of(@clock.position).next_sam
         if !track[:continuous] && track[:staged_until] > swap_at
-          drop_pending(name, @clock.position_to_ms(swap_at).to_i)
+          drop_pending(name, @clock.position_to_ms(swap_at).to_i - track[:latency_ms])
           track[:staged_until] = swap_at
         end
         track[:next_pattern] = pattern
         track[:swap_at] = swap_at
         track[:sink] = sink
         track[:continuous] = continuous
+        track[:latency_ms] = latency_ms
       else
         track = {
           name: name,
@@ -189,6 +199,7 @@ module Johakyu
           swap_at: nil,
           continuous: continuous,
           sink: sink,
+          latency_ms: latency_ms,
           staged_until: Fraction.of(@clock.position),
         }
         @tracks[name] = track
@@ -221,12 +232,13 @@ module Johakyu
       haps = track[:pattern].query(TimeSpan.new(from, to))
       sink = track[:sink]
       name = track[:name]
+      latency_ms = track[:latency_ms]
       i = 0
       while i < haps.length
         hap = haps[i]
         i += 1
         next unless hap.has_onset?
-        at_ms = @clock.position_to_ms(hap.whole.begin_time).to_i
+        at_ms = @clock.position_to_ms(hap.whole.begin_time).to_i - latency_ms
         @pending << [at_ms, sink, hap.value, name]
       end
       track[:staged_until] = to

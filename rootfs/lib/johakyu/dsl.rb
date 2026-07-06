@@ -34,11 +34,33 @@ module Johakyu
       hh: [2, 2200, :square, 25],
     }
 
-    def initialize(audio: nil, bpm: 120)
+    # audio_latency_ms compensates the PWM audio output path: tone()
+    # becomes audible only after the ring buffer (1024 samples, about
+    # 46 ms) drains, while a DMX write lands within one 25 ms frame.
+    # Sound events therefore fire early by this amount so beats and
+    # light land together. Tune by ear with audio_latency_ms=.
+    def initialize(audio: nil, bpm: 120, audio_latency_ms: 35)
       @clock = Clock.new(bpm: bpm)
       @scheduler = Scheduler.new(@clock)
       @audio = audio
+      @audio_latency_ms = audio_latency_ms
+      @sound_tracks = []
       @gates = []
+    end
+
+    attr_reader :audio_latency_ms
+
+    # Adjust the sound output latency compensation at runtime and
+    # restage so upcoming events use the new offset.
+    def audio_latency_ms=(ms)
+      ms = 0 if ms < 0
+      @audio_latency_ms = ms
+      i = 0
+      while i < @sound_tracks.length
+        @scheduler.set_latency(@sound_tracks[i], ms)
+        i += 1
+      end
+      @scheduler.restage
     end
 
     def tempo(bpm)
@@ -53,7 +75,8 @@ module Johakyu
       pattern = Session.steps_to_pattern(steps, true)
       voice = VOICES[name] || VOICES[:bd]
       track = ("sound_" + name.to_s).to_sym
-      @scheduler.bind(track, pattern) do |value, at_ms|
+      @sound_tracks << track unless @sound_tracks.include?(track)
+      @scheduler.bind(track, pattern, latency_ms: @audio_latency_ms) do |value, at_ms|
         trigger_voice(voice, value, at_ms)
       end
     end

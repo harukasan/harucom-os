@@ -77,7 +77,7 @@ def johakyu_demo
 
   DVI::Text.clear(attr_clear)
   DVI::Text.put_string(0, 0, "=== Johakyu demo (M4 stage A)  sound + light on one clock ===", attr_title)
-  DVI::Text.put_string(0, 2, "1/2/3: preset (swaps at next cycle)   -/=: tempo   Esc/q: quit", attr_normal)
+  DVI::Text.put_string(0, 2, "1/2/3: preset (swaps at next cycle)   -/=: tempo   [/]: audio latency   Esc/q: quit", attr_normal)
 
   scheduler = session.scheduler
   running = true
@@ -95,7 +95,7 @@ def johakyu_demo
       position_frac = ((position - position_int) * 100).to_i
       frac_text = position_frac < 10 ? "0#{position_frac}" : "#{position_frac}"
       tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
-      DVI::Text.put_string(0, 4, "preset: #{preset_name}     bpm: #{bpm}      ", attr_active)
+      DVI::Text.put_string(0, 4, "preset: #{preset_name}     bpm: #{bpm}     audio lat: #{session.audio_latency_ms} ms      ", attr_active)
       DVI::Text.put_string(0, 6, "cycle: #{position_int}.#{frac_text}    frames: #{DMX.frame_count}      ", attr_normal)
       DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   ticks: #{scheduler.tick_count}      ", attr_normal)
       DVI::Text.put_string(0, 9, "fired: #{scheduler.fired_count}   pending: #{scheduler.pending_count}   late max: #{scheduler.fire_delay_ms_max} ms      ", attr_normal)
@@ -118,6 +118,11 @@ def johakyu_demo
         when "="
           bpm = bpm < 300 ? bpm + 10 : bpm
           session.tempo(bpm)
+        when "["
+          session.audio_latency_ms = session.audio_latency_ms - 5
+        when "]"
+          latency = session.audio_latency_ms + 5
+          session.audio_latency_ms = latency > 150 ? 150 : latency
         when "q", "Q"
           running = false
         end
