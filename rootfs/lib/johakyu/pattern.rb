@@ -483,7 +483,21 @@ module Johakyu
           end
           k += 1
         end
-        haps.sort { |a, b| a.part.begin_time <=> b.part.begin_time }
+        # Insertion sort in plain Ruby. Array#sort with a block is a C
+        # heapsort that yields per comparison, which re-enters the VM;
+        # keep the scheduler's query path free of nested execution.
+        i = 1
+        while i < haps.length
+          hap = haps[i]
+          j = i - 1
+          while j >= 0 && hap.part.begin_time < haps[j].part.begin_time
+            haps[j + 1] = haps[j]
+            j -= 1
+          end
+          haps[j + 1] = hap
+          i += 1
+        end
+        haps
       end
     end
 
