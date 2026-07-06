@@ -182,6 +182,52 @@ DSL に依存せず C API を直接叩く確認ハーネス (`audio_demo.rb` 方
 - 手本: `mrbgems/picoruby-pwm-audio/ports/rp2350/pwm_audio_port.c`、
   `lib/picoruby/mrbgems/picoruby-uart/ports/rp2040/uart.c`
 
+## 実装メモ (2026-07-06, M2 実装完了・ビルド確認済み)
+
+`mrbgems/picoruby-dmx/` 一式、`rootfs/lib/board/dmx.rb`、`rootfs/app/dmx_check.rb` を実装し、
+`bundle exec rake distclean` + フルビルドが通ることを確認済み。実機確認 (M2c) は未実施。
+
+### 設計からの変更点
+
+- **アラームは TIMER1 alarm 0** (設計は「Alarm 2 または 3」)。TIMER0 の 4 本は全て使用済み
+  だった: alarm 0 = mruby タスク tick (hal_task.c)、alarm 1 = pwm-audio、alarm 2 = PIO-USB
+  SOF、alarm 3 = SDK デフォルト alarm pool (`sleep_ms` 等が使用、
+  `PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM=3`)。TIMER1 は完全に空いており、
+  `alarm_pool_create_on_timer(alarm_pool_timer_for_timer_num(1), 0, 4)` で取得。
+  TIMER1 alarm 1 は pwm_audio_port.c が誤って `TIMER1_IRQ_1` の優先度を上げているため避けた。
+- **DVI に DMA claim を追加** (`dvi_output.c`)。DVI は ch0/ch1 をハードコードするだけで
+  claim していなかったため、そのままでは `dma_claim_unused_channel` が ch0 を返して DVI と
+  衝突する。`dma_claim_mask` で ch0/ch1 を claim するよう修正した (R11 の前提条件)。
+  PIO-USB は ch2 を claim 済みなので、DMX の動的取得は通常 ch3 になる。
+- **フレームガードは DMA busy に加えて UART BUSY フラグも見る**。DMA 完了は「FIFO へ
+  書き終えた」ことしか意味せず、TX FIFO 32 バイト分 (約 1.4 ms) は線上にまだ流れている。
+  `uart_get_hw(uart1)->fr & UART_UARTFR_BUSY_BITS` で線がアイドルになるまで次フレームを
+  開始しない。
+- **30Hz 降格は sticky ではなく自己回復型**。ガードに引っかかったフレームはスキップし
+  次周期のみ 33 ms、次フレームが正常に出れば 25 ms (40Hz) に戻る。512ch フルフレームは
+  22.8 ms で 25 ms 周期に収まるため、定常状態では降格しない見込み (実機で要確認)。
+- **デッドマンは trip 中毎フレーム blackout する**。keepalive を呼ばずに set し続ける
+  アプリは暗転したままになる (故障シグナルとして明確)。keepalive 再開後は Ruby が値を
+  再設定した時点で復灯する。`deadman_ms=` は設定時に heartbeat をリフレッシュする
+  (有効化直後の誤 trip 防止)。
+- **`dmx_start` はユニバースをゼロクリアする**。start 前に set した値は破棄されるので、
+  値の設定は start 後に行う。`DMX.stop` は送信を止めるだけで消灯しない
+  (`Board::DMX#stop` が blackout + 100 ms 待ち + stop を包む)。
+- BREAK/MAB の one-shot は 1 本のアラームコールバックを phase 変数で使い回し、正の戻り値
+  (コールバック終了時点からの再スケジュール) で最小幅を保証。高優先度 IRQ による遅延は
+  幅が伸びる方向にしか働かず、DMX 的に無害。
+
+### 実機確認へのハンドオフ
+
+- 確認手順は上記チェックリストの通り、`run app/dmx_check.rb` のモード 1-5 + B/Q で全項目
+  なぞれる。起動ログに `DMX: UART1 250000 baud 8N2, TX=GPIO20, DMA ch3, TIMER1 alarm 0`
+  が出ること (ch 番号が 3 以外なら R11 の想定崩れなので要調査)。
+- モード 3 (Slots) で 512/160/26 のどれでも rate 表示が 40.0 Hz 近辺に張り付くこと。
+  30 Hz 前後に落ちる場合はガードが働いている (ロジアナでフレーム衝突がないことを併せて確認)。
+- モード 5 (Deadman) は表示中の readback が 500 ms 後に 0 へ落ち、キーで復灯すること。
+  灯体側の消灯遅延 (フェード) は灯体依存なので readback を一次判定に使う。
+- ロジアナ計測値の期待: BREAK 176 µs / MAB 12 µs / 512ch フレーム 22.76 ms / 周期 25 ms。
+
 ## 次のハンドオフ先
 
 - [research-johakyu-03-fixtures.md](research-johakyu-03-fixtures.md) (M3: フィクスチャモデル)。

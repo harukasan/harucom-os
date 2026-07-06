@@ -147,6 +147,17 @@ target_include_directories(picoruby-pwm-audio PUBLIC
 )
 target_link_libraries(picoruby-pwm-audio pico_stdlib hardware_pwm hardware_dma hardware_clocks pico_time)
 
+# --- DMX library ---
+add_library(picoruby-dmx
+    mrbgems/picoruby-dmx/src/dmx.c
+    mrbgems/picoruby-dmx/ports/rp2350/dmx_port.c
+)
+add_dependencies(picoruby-dmx build_picoruby)
+target_include_directories(picoruby-dmx PUBLIC
+    mrbgems/picoruby-dmx/include
+)
+target_link_libraries(picoruby-dmx pico_stdlib hardware_uart hardware_dma pico_time)
+
 # --- Ruby scripts (rootfs/ -> ruby_scripts.h) ---
 # Track all rootfs files (Ruby, YAML, images, etc.) so that edits
 # retrigger gen_ruby_scripts.rb.
@@ -236,6 +247,7 @@ target_include_directories(harucom_os PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/harucom-os-dict/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-pwm-audio/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-flash-file/include
+    ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-dmx/include
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems/picoruby-dvi/include
 )
 
@@ -260,6 +272,7 @@ target_link_libraries(harucom_os
     mruby
     picoruby-dvi
     picoruby-pwm-audio
+    picoruby-dmx
 )
 
 # Core 0 needs 32 KB stack for mruby compiler (mrc_load_string_cxt).
