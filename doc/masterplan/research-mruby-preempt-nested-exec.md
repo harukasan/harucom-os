@@ -2,12 +2,24 @@
 
 ## ステータス
 
-- **未適用** (2026-07-07 時点)。別タスクとして時間を取って対応する。修正パッチは本ファイル
-  末尾に保存。
-- 暫定対処も入れていない: Pattern#rev の sort 純 Ruby 化 (17c38e4) は方針統一のため revert
-  済み (df575b0)。VM 再入への対処は本タスクで一括して扱う。
-- それまでの既知リスク: C→Ruby 再入中 (ブロック付き sort、require、eval、文字列補間の
-  Ruby 定義 to_s 等) にタイムスライスが切れると callinfo 破壊で稀にハードフォルトする。
+- **上流で修正済みと判明、バックポート適用済み** (2026-07-07)。johakyu_demo 中の再発
+  (計 3 回目) を受けて調査した結果、mruby 本体 master が本バグをそのものずばり修正して
+  いた:
+  - `d2a1c43a5` "vm.c: defer task switch across C call boundary" (Matz、2026-05-28、
+    issues #6864 / #6868)。callinfo チェーンを cibase まで歩き `cci > 0` (C 境界) が
+    あればスイッチを保留する `task_across_c_boundary()`。本ファイルの vm_nest 案と同等
+    だが、構造体変更もカウンタ管理も不要でより堅牢。
+  - `dc671f007` "vm.c: restore mrb->jmp on early return for task switch"。early return が
+    dangling な c_jmp を残す潜在バグの修正 (vendored 版にも存在した)。
+- この 2 修正の形を vendored スナップショット (base 7a4622678) にバックポートした
+  (vm.c のみ、working tree 変更・未コミット)。picoruby が mruby を d2a1c43a5 以降へ
+  更新すれば不要になる。本ファイル末尾の vm_nest パッチは**廃案** (参考として残す)。
+- **残る別タスク**: vendored mruby のバンプ (816 コミット遅れ)。関連する安定性修正が
+  多数ある (`0bfdb9c18` stack realloc 中 GC の use-after-free、`be36b67a1` preempt 済み
+  タスクの dead stack slot マーク、`870a6b58a` root context でのスイッチ禁止、
+  `f1232334c` execute_task の例外処理など)。ただし挙動変更も含む
+  (`8ceeea616` は C 境界越し sleep をエラーにする。現行 harucom は blocking sleep
+  フォールバックに依存し得るため要影響調査)。
 
 ## 症状
 
