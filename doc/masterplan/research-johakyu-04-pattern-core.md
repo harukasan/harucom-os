@@ -195,11 +195,34 @@ sine.segment。
   `pump` が期日到来分を発火。連続 track は毎 tick 現在値をサンプリングして即書き込み。
 - Clock: `Machine.board_millis` ベース、bpm/cpm/cps 変更は origin リベースで連続。
 
-### R15 の現状
+### R15 の実測と対処 (2026-07-07)
 
-Fraction は上記の軽量有理数で決定。1 tick の query コストと GC 影響は実機計測が残って
-おり、`johakyu_demo` の画面に tick 平均 (µs) / 最大 (ms) を常時表示するようにしてある。
-段階A 規模 (離散 5-6 track) で問題が出たら Hap 再利用や割り当て削減を検討する。
+Fraction は上記の軽量有理数で決定。初版スケジューラ (毎 tick 全 track を ~50-70ms 窓で
+query) の実機計測は **tick 平均 58ms / 最大 342ms / 発火遅延最大 412ms** (段階A 6 track、
+preset 3)。query 木のセットアップコスト (span 分割、fast 変換の Fraction 演算、Hap 生成)
+を毎秒数百回払うのが平均を押し上げ、GC (PSRAM ヒープ) がスパイクを作る。412ms は
+deadman 500ms に近く危険だった。
+
+対処としてスケジューラを**チャンク staging** に再設計した:
+
+- 各 track が `staged_until` を持ち、1 tick につき最も急ぎの 1 track だけを 1 サイクル分
+  (STAGE_CHUNK) 先読み query して pending に積む。query 回数は毎秒数百回 → 数回に減る。
+- 通常の tick は staging 不要判定 (Float 比較、割り当てゼロ) だけで返り、pump が
+  ~10ms 周期で回るため発火ジッタが激減する。audio.update の呼び出し間隔も安定する。
+- 量子化スワップは「境界以降に staged 済みのイベントを破棄し、境界から新パターンで
+  staging し直す」に単純化 (pending イベントに track 名を持たせて破棄)。
+- テンポ変更は staged 済みの発火時刻が旧テンポ基準になるため、`Session#tempo` が
+  restage (全破棄 + staged_until リセット) する。
+- 新規 bind は初回チャンクを同期 staging し、初拍が staging 順で遅れないようにする。
+
+ホスト計測 (preset 3 相当、10ms 刻み 2000 iteration): 旧 94.1 µs/iteration →
+新 4.7 µs/iteration (**20 倍**)。実機の再計測は残項目 (johakyu_demo の tick avg/max と
+late max 表示で確認する。staging チャンクの単発コストが tick max に出る想定。大きい
+場合は STAGE_CHUNK を 1/2 サイクルに下げる)。
+
+音抜けの既知バグも修正済み: ゲートオフを目標時刻基準で積んでいたため、発火遅延が
+ゲート長を超えるとノートが即殺されていた。実発火時刻基準に変更し、再トリガ時に同
+チャネルの古いゲートを破棄する (688df61)。
 
 ### ベンチ確認の残項目 (M4 DoD)
 

@@ -43,6 +43,9 @@ module Johakyu
 
     def tempo(bpm)
       @clock.bpm = bpm
+      # Staged target times were computed under the old tempo; drop and
+      # restage so upcoming events land on the new grid.
+      @scheduler.restage
     end
 
     # Sound step track: seq(:bd, [1, 0, 0.5, 0]). Values scale volume.
