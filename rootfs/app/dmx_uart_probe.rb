@@ -23,12 +23,6 @@
 # e.g. a shutter). Fixture DMX charts are pinned down later in M3.
 
 def dmx_uart_probe(dimmer_ch: 1, hold_channels: {}, slots: 32)
-  unless defined?(UART)
-    puts "UART class is missing from this build."
-    puts "Enable picoruby-uart in build_config, then: rake distclean && rake"
-    return
-  end
-
   uart = UART.new(unit: :RP2040_UART1, txd_pin: 20, rxd_pin: 21,
                   baudrate: 250000, data_bits: 8, stop_bits: 2,
                   parity: UART::PARITY_NONE)
@@ -214,6 +208,9 @@ def dmx_uart_probe(dimmer_ch: 1, hold_channels: {}, slots: 32)
   puts "dmx_uart_probe: done (rig blacked out)."
 end
 
-# Edit these to match the fixture on the bench. Example with a shutter held open:
-#   dmx_uart_probe(dimmer_ch: 1, hold_channels: { 6 => 255 })
-dmx_uart_probe(dimmer_ch: 1, hold_channels: {})
+# Edit these to match the fixture on the bench.
+# SHEHDS LED Spot 80W (3-face prism), 13ch mode: CH6 = total dimming.
+# Color (CH8) and Gobo (CH9) sit at white/open when 0, and Strobe (CH7) < 16 is
+# steady on, so no channels need holding to get light. Set the fixture to
+# 13ch mode (chnd) and DMX address 1 (Addr a001).
+dmx_uart_probe(dimmer_ch: 6, hold_channels: {})
