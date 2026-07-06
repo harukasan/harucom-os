@@ -160,6 +160,60 @@ VBUS は F1 (≈1.0A ホールド) で保護され、十分なはず。ただし
 - 参照: `lib/picoruby/mrbgems/picoruby-uart/ports/rp2040/uart.c`、
   `include/boards/harucom_board.h`。
 
+## 実測結果 (2026-07-06, M0/M1 完了)
+
+測定器: RIGOL DS1104Z Plus。送出側: `rootfs/app/dmx_uart_probe.rb` (UART1, GPIO20 TX,
+250k/8N2)。経路: Grove(J5) → M5 DMX Unit → XLR-3 → 灯体。
+
+### 判定サマリ
+
+| 項目 | 内容 | 結果 |
+|---|---|---|
+| R1 | 3.3V ロジック極性 (アイドル High / start bit Low) | 合格 |
+| R2 | BREAK が灯体に通る | 合格 (1.065 ms) |
+| R3 | エッジ・タイミング品質 | 合格 (44 µs/byte 理論値一致) |
+| R4 | BREAK 中も送信保持 (差動がフロートしない) | 合格 (灯体点灯で実証) |
+| R5 | blocking write の Core0 ストール | 実測完了 (512ch で 22 ms → DMA 必須) |
+| M1 | 灯体 1 台の dimmer 変化 | 達成 (CH6 で 0→255→0 フェード) |
+
+### オシロ実測 (一次側 TX = GPIO20)
+
+| 測定対象 | 実測値 | 理論値 / 規格 |
+|---|---|---|
+| BREAK 幅 | 1.065 ms (安定) | `break(1)` = 1 ms、規格 ≥88 µs |
+| start code 0x00 の連続 Low | 36 µs | 9 bit × 4 µs = 36 µs |
+| 1 バイト周期 | 44 µs | 11 bit (8N2) × 4 µs = 44 µs |
+| フレーム周期 | 21.75 ms (約 46 Hz) | sleep_ms(20) + BREAK + write |
+
+44 µs/byte が正確に出ており 250000 baud / 8N2 の設定は正しい。BREAK 長は sleep ベース
+のため数十 µs のジッタを持つ (規格内・ラッチに影響なし)。片側基準では反対側が必ずブレる
+ので、BREAK 幅は Edge/Falling + Holdoff 15ms (BREAK 先頭固定)、MAB 以降のデータ部は
+Pulse/負パルス幅 >200µs (BREAK 終端固定) で観測した。
+
+### R5: blocking write の実測
+
+`Machine.uptime_us` / `Machine.board_millis` で `uart.write` 前後を計測 (probe の
+Timing モード)。
+
+| slots | write_us | write_ms |
+|---|---|---|
+| 26 | 63 | 0 |
+| 160 | 5,706 | 6 |
+| 512 | 22,168 | 22 |
+
+RP2350 UART の TX FIFO は 32 バイト。FIFO に収まる送信は即時に返り、超過分は
+44 µs/byte でブロックする ((バイト数 - 32) × 44 µs と一致)。**512ch フルフレームで
+Core0 が約 22 ms、160ch でも約 5.7 ms 停止するため、音声と同居する M2 の DMX
+エンジンは DMA 送出が必須と確定**。blocking write はブリングアップ用途に限る。
+
+### M1: 灯体点灯
+
+- 灯体: SHEHDS LED Spot 80W (3 面プリズム、ムービングヘッド)。13ch モード、DMX アドレス 1。
+- 13ch モードの CH6 = Total dimming。`dimmer_ch: 6` でフェード (0→255→0) を確認。
+  Color (CH8)・Gobo (CH9) は 0 で白/オープン、Strobe (CH7) は 16 未満で常時点灯のため
+  hold_channels は不要。
+- CH1 (Pan) への書き込みで首振りも動作。複数チャンネルのデコードが正しく機能している。
+
 ## 次のハンドオフ先
 
 - R5 で DMA 化が必要と確定 → [research-johakyu-01-dmx-engine.md](research-johakyu-01-dmx-engine.md) (M2)。
