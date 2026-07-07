@@ -20,6 +20,14 @@
   `f1232334c` execute_task の例外処理など)。ただし挙動変更も含む
   (`8ceeea616` は C 境界越し sleep をエラーにする。現行 harucom は blocking sleep
   フォールバックに依存し得るため要影響調査)。
+- **同族の別経路: Sandbox#stop (2026-07-08 実機再現)**。johakyu アプリの eval
+  タイムアウトが走行中タスクへ `@sandbox.stop` → 再開時に `RETURN_IF_TASK_STOPPED` の
+  STOPPED 分岐が (バックポートしたガードの対象外なので) ネスト有無を見ずに vm_exec
+  から強制 return し、同一シグネチャ (mrb_vm_exec 二重フレーム + execute_task) で
+  hardfault。`loop {}` を eval するだけで再現。**回避**: アプリ側で stop を使わず
+  suspend + サンドボックス放棄・新規作成 (johakyu.rb、コミット 65ed8da)。恒久修正の
+  候補は STOPPED 分岐にも `!task_across_c_boundary(mrb)` を掛けること (ただし C 境界内で
+  停止が保留され続ける意味論の検討が要る)。mruby バンプ時に上流の stop 系修正を確認。
 
 ## 症状
 
