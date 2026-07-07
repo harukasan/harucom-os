@@ -184,6 +184,10 @@ research 04 で計測した 1 tick query コストを、実際の DSL (複数バ
     余裕チェックで防止)。
   - stage_ms_max を計測しデモに表示。次の実測で tick max >> stage max なら残りは
     GC 起因 (対策候補: GC.interval_ratio / step_ratio 調整、アロケート削減の続き)。
+  実機3回目 (1/4 チャンク + 譲歩): tick max 433 → 135 ms / late 425 → 298 ms。
+  数値は起動からの最高値で、プリセット切り替えの過渡を含む。以降は preset 切り替えで
+  統計をリセットするようにしたので、定常値とスワップ過渡をプリセット単位で読める。
+  deadman 500 ms・音バッファに対して定常運用は安全圏。
 - mruby 注意: この mruby は super にブロックを転送しない (リテラルブロックも
   `super(&proc)` も親に届かず @query が nil になった)。Signal は query 自体を
   オーバーライドし、ブロック保存そのものを不要にした。
