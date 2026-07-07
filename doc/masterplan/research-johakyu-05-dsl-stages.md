@@ -176,7 +176,14 @@ research 04 で計測した 1 tick query コストを、実際の DSL (複数バ
   - STAGE_CHUNK を 1/2 サイクルにしてスパイクを半減、ミニ記法にサイクル単位の
     1 エントリ memo を入れて再クエリ増を相殺。
   ホスト (test VM) では update 平均 59 → 11 us / 最大 1524 → 649 us、発火イベント数は
-  不変。実機の再測定はプリセット 5 の画面表示 (tick avg/max, late max) で行う。
+  不変。実機再測定は tick avg 20.5 → 6.4 ms / late 569 → 425 ms と改善したが、
+  tick max 433 ms のスパイク (staging が pump を塞ぐ) が残った。追加対策:
+  - STAGE_CHUNK を 1/4 サイクルに (memo により総コスト据え置きでスパイク半減)。
+  - staging の譲歩: pending に 30 ms 以内に発火するイベントがあり track に
+    0.05 サイクル以上の余裕があれば staging を次 tick へ回す (starvation は
+    余裕チェックで防止)。
+  - stage_ms_max を計測しデモに表示。次の実測で tick max >> stage max なら残りは
+    GC 起因 (対策候補: GC.interval_ratio / step_ratio 調整、アロケート削減の続き)。
 - mruby 注意: この mruby は super にブロックを転送しない (リテラルブロックも
   `super(&proc)` も親に届かず @query が nil になった)。Signal は query 自体を
   オーバーライドし、ブロック保存そのものを不要にした。
