@@ -163,10 +163,23 @@ research 04 で計測した 1 tick query コストを、実際の DSL (複数バ
 - 確認用: `johakyu_demo` プリセット 5 (sound スタック + every/fast + euclid スネア、
   s1 = saw.segment(8).slow(2) の dimmer、s2 = 連続 sine の dimmer + pan スイープ)。
   プリセット 1-4 は s2 の pan を 0.5 にバインドして track 集合を揃える。
-- R15 再評価 (ホスト、test VM): プリセット 5 相当の負荷で update 平均 59 us / 最大
-  1.5 ms (6000 update、連続 2 本 = 3 DMX write/tick)。M4 時のホスト→実機係数から実機
-  tick 平均 1-2 ms 見込み。実機の数値はプリセット 5 の画面表示 (tick avg/max, late max)
-  で確認する。
+- R15 再評価: プリセット 5 の実機初回測定は tick 平均 20.5 ms / 最大 321 ms /
+  late 最大 569 ms (deadman 500 ms 超え) で不合格。原因は (1) 連続シグナルの毎 tick
+  サンプリングが query 経路でコンビネータ層ごとに Fraction/TimeSpan/Hap を割り当て、
+  実機 (boxed Float + PSRAM ヒープ) の GC 圧を支配、(2) sound スタック (every + stack +
+  euclid) の 1 サイクル staging が単発スパイクになり pump を塞ぐ。対策 3 点:
+  - Signal クラス: fast/slow/range を 3 つの Float 係数
+    (time_scale/value_scale/value_offset) に畳み込み、sample() はブロック呼び出し 1 回 +
+    Float 演算 3 個。Fraction/Hap を作らない。scheduler は Pattern#sample 経由で
+    サンプル (汎用 Pattern は従来の query フォールバック)。
+  - 連続サンプリングを CONTINUOUS_INTERVAL_MS = 25 ms (DMX 40 Hz フレーム) に制限。
+  - STAGE_CHUNK を 1/2 サイクルにしてスパイクを半減、ミニ記法にサイクル単位の
+    1 エントリ memo を入れて再クエリ増を相殺。
+  ホスト (test VM) では update 平均 59 → 11 us / 最大 1524 → 649 us、発火イベント数は
+  不変。実機の再測定はプリセット 5 の画面表示 (tick avg/max, late max) で行う。
+- mruby 注意: この mruby は super にブロックを転送しない (リテラルブロックも
+  `super(&proc)` も親に届かず @query が nil になった)。Signal は Pattern の @query を
+  直接代入して回避。
 - ホストテスト: `rake test` に M8 分を追加 (continuous? プローブ、SoundHandle チェーン、
   euclid の DMX 構造化、連続→離散スワップ、String "0" の truthiness)。
 
