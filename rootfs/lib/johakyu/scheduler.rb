@@ -26,11 +26,19 @@ module Johakyu
     # a time. The minimum must cover several loop iterations so all
     # tracks get their staging turn before events fall due. The
     # threshold compares as Float so an idle tick allocates nothing.
-    # Half-cycle chunks keep the worst single staging tick short, so
-    # pending events never wait behind a whole-cycle query; the mini
-    # notation per-cycle memo keeps the second query of a cycle cheap.
+    # Quarter-cycle chunks keep the worst single staging tick short, so
+    # pending events never wait long behind a heavy query; the mini
+    # notation per-cycle memo keeps repeated queries of a cycle cheap.
     STAGE_AHEAD_MIN = 0.25
-    STAGE_CHUNK = Fraction.new(1, 2)
+    STAGE_CHUNK = Fraction.new(1, 4)
+
+    # Staging yields to imminent events: when a pending event fires
+    # within this many ms, the tick skips staging so a long query does
+    # not block pump and fire that event late. Staging only yields
+    # while the track is staged at least the minimum runway ahead, so
+    # dense events cannot starve staging.
+    STAGE_DEFER_EVENT_MS = 30
+    STAGE_DEFER_MIN_AHEAD = 0.05
 
     # Continuous tracks are sampled at most this often. DMX output is
     # quantized to 40 Hz frames (25 ms), so sampling every loop
@@ -38,7 +46,7 @@ module Johakyu
     CONTINUOUS_INTERVAL_MS = 25
 
     attr_reader :tick_count, :tick_ms_total, :tick_ms_max, :fired_count,
-                :fire_delay_ms_max
+                :fire_delay_ms_max, :stage_ms_max
 
     def initialize(clock)
       @clock = clock
@@ -50,6 +58,7 @@ module Johakyu
       @tick_ms_max = 0
       @fired_count = 0
       @fire_delay_ms_max = 0
+      @stage_ms_max = 0
       @errors = {}
     end
 
@@ -142,10 +151,12 @@ module Johakyu
       end
 
       if urgent && urgent[:staged_until].to_f < now_position + STAGE_AHEAD_MIN
-        begin
-          stage_chunk(urgent)
-        rescue => e
-          track_failed(urgent, e)
+        unless defer_staging?(urgent, now_position, started_ms)
+          begin
+            stage_chunk(urgent)
+          rescue => e
+            track_failed(urgent, e)
+          end
         end
       end
 
@@ -233,9 +244,22 @@ module Johakyu
       end
     end
 
+    # True when staging should wait a tick: an event is about to fire
+    # and the track has enough runway to stage later.
+    def defer_staging?(track, now_position, now_ms)
+      return false if track[:staged_until].to_f <= now_position + STAGE_DEFER_MIN_AHEAD
+      i = 0
+      while i < @pending.length
+        return true if @pending[i][0] <= now_ms + STAGE_DEFER_EVENT_MS
+        i += 1
+      end
+      false
+    end
+
     # Stage one chunk of a discrete track, honoring a pending swap at
     # its cycle boundary.
     def stage_chunk(track)
+      started_ms = Machine.board_millis
       from = track[:staged_until]
       swap_at = track[:swap_at]
       if swap_at && from >= swap_at
@@ -260,6 +284,8 @@ module Johakyu
       end
       track[:staged_until] = to
       track[:last_good] = track[:pattern]
+      elapsed = Machine.board_millis - started_ms
+      @stage_ms_max = elapsed if elapsed > @stage_ms_max
     end
 
     # Remove staged events of a track at or after from_ms.

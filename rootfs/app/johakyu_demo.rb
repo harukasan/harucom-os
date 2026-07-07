@@ -151,7 +151,7 @@ def johakyu_demo
       tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
       DVI::Text.put_string(0, 4, "preset: #{preset_name}     bpm: #{bpm}     audio lat: #{session.audio_latency_ms} ms      ", attr_active)
       DVI::Text.put_string(0, 6, "cycle: #{position_int}.#{frac_text}    frames: #{DMX.frame_count}      ", attr_normal)
-      DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   ticks: #{scheduler.tick_count}      ", attr_normal)
+      DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   stage max: #{scheduler.stage_ms_max} ms      ", attr_normal)
       DVI::Text.put_string(0, 9, "fired: #{scheduler.fired_count}   pending: #{scheduler.pending_count}   late max: #{scheduler.fire_delay_ms_max} ms      ", attr_normal)
       DVI::Text.put_string(0, 11, "dimmer ch6: #{DMX.get(6)}   ch19: #{DMX.get(19)}      ", attr_normal)
     end

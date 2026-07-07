@@ -205,6 +205,27 @@ class SchedulerTest < Picotest::Test
     assert_equal [[0, 255], [750, 255], [1500, 255]], ons
   end
 
+  def test_staging_yields_to_due_events
+    clock = Johakyu::Clock.new(bpm: 120, beats_per_cycle: 4)
+    scheduler = Johakyu::Scheduler.new(clock)
+    scheduler.bind(:x, steps([1, 1, 1, 1, 1, 1, 1, 1])) { |v, at| }
+    # the fresh bind stages the first quarter cycle: onsets at 0, 250
+    assert_equal 2, scheduler.pending_count
+    Machine.millis = 240
+    scheduler.tick
+    # an event is due within STAGE_DEFER_EVENT_MS and the track has
+    # runway, so the tick must not stage ahead of firing it
+    assert_equal 2, scheduler.pending_count
+    scheduler.pump
+    assert_equal 1, scheduler.pending_count
+    Machine.millis = 260
+    scheduler.pump
+    Machine.millis = 300
+    scheduler.tick
+    # nothing due now, staging resumes
+    assert_equal true, scheduler.pending_count >= 1
+  end
+
   def test_signal_swaps_to_discrete_at_boundary
     audio = FakeAudio.new
     session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
