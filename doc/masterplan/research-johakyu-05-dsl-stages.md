@@ -125,9 +125,10 @@ research 04 で計測した 1 tick query コストを、実際の DSL (複数バ
 - 既存 (research 04): `pattern.rb`/`signal.rb`/`clock.rb`/`scheduler.rb` を利用。
 - 依存: `fixture.rb` (research 03)、`DMX`/`Audio` (research 01/02)。
 
-## 実装メモ (2026-07-07 更新, 段階A 実機確認済み・段階B 実装済み)
+## 実装メモ (2026-07-07 更新, 段階A/B 実機確認済み・段階C 実装済み)
 
-段階A は M4 として実機確認済み (research 04 参照)。段階B (M7) を実装、実機確認待ち:
+段階A (M4)・段階B (M7) は実機確認済み (M7 はプリセット 4 で sound/dimmer/color を確認)。
+段階B の実装記録:
 
 - `rootfs/lib/johakyu/mini.rb`: 手書き再帰下降パーサ + strudel-rb 移植の「サイクル番号 →
   イベント列」インタープリタ。表のサブセット全対応 (列 / `*n` / `!n` / `/n` / `[...]` /
@@ -142,6 +143,32 @@ research 04 で計測した 1 tick query コストを、実際の DSL (複数バ
   バインダ。track 名は dmx_seq と同一なので配列スタイルとミニ記法スタイルは同じ track を
   境界量子化で置き換え合える。ミニ記法の数値文字列は正規化 Float、それ以外は名前テーブル。
 - 確認用: `johakyu_demo` プリセット 4 がミニ記法駆動 (sound + 両灯体の dimmer/color)。
+
+段階C (M8) を実装、実機確認待ち:
+
+- `Session#sound(...)` が SoundHandle を返し、fast/slow/rev/every/euclid/struct/mask/
+  degrade_by が呼び出し後にチェーンできる (`sound("bd*4").every(4) { |p| p.fast(2) }`)。
+  バインドは次の update まで遅延し、チェーン全体の最終パターンで一度だけ track を置き換える
+  (リンクごとに即バインドすると初回サイクルに未変換パターンが乗るため)。
+- `Pattern#continuous?` プローブ (微小 span を query して whole 無しなら連続) を追加し、
+  `bind_dmx` が離散 (staged) と連続 (毎 tick サンプル) を自動振り分け。
+  `dmx(:s2).pan(Johakyu.sine.range(0.3, 0.7).slow(8))` がそのまま効く。dmx_signal は
+  同じ経路への別名として残置。連続→離散の再バインドは境界量子化スワップ
+  (scheduler が staged_until を swap 境界に合わせる)。
+- `write_dmx` が Boolean を扱う (euclid の true → 1.0)。`Pattern.active_value?` で
+  bool パターンの truthiness を統一し、ミニ記法の "0" (String) を偽扱いに
+  (struct/mask で "1 0" が期待どおり動く)。
+- ショートハンド: `Johakyu.euclid(3, 8)` と `Johakyu.mini("1 0")` (reify 位置以外で
+  変換チェーンする用)。
+- 確認用: `johakyu_demo` プリセット 5 (sound スタック + every/fast + euclid スネア、
+  s1 = saw.segment(8).slow(2) の dimmer、s2 = 連続 sine の dimmer + pan スイープ)。
+  プリセット 1-4 は s2 の pan を 0.5 にバインドして track 集合を揃える。
+- R15 再評価 (ホスト、test VM): プリセット 5 相当の負荷で update 平均 59 us / 最大
+  1.5 ms (6000 update、連続 2 本 = 3 DMX write/tick)。M4 時のホスト→実機係数から実機
+  tick 平均 1-2 ms 見込み。実機の数値はプリセット 5 の画面表示 (tick avg/max, late max)
+  で確認する。
+- ホストテスト: `rake test` に M8 分を追加 (continuous? プローブ、SoundHandle チェーン、
+  euclid の DMX 構造化、連続→離散スワップ、String "0" の truthiness)。
 
 段階A の記録 (M4 時点):
 
