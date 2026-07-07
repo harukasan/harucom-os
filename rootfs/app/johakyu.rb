@@ -178,7 +178,16 @@ class JohakyuApp
       error = @sandbox.error
       if error && !error.is_a?(SystemExit)
         @live.discard
-        @message = "#{error.message} (#{error.class})"
+        location = nil
+        if error.respond_to?(:backtrace)
+          backtrace = error.backtrace
+          location = backtrace[0] if backtrace && backtrace.length > 0
+        end
+        if location
+          @message = "#{location}: #{error.message} (#{error.class})"
+        else
+          @message = "#{error.message} (#{error.class})"
+        end
       else
         @live.apply
         @message = "Applied (next cycle)"
