@@ -1,19 +1,22 @@
-# johakyu_demo: M4 stage A verification, sound and light from one clock.
+# johakyu_demo: DSL stage A to C verification, sound and light from
+# one clock.
 #
 # Run from IRB:  run app/johakyu_demo.rb
 #
 # Drives the SHEHDS rig (s1/s2, 13ch, base 1/14) and the PWM tone
-# voices from the same step sequencer. The M4 acceptance line is
-# preset 1: the dimmer must rise exactly on each kick. Preset changes
-# rebind the same track names, so they demonstrate the quantized swap
-# (edits land at the next cycle boundary, never mid-step).
+# voices from one scheduler. The M4 acceptance line is preset 1: the
+# dimmer must rise exactly on each kick. Preset changes rebind the
+# same track names, so they demonstrate the quantized swap (edits
+# land at the next cycle boundary, never mid-step).
 #
 # Presets:
 #   1  Kick pulse    four on the floor, both lights flash on the kick
 #   2  Backbeat      kick + snare, s1/s2 alternate per beat
 #   3  Hats + color  eighth hats, color steps, dimmer accents
+#   4  Mini notation sound() and dmx() driven by mini notation (M7)
+#   5  Transforms    every/fast/euclid + sine/saw signals (M8)
 # Keys:
-#   1/2/3 preset   -/= tempo down/up   Esc/q quit
+#   1-5 preset   -/= tempo down/up   [/] audio latency   Esc/q quit
 #
 # The status block shows the R15 measurements: scheduler tick average
 # and maximum (ms), pending events, and fired event count.
@@ -54,6 +57,7 @@ def johakyu_demo
       session.dmx_seq(:s2, :dimmer, [1.0, 0, 0, 0, 1.0, 0, 0, 0])
       session.dmx_seq(:s1, :color, [:white])
       session.dmx_seq(:s2, :color, [:white])
+      session.dmx_seq(:s2, :pan, [0.5])
     when 2
       preset_name = "2 Backbeat"
       session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])
@@ -64,6 +68,7 @@ def johakyu_demo
       session.dmx_seq(:s2, :dimmer, [0, 0, 1.0, 0, 0, 0, 1.0, 0])
       session.dmx_seq(:s1, :color, [:white])
       session.dmx_seq(:s2, :color, [:blue])
+      session.dmx_seq(:s2, :pan, [0.5])
     when 3
       preset_name = "3 Hats + color"
       session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])
@@ -74,6 +79,7 @@ def johakyu_demo
       session.dmx_seq(:s2, :dimmer, [1.0, 0.2, 0.5, 0.2, 1.0, 0.2, 0.5, 0.2])
       session.dmx_seq(:s1, :color, [:red, :blue, :yellow, :green])
       session.dmx_seq(:s2, :color, [:blue, :red, :green, :yellow])
+      session.dmx_seq(:s2, :pan, [0.5])
     when 4
       preset_name = "4 Mini notation"
       session.seq(:bd, [])
@@ -81,14 +87,33 @@ def johakyu_demo
       session.seq(:hh, [])
       session.sound("bd ~ [sn sn] ~, hh*8")
       session.dmx(:s1).dimmer("1 0 0.5 0").color("<red blue yellow>")
-      session.dmx(:s2).dimmer("0 0.5 1 0").color("<blue yellow red>")
+      session.dmx(:s2).dimmer("0 0.5 1 0").color("<blue yellow red>").pan("0.5")
+    when 5
+      preset_name = "5 Transforms (M8)"
+      session.seq(:bd, [])
+      session.seq(:sn, [])
+      session.seq(:hh, [])
+      # every 4th cycle doubles the tempo of the whole layer; the
+      # snare follows a euclid(3, 8) structure.
+      session.sound(Johakyu::Pattern.stack(
+        "bd ~ bd ~",
+        Johakyu.mini("sn").euclid(3, 8),
+        "hh*8"
+      )).every(4) { |p| p.fast(2) }
+      # s1 steps a sawtooth ramp over two cycles; s2 breathes on a
+      # continuous sine and sweeps pan across eight cycles.
+      session.dmx(:s1).dimmer(Johakyu.saw.segment(8).slow(2))
+        .color("<red blue yellow>")
+      session.dmx(:s2).dimmer(Johakyu.sine.slow(2))
+        .color("<blue yellow red>")
+        .pan(Johakyu.sine.range(0.3, 0.7).slow(8))
     end
   end
   apply_preset.call(1)
 
   DVI::Text.clear(attr_clear)
-  DVI::Text.put_string(0, 0, "=== Johakyu demo (M4 stage A)  sound + light on one clock ===", attr_title)
-  DVI::Text.put_string(0, 2, "1/2/3/4: preset (swaps at next cycle)   -/=: tempo   [/]: audio latency   Esc/q: quit", attr_normal)
+  DVI::Text.put_string(0, 0, "=== Johakyu demo  sound + light on one clock ===", attr_title)
+  DVI::Text.put_string(0, 2, "1-5: preset (swaps at next cycle)   -/=: tempo   [/]: audio latency   Esc/q: quit", attr_normal)
 
   scheduler = session.scheduler
   running = true
@@ -146,6 +171,7 @@ def johakyu_demo
         when "2" then apply_preset.call(2)
         when "3" then apply_preset.call(3)
         when "4" then apply_preset.call(4)
+        when "5" then apply_preset.call(5)
         when "-"
           bpm = bpm > 40 ? bpm - 10 : bpm
           session.tempo(bpm)

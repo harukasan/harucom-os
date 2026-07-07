@@ -1,9 +1,11 @@
-# Johakyu stage A DSL: array step sequencer driving sound and light
-# from one clock (research 05).
+# Johakyu DSL: sound and light patterns driven from one clock
+# (research 05, stages A to C).
 #
 #   session = Johakyu::Session.new(audio: Board::PWMAudio.new, bpm: 120)
-#   session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])
-#   session.dmx_seq(:all, :dimmer, [1.0, 0, 0, 0, 1.0, 0, 0, 0])
+#   session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])            # stage A
+#   session.sound("bd*4, hh*8").every(4) { |p| p.fast(2) } # stages B/C
+#   session.dmx(:s1).dimmer("1 0 0.5 0").color("<red blue>")
+#   session.dmx(:s2).pan(Johakyu.sine.range(0.2, 0.8).slow(8))
 #   loop do
 #     session.update
 #     DMX.keepalive
@@ -52,6 +54,8 @@ module Johakyu
       @audio_latency_ms = audio_latency_ms
       @sound_tracks = []
       @gates = []
+      @sound_pattern = nil
+      @sound_dirty = false
     end
 
     attr_reader :audio_latency_ms
@@ -95,27 +99,35 @@ module Johakyu
     end
 
     # Continuous light track: dmx_signal(:all, :pan, Johakyu.sine.slow(4)).
-    # Sampled once per tick; DMX frames quantize the rest.
+    # Kept as the stage A name; bind_dmx detects signals itself, so
+    # this is the same binding as dmx(target).pan(...).
     def dmx_signal(target, attribute, pattern)
-      fixture = Johakyu.dmx(target)
-      track = ("dmx_" + target.to_s + "_" + attribute.to_s).to_sym
-      @scheduler.bind_continuous(track, pattern) do |value, _at_ms|
-        Session.write_dmx(fixture, attribute, value)
-      end
+      bind_dmx(target, attribute, pattern)
     end
 
-    # Stage B: sound("bd ~ sn ~") plays named voices from mini notation
-    # (or any Pattern). Values are voice names; "bd:2" style sample
-    # numbers are accepted and the number is ignored until WAV lands.
+    # Stage B/C: sound("bd ~ sn ~") plays named voices from mini
+    # notation (or any Pattern). Values are voice names; "bd:2" style
+    # sample numbers are accepted and the number is ignored until WAV
+    # lands. Returns a handle so pattern transforms chain after the
+    # call, Strudel style:
+    #
+    #   sound("bd*4").every(4) { |p| p.fast(2) }
+    #
+    # The bind is deferred to the next update so a transform chain
+    # replaces the track once, with the final pattern. Binding per
+    # link would play the untransformed pattern for the first cycle.
     def sound(pattern)
-      pattern = Pattern.reify(pattern)
-      @sound_tracks << :sound unless @sound_tracks.include?(:sound)
-      @scheduler.bind(:sound, pattern, latency_ms: @audio_latency_ms) do |value, at_ms|
-        name = value.is_a?(Hash) ? value[:s] : value
-        name = name.to_sym if name.is_a?(String)
-        voice = VOICES[name]
-        trigger_voice(voice, 1.0, at_ms) if voice
-      end
+      @sound_pattern = Pattern.reify(pattern)
+      @sound_dirty = true
+      SoundHandle.new(self)
+    end
+
+    # Apply one transform to the pending sound pattern (SoundHandle
+    # chain links call this).
+    def transform_sound(&block)
+      return unless @sound_pattern
+      @sound_pattern = block.call(@sound_pattern)
+      @sound_dirty = true
     end
 
     # Stage B: dmx(:s1).color("red blue").dimmer("1 0 0.5 0") binds
@@ -125,12 +137,21 @@ module Johakyu
       DmxTarget.new(self, target)
     end
 
-    # Bind one fixture attribute track. Used by dmx_seq and DmxTarget.
+    # Bind one fixture attribute track. Continuous patterns (signals)
+    # are sampled every tick, discrete patterns are staged as events,
+    # so dmx(:s1).pan(Johakyu.sine.slow(8)) and dmx(:s1).pan("0 0.5")
+    # go through the same call. Used by dmx_seq, dmx_signal, DmxTarget.
     def bind_dmx(target, attribute, pattern)
       fixture = Johakyu.dmx(target)
       track = ("dmx_" + target.to_s + "_" + attribute.to_s).to_sym
-      @scheduler.bind(track, pattern) do |value, _at_ms|
-        Session.write_dmx(fixture, attribute, value)
+      if pattern.continuous?
+        @scheduler.bind_continuous(track, pattern) do |value, _at_ms|
+          Session.write_dmx(fixture, attribute, value)
+        end
+      else
+        @scheduler.bind(track, pattern) do |value, _at_ms|
+          Session.write_dmx(fixture, attribute, value)
+        end
       end
     end
 
@@ -185,9 +206,62 @@ module Johakyu
       end
     end
 
+    # Chainable transform handle returned by Session#sound. Each link
+    # transforms the pending sound pattern; the next update binds the
+    # final result once.
+    class SoundHandle
+      def initialize(session)
+        @session = session
+      end
+
+      def fast(factor)
+        transform { |p| p.fast(factor) }
+      end
+
+      def slow(factor)
+        transform { |p| p.slow(factor) }
+      end
+
+      def rev
+        transform { |p| p.rev }
+      end
+
+      def every(n, &func)
+        transform { |p| p.every(n, &func) }
+      end
+
+      def euclid(pulses, steps, rotation = 0)
+        transform { |p| p.euclid(pulses, steps, rotation) }
+      end
+
+      def struct(bool_pattern)
+        transform { |p| p.struct(bool_pattern) }
+      end
+
+      def mask(bool_pattern)
+        transform { |p| p.mask(bool_pattern) }
+      end
+
+      def degrade_by(amount)
+        transform { |p| p.degrade_by(amount) }
+      end
+
+      def degrade
+        transform { |p| p.degrade }
+      end
+
+      private
+
+      def transform(&block)
+        @session.transform_sound(&block)
+        self
+      end
+    end
+
     # Advance the scheduler, fire due events, release finished notes,
     # and keep the audio ring buffer filled. Call every loop iteration.
     def update
+      flush_sound if @sound_dirty
       @scheduler.tick
       @scheduler.pump
       pump_gates
@@ -204,6 +278,7 @@ module Johakyu
     # raw 0-255, Floats are normalized, Symbols use the name tables.
     # Strings come from mini notation: numeric text ("0.5") becomes a
     # normalized Float, anything else is a table name ("red").
+    # Booleans come from structure patterns like euclid: full or zero.
     def self.write_dmx(fixture, attribute, value)
       if value.is_a?(String)
         if numeric_string?(value)
@@ -213,6 +288,10 @@ module Johakyu
         end
       elsif value.is_a?(Integer)
         fixture.raw(attribute, value)
+      elsif value == true
+        fixture.set(attribute, 1.0)
+      elsif value == false
+        fixture.set(attribute, 0.0)
       else
         fixture.set(attribute, value)
       end
@@ -249,6 +328,21 @@ module Johakyu
     end
 
     private
+
+    # Bind the pending sound pattern to the :sound track. Rebinding an
+    # existing track swaps at the next cycle boundary (scheduler rule),
+    # so live edits land musically.
+    def flush_sound
+      @sound_dirty = false
+      pattern = @sound_pattern
+      @sound_tracks << :sound unless @sound_tracks.include?(:sound)
+      @scheduler.bind(:sound, pattern, latency_ms: @audio_latency_ms) do |value, at_ms|
+        name = value.is_a?(Hash) ? value[:s] : value
+        name = name.to_sym if name.is_a?(String)
+        voice = VOICES[name]
+        trigger_voice(voice, 1.0, at_ms) if voice
+      end
+    end
 
     def trigger_voice(voice, value, at_ms)
       return unless @audio

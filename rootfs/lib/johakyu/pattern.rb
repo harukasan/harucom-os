@@ -233,6 +233,17 @@ module Johakyu
       query(TimeSpan.new(Fraction.of(begin_time), Fraction.of(end_time)))
     end
 
+    # True when this pattern is a continuous signal: its Haps carry no
+    # whole, so nothing ever has an onset. Probed with one tiny query.
+    # The DSL uses this to choose between staged events and per-tick
+    # sampling in the scheduler.
+    def continuous?
+      probe = TimeSpan.new(Fraction.new(0),
+                           Fraction.new(1, Fraction::FLOAT_DENOMINATOR))
+      haps = query(probe)
+      haps.length > 0 && haps[0].whole.nil?
+    end
+
     # ---- factories ----
 
     def self.pure(value)
@@ -539,7 +550,7 @@ module Johakyu
         while i < bool_haps.length
           bool_hap = bool_haps[i]
           i += 1
-          next unless bool_hap.value
+          next unless Pattern.active_value?(bool_hap.value)
           inner = source.query(bool_hap.whole || bool_hap.part)
           j = 0
           while j < inner.length
@@ -572,7 +583,7 @@ module Johakyu
           while j < bool_haps.length
             bh = bool_haps[j]
             j += 1
-            if bh.value && bh.value != 0 && bh.part.intersection(hap.part)
+            if Pattern.active_value?(bh.value) && bh.part.intersection(hap.part)
               keep = true
               break
             end
@@ -654,6 +665,13 @@ module Johakyu
       apply_op(other) { |a, b| a / b }
     end
 
+    # Truthiness for boolean patterns. Mini notation atoms stay
+    # Strings, so "0" counts as false alongside 0, false, and nil.
+    def self.active_value?(value)
+      return false if value.nil? || value == false
+      value != 0 && value != "0"
+    end
+
     # Deterministic pseudo-random value for a given time (0..1),
     # matching strudel-rb's time_to_rand.
     def self.time_to_rand(x)
@@ -706,5 +724,11 @@ module Johakyu
         haps
       end
     end
+  end
+
+  # Module-level shorthand so DSL code reads like the Strudel examples:
+  # dmx(:all).strobe(Johakyu.euclid(3, 8)).
+  def self.euclid(pulses, steps, rotation = 0)
+    Pattern.euclid(pulses, steps, rotation)
   end
 end

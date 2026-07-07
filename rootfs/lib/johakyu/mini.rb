@@ -432,4 +432,11 @@ module Johakyu
       pure(value)
     end
   end
+
+  # Module-level shorthand for building a pattern from mini notation
+  # outside a reify position, so transforms can chain on the text:
+  # Johakyu.mini("1 0").fast(2).
+  def self.mini(text)
+    Mini.parse(text)
+  end
 end

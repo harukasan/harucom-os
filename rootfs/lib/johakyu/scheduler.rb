@@ -184,6 +184,10 @@ module Johakyu
         if !track[:continuous] && track[:staged_until] > swap_at
           drop_pending(name, @clock.position_to_ms(swap_at).to_i - track[:latency_ms])
           track[:staged_until] = swap_at
+        elsif track[:continuous] && !continuous
+          # The track was continuous, so staged_until never advanced.
+          # Stage the incoming discrete pattern from the swap boundary.
+          track[:staged_until] = swap_at
         end
         track[:next_pattern] = pattern
         track[:swap_at] = swap_at

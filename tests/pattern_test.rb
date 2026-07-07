@@ -119,4 +119,13 @@ class PatternTest < Picotest::Test
     assert_equal 1, sum.den
     assert_equal true, Johakyu::Fraction.new(2, 6) == third
   end
+
+  def test_continuous_detection
+    assert_equal true, Johakyu.sine.continuous?
+    assert_equal true, Johakyu.sine.range(0.2, 0.8).slow(8).continuous?
+    assert_equal false, Johakyu.saw.segment(4).continuous?
+    assert_equal false, P.pure(1).continuous?
+    assert_equal false, P.silence.continuous?
+    assert_equal false, P.euclid(3, 8).continuous?
+  end
 end

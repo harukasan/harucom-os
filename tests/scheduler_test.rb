@@ -162,4 +162,57 @@ class SchedulerTest < Picotest::Test
     dimmers = DMX.writes.select { |w| w[1] == 6 }.map { |w| [w[0], w[2]] }
     assert_equal [[0, 255], [500, 0], [1000, 128], [1500, 0]], dimmers
   end
+
+  def test_signal_autobinds_continuous
+    audio = FakeAudio.new
+    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
+    session.dmx(:s2).pan(Johakyu.sine.range(0.2, 0.8).slow(8))
+    run_until(session, 500, 20)
+    pans = DMX.writes.select { |w| w[1] == 14 }
+    # A discrete bind would write at most once here; sampling writes
+    # every tick.
+    assert_equal true, pans.length >= 20
+    assert_equal true, pans.all? { |w| w[2] >= 51 && w[2] <= 204 }
+  end
+
+  def test_sound_chain_every_fast
+    audio = FakeAudio.new
+    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
+    session.sound("bd*2").every(2) { |p| p.fast(2) }
+    run_until(session, 3990)
+    times = audio.tones.map { |e| e[1] }
+    assert_equal [0, 1000, 2000, 2500, 3000, 3500], times
+  end
+
+  def test_sound_chain_applies_from_first_cycle
+    audio = FakeAudio.new
+    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
+    session.sound("bd sn").rev
+    run_until(session, 1990)
+    # rev must already hold at the first bind: snare first, kick second
+    assert_equal 1, audio.tones[0][2]
+    assert_equal 0, audio.tones[1][2]
+  end
+
+  def test_euclid_structures_dmx
+    audio = FakeAudio.new
+    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
+    session.dmx(:s1).dimmer(Johakyu.euclid(3, 8))
+    run_until(session, 1990)
+    ons = DMX.writes.select { |w| w[1] == 6 }.map { |w| [w[0], w[2]] }
+    assert_equal [[0, 255], [750, 255], [1500, 255]], ons
+  end
+
+  def test_signal_swaps_to_discrete_at_boundary
+    audio = FakeAudio.new
+    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
+    session.dmx(:s2).pan(Johakyu.sine.slow(8))
+    run_until(session, 900)
+    session.dmx(:s2).pan("0.25 0.75")
+    run_until(session, 3990)
+    silent = DMX.writes.select { |w| w[1] == 14 && w[0] > 900 && w[0] < 2000 }
+    assert_equal 0, silent.length
+    steps = DMX.writes.select { |w| w[1] == 14 && w[0] >= 2000 }.map { |w| [w[0], w[2]] }
+    assert_equal [[2000, 64], [3000, 191]], steps
+  end
 end

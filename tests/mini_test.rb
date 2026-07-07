@@ -77,6 +77,19 @@ class MiniTest < Picotest::Test
     assert_equal 2, pattern.query_arc(0, 1).length
   end
 
+  def test_mini_shorthand_allows_transform_chains
+    haps = Johakyu.mini("bd sn").fast(2).query_arc(0, 1)
+    assert_equal 4, haps.length
+  end
+
+  def test_string_zero_is_false_in_bool_patterns
+    masked = Johakyu::Pattern.fastcat(1, 2).mask("1 0").query_arc(0, 1)
+    assert_equal ["0/1..1/2|0/1..1/2|1"], hap_sigs(masked)
+    structed = Johakyu::Pattern.pure("bd").struct("1 0 1 0").query_arc(0, 1)
+    assert_equal ["0/1..1/4|0/1..1/4|\"bd\"", "1/2..3/4|1/2..3/4|\"bd\""],
+                 hap_sigs(structed)
+  end
+
   def test_malformed_input_raises
     assert_raise(ArgumentError) { parse("[bd") }
     assert_raise(ArgumentError) { parse("bd ]") }
