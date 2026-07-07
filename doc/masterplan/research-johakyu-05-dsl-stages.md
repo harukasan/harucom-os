@@ -178,8 +178,8 @@ research 04 で計測した 1 tick query コストを、実際の DSL (複数バ
   ホスト (test VM) では update 平均 59 → 11 us / 最大 1524 → 649 us、発火イベント数は
   不変。実機の再測定はプリセット 5 の画面表示 (tick avg/max, late max) で行う。
 - mruby 注意: この mruby は super にブロックを転送しない (リテラルブロックも
-  `super(&proc)` も親に届かず @query が nil になった)。Signal は Pattern の @query を
-  直接代入して回避。
+  `super(&proc)` も親に届かず @query が nil になった)。Signal は query 自体を
+  オーバーライドし、ブロック保存そのものを不要にした。
 - ホストテスト: `rake test` に M8 分を追加 (continuous? プローブ、SoundHandle チェーン、
   euclid の DMX 構造化、連続→離散スワップ、String "0" の truthiness)。
 

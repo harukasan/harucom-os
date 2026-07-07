@@ -27,15 +27,17 @@ module Johakyu
 
   class Signal < Pattern
     # sample(t) = value_offset + value_scale * func(t * time_scale)
-    def initialize(func, time_scale = 1.0, value_scale = 1.0, value_offset = 0.0)
-      @func = func
+    def initialize(func = nil, time_scale = 1.0, value_scale = 1.0, value_offset = 0.0, &block)
+      @func = func || block
       @time_scale = time_scale
       @value_scale = value_scale
       @value_offset = value_offset
-      # Sets Pattern's @query directly: this mruby does not forward a
-      # block through super to the parent initialize.
-      me = self
-      @query = lambda { |span| [Hap.new(nil, span, me.sample(span.midpoint.to_f))] }
+    end
+
+    # Signals answer queries by overriding this method instead of
+    # storing a query proc like Pattern.new does.
+    def query(span)
+      [Hap.new(nil, span, sample(span.midpoint.to_f))]
     end
 
     def continuous?
@@ -67,13 +69,13 @@ module Johakyu
 
     def with_value(&block)
       source = self
-      Signal.new(lambda { |t| block.call(source.sample(t)) })
+      Signal.new { |t| block.call(source.sample(t)) }
     end
   end
 
   # Build a continuous pattern from a block of cycle position (Float).
   def self.signal(&func)
-    Signal.new(func)
+    Signal.new(&func)
   end
 
   # Rising ramp 0..1 each cycle.
