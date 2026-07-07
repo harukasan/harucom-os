@@ -244,6 +244,17 @@ module Johakyu
       haps.length > 0 && haps[0].whole.nil?
     end
 
+    # Sample the value active at a cycle position (Float). Returns nil
+    # when nothing is active. Signal overrides this with a Float-only
+    # fast path; this generic version queries a tiny span, which costs
+    # Fraction and Hap allocations, so the scheduler prefers Signals
+    # for per-tick sampling.
+    def sample(position)
+      t = Fraction.of(position)
+      haps = query(TimeSpan.new(t, t + Fraction.new(1, Fraction::FLOAT_DENOMINATOR)))
+      haps.length > 0 ? haps[0].value : nil
+    end
+
     # ---- factories ----
 
     def self.pure(value)

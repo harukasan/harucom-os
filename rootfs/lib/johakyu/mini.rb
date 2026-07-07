@@ -28,6 +28,11 @@ module Johakyu
     def self.parse(input)
       ast = Reader.new(input).read_pattern
       events_fn = Compiler.compile(ast)
+      # One-entry memo: staging queries walk cycles sequentially, and
+      # half-cycle chunks hit the same cycle twice, so remembering the
+      # last cycle's event list halves the interpreter work.
+      memo_cycle = nil
+      memo_events = nil
       Pattern.new do |span|
         spans = span.span_cycles
         haps = []
@@ -36,7 +41,14 @@ module Johakyu
           sub = spans[i]
           i += 1
           cycle_start = sub.begin_time.sam
-          events = events_fn.call(cycle_start.floor_i)
+          cycle_index = cycle_start.floor_i
+          if memo_cycle == cycle_index
+            events = memo_events
+          else
+            events = events_fn.call(cycle_index)
+            memo_cycle = cycle_index
+            memo_events = events
+          end
           j = 0
           while j < events.length
             event = events[j]

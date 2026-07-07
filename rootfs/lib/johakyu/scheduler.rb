@@ -26,8 +26,16 @@ module Johakyu
     # a time. The minimum must cover several loop iterations so all
     # tracks get their staging turn before events fall due. The
     # threshold compares as Float so an idle tick allocates nothing.
+    # Half-cycle chunks keep the worst single staging tick short, so
+    # pending events never wait behind a whole-cycle query; the mini
+    # notation per-cycle memo keeps the second query of a cycle cheap.
     STAGE_AHEAD_MIN = 0.25
-    STAGE_CHUNK = Fraction.new(1)
+    STAGE_CHUNK = Fraction.new(1, 2)
+
+    # Continuous tracks are sampled at most this often. DMX output is
+    # quantized to 40 Hz frames (25 ms), so sampling every loop
+    # iteration is wasted work.
+    CONTINUOUS_INTERVAL_MS = 25
 
     attr_reader :tick_count, :tick_ms_total, :tick_ms_max, :fired_count,
                 :fire_delay_ms_max
@@ -119,10 +127,14 @@ module Johakyu
         i += 1
         next unless track
         if track[:continuous]
-          begin
-            sample_continuous(track, now_position)
-          rescue => e
-            track_failed(track, e)
+          last = track[:sampled_at_ms]
+          if last.nil? || started_ms - last >= CONTINUOUS_INTERVAL_MS
+            track[:sampled_at_ms] = started_ms
+            begin
+              sample_continuous(track, now_position)
+            rescue => e
+              track_failed(track, e)
+            end
           end
         elsif urgent.nil? || track[:staged_until] < urgent[:staged_until]
           urgent = track
@@ -205,6 +217,7 @@ module Johakyu
           sink: sink,
           latency_ms: latency_ms,
           staged_until: Fraction.of(@clock.position),
+          sampled_at_ms: nil,
         }
         @tracks[name] = track
         @order << name
@@ -273,10 +286,8 @@ module Johakyu
       end
     end
 
-    # Sample a continuous track at the current position. EPSILON keeps
-    # the span non-empty; signals sample at the span midpoint.
-    EPSILON = Fraction.new(1, 3840)
-
+    # Sample a continuous track at the current position. Pattern#sample
+    # gives Signals their Float fast path (no Fraction allocation).
     def sample_continuous(track, now_position)
       swap_at = track[:swap_at]
       if swap_at && swap_at <= now_position
@@ -284,11 +295,8 @@ module Johakyu
         track[:next_pattern] = nil
         track[:swap_at] = nil
       end
-      t = Fraction.of(now_position)
-      haps = track[:pattern].query(TimeSpan.new(t, t + EPSILON))
-      if haps.length > 0
-        track[:sink].call(haps[0].value, nil)
-      end
+      value = track[:pattern].sample(now_position)
+      track[:sink].call(value, nil) unless value.nil?
       track[:last_good] = track[:pattern]
     end
   end

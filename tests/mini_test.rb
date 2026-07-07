@@ -94,4 +94,15 @@ class MiniTest < Picotest::Test
     assert_raise(ArgumentError) { parse("[bd") }
     assert_raise(ArgumentError) { parse("bd ]") }
   end
+
+  def test_repeated_and_partial_queries_are_stable
+    pattern = parse("<bd sn> hh")
+    first = hap_sigs(pattern.query_arc(0, 1))
+    # same cycle again (memo hit), then halves, then the next cycle
+    assert_equal first, hap_sigs(pattern.query_arc(0, 1))
+    halves = hap_sigs(pattern.query_arc(0, 0.5)) + hap_sigs(pattern.query_arc(0.5, 1))
+    assert_equal first, halves
+    assert_equal ["1/1..3/2|1/1..3/2|\"sn\"", "3/2..2/1|3/2..2/1|\"hh\""],
+                 hap_sigs(pattern.query_arc(1, 2))
+  end
 end

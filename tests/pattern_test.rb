@@ -128,4 +128,20 @@ class PatternTest < Picotest::Test
     assert_equal false, P.silence.continuous?
     assert_equal false, P.euclid(3, 8).continuous?
   end
+
+  def test_signal_transform_chain_keeps_fast_path
+    signal = Johakyu.sine.range(0.2, 0.8).slow(8)
+    assert_equal true, signal.is_a?(Johakyu::Signal)
+    # slow(8) at position 2.0 samples sine at 0.25 (its peak): 0.8
+    value = signal.sample(2.0)
+    assert_equal true, (value - 0.8).abs < 1e-9
+    # the fast path agrees with the query path
+    queried = signal.query_arc(2.0, 2.0 + 1.0 / 3840)[0].value
+    assert_equal true, (queried - value).abs < 0.001
+  end
+
+  def test_generic_sample_falls_back_to_query
+    assert_equal 2, P.fastcat(1, 2).sample(0.5)
+    assert_equal true, P.silence.sample(0.25).nil?
+  end
 end

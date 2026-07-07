@@ -68,7 +68,9 @@ class SchedulerTest < Picotest::Test
     samples = []
     scheduler.bind_continuous(:pan, Johakyu.sine) { |v, _at| samples << v }
     run_until(scheduler, 2000, 20)
-    assert_equal true, samples.length >= 99
+    # Sampling is capped at CONTINUOUS_INTERVAL_MS (25 ms), so 20 ms
+    # ticks sample every other tick.
+    assert_equal true, samples.length >= 45
     assert_equal true, samples.all? { |v| v >= 0.0 && v <= 1.0 }
   end
 
@@ -170,8 +172,8 @@ class SchedulerTest < Picotest::Test
     run_until(session, 500, 20)
     pans = DMX.writes.select { |w| w[1] == 14 }
     # A discrete bind would write at most once here; sampling writes
-    # every tick.
-    assert_equal true, pans.length >= 20
+    # every CONTINUOUS_INTERVAL_MS.
+    assert_equal true, pans.length >= 10
     assert_equal true, pans.all? { |w| w[2] >= 51 && w[2] <= 204 }
   end
 

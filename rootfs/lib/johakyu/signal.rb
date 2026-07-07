@@ -8,17 +8,72 @@
 #   Johakyu.sine.slow(4)                # slow pan sweep source
 #   Johakyu.saw.segment(8)              # 8 discrete steps per cycle
 #   Johakyu.tri.range(0.2, 0.8)         # rescaled to 0.2..0.8
+#
+# Signal keeps the value function in the Float domain. The scheduler
+# samples continuous tracks through sample(), which stays in Float
+# arithmetic instead of querying: the query path allocates a Fraction,
+# TimeSpan, and Hap per combinator layer per sample, and on the board
+# (boxed Floats, PSRAM heap) that GC pressure dominated the tick cost.
+# fast/slow/range fold into three Float coefficients instead of
+# wrapping blocks, so a chain like sine.range(0.2, 0.8).slow(8) costs
+# one block call and three Float operations per sample (mruby block
+# calls are comparatively expensive). Other transforms fall back to
+# Pattern and stay correct through the query path.
 
 require "johakyu/pattern"
 
 module Johakyu
   TWO_PI = 6.283185307179586
 
+  class Signal < Pattern
+    # sample(t) = value_offset + value_scale * func(t * time_scale)
+    def initialize(func, time_scale = 1.0, value_scale = 1.0, value_offset = 0.0)
+      @func = func
+      @time_scale = time_scale
+      @value_scale = value_scale
+      @value_offset = value_offset
+      # Sets Pattern's @query directly: this mruby does not forward a
+      # block through super to the parent initialize.
+      me = self
+      @query = lambda { |span| [Hap.new(nil, span, me.sample(span.midpoint.to_f))] }
+    end
+
+    def continuous?
+      true
+    end
+
+    # Float fast path: no Fraction or Hap allocation.
+    def sample(position)
+      @value_offset + @value_scale * @func.call(position * @time_scale)
+    end
+
+    def fast(factor)
+      f = factor.to_f
+      raise ArgumentError, "fast factor must be positive" if f <= 0
+      Signal.new(@func, @time_scale * f, @value_scale, @value_offset)
+    end
+
+    def slow(factor)
+      fast(1.0 / factor.to_f)
+    end
+
+    # Rescale the sampled value to min..max. Folds into the linear
+    # coefficients: min + (offset + scale * f) * (max - min).
+    def range(min, max)
+      span = (max - min).to_f
+      Signal.new(@func, @time_scale,
+                 @value_scale * span, min + @value_offset * span)
+    end
+
+    def with_value(&block)
+      source = self
+      Signal.new(lambda { |t| block.call(source.sample(t)) })
+    end
+  end
+
   # Build a continuous pattern from a block of cycle position (Float).
   def self.signal(&func)
-    Pattern.new do |span|
-      [Hap.new(nil, span, func.call(span.midpoint.to_f))]
-    end
+    Signal.new(func)
   end
 
   # Rising ramp 0..1 each cycle.
