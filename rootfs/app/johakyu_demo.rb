@@ -46,6 +46,9 @@ def johakyu_demo
   # each track at the next cycle boundary and leaves no stale tracks.
   preset_name = ""
   apply_preset = lambda do |n|
+    # Stats restart per preset so tick/late/stage read as steady-state
+    # numbers for this preset (the swap transient is still included).
+    session.scheduler.reset_stats
     case n
     when 1
       preset_name = "1 Kick pulse"

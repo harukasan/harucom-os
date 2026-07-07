@@ -108,6 +108,18 @@ module Johakyu
       @errors[name]
     end
 
+    # Reset the performance counters (averages and high-water marks).
+    # The demo calls this on preset switches so the numbers describe
+    # the current preset instead of the whole run.
+    def reset_stats
+      @tick_count = 0
+      @tick_ms_total = 0
+      @tick_ms_max = 0
+      @fired_count = 0
+      @fire_delay_ms_max = 0
+      @stage_ms_max = 0
+    end
+
     # Drop staged events and stage again from the current position.
     # Call after a tempo change: staged target times were computed with
     # the old tempo and would fire off the new grid.
