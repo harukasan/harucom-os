@@ -86,11 +86,7 @@ class JohakyuApp
     analyze_viewport
 
     @view = Johakyu::UniverseView.new(@session, top: VIEW_TOP)
-    @sandbox = Sandbox.new("johakyu-live")
-    @sandbox.compile("_ = nil")
-    @sandbox.execute
-    @sandbox.wait(timeout: nil)
-    @sandbox.suspend
+    @sandbox = new_eval_sandbox
 
     @console.clear
     @view.reset
@@ -154,6 +150,17 @@ class JohakyuApp
 
   # -- Live eval --
 
+  # Resident sandbox, primed once so later compiles reuse the task
+  # (the irb compile/execute/suspend pattern).
+  def new_eval_sandbox
+    sandbox = Sandbox.new("johakyu-live")
+    sandbox.compile("_ = nil")
+    sandbox.execute
+    sandbox.wait(timeout: nil)
+    sandbox.suspend
+    sandbox
+  end
+
   def start_eval
     return if @evaling
     source = @buffer.lines.join("\n")
@@ -195,10 +202,16 @@ class JohakyuApp
       @sandbox.suspend
       draw_status
     elsif Machine.board_millis - @eval_started_ms > EVAL_TIMEOUT_MS
-      @sandbox.stop
+      # Do not stop a running task: the stop flag forces a return out
+      # of a possibly nested mrb_vm_exec and hardfaults (the known
+      # mruby-task nested-exec family). Suspending only parks the task
+      # at its next safe point, so the runaway script is abandoned and
+      # a fresh sandbox takes over.
+      @sandbox.suspend
+      @sandbox = new_eval_sandbox
       @live.discard
       @evaling = false
-      @message = "Eval timeout (script must not loop)"
+      @message = "Eval timeout: scripts must not loop (bindings keep running)"
       draw_status
     end
   end
