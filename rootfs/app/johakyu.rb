@@ -40,6 +40,14 @@ class JohakyuApp
   UNDO_MAX = 200
   EVAL_TIMEOUT_MS = 2000
 
+  # Windowed syntax analysis (same design as edit.rb): only a window
+  # of lines around the viewport is parsed, rebuilt on edits or when
+  # the viewport leaves the window. Scrolling alone reuses the cached
+  # map, so it neither reparses nor reallocates the joined source.
+  SYNTAX_MARGIN      = 40
+  SYNTAX_ANCHOR_SCAN = 60
+  SYNTAX_MAX_BYTES   = 8100
+
   STARTER = [
     "tempo 120",
     "",
@@ -61,9 +69,11 @@ class JohakyuApp
     @message = nil
     @undo_stack = []
     @redo_stack = []
-    @syntax_result = nil
-    @highlight_map = nil
-    @line_offsets = nil
+    @syntax = nil     # [highlight_map, window_offsets, win_start] or nil
+    @win_start = 0
+    @win_end = 0
+    @command_bar_text = nil
+    @command_bar_mode = false
 
     @evaling = false
     @eval_started_ms = 0
@@ -73,7 +83,7 @@ class JohakyuApp
   def run
     setup_engine
     load_buffer
-    rebuild_syntax
+    analyze_viewport
 
     @view = Johakyu::UniverseView.new(@session, top: VIEW_TOP)
     @sandbox = Sandbox.new("johakyu-live")
@@ -290,50 +300,128 @@ class JohakyuApp
     true
   end
 
-  # -- Syntax --
+  # -- Syntax (windowed, same design as edit.rb) --
 
-  def rebuild_syntax
-    source = @buffer.lines.join("\n")
+  # A line starting at column 0 with a top-level construct boundary is
+  # a safe place to start parsing.
+  def syntax_anchor?(line)
+    return false if line.bytesize == 0
+    b0 = line.getbyte(0)
+    return false if b0 == 0x20 || b0 == 0x09
+    return true if line == "end"
+    line.start_with?("class ", "class\t", "module ", "module\t", "def ", "def\t")
+  end
+
+  def syntax_anchor_line(from_line)
+    from_line = 0 if from_line < 0
+    limit = from_line - SYNTAX_ANCHOR_SCAN
+    limit = 0 if limit < 0
+    i = from_line
+    while i > limit
+      line = @buffer.lines[i]
+      return i if line && syntax_anchor?(line)
+      i -= 1
+    end
+    limit
+  end
+
+  # Parse a window covering [top, bottom] plus margins, capped to the
+  # analyzer byte budget. Returns the raw result and updates the
+  # cached bundle (@syntax = [highlight_map, offsets, win_start]).
+  def analyze_window(top, bottom)
+    lines = @buffer.lines
+    n = lines.length
+    if n == 0
+      @syntax = nil
+      @win_start = 0
+      @win_end = 0
+      return nil
+    end
+    top = 0 if top < 0
+    bottom = n - 1 if bottom > n - 1
+    bottom = top if bottom < top
+
+    ws = syntax_anchor_line(top - SYNTAX_MARGIN)
+    we = bottom + SYNTAX_MARGIN + 1
+    we = n if we > n
+
+    total = 0
+    i = ws
+    while i < we
+      total += lines[i].bytesize + 1
+      i += 1
+    end
+    while total > SYNTAX_MAX_BYTES && we > bottom + 1
+      we -= 1
+      total -= lines[we].bytesize + 1
+    end
+    while total > SYNTAX_MAX_BYTES && ws < top
+      total -= lines[ws].bytesize + 1
+      ws += 1
+    end
+
+    @win_start = ws
+    @win_end = we
+    source = lines[ws...we].join("\n")
     result = RubySyntax.analyze(source)
     unless result
-      @syntax_result = nil
-      @highlight_map = nil
-      @line_offsets = nil
-      return
+      @syntax = nil
+      return nil
     end
     offsets = []
-    offset = 0
-    @buffer.lines.each { |l| offsets.push(offset); offset += l.bytesize + 1 }
-    @syntax_result = result
-    @highlight_map = result.highlight_map
-    @line_offsets = offsets
+    off = 0
+    i = ws
+    while i < we
+      offsets.push(off)
+      off += lines[i].bytesize + 1
+      i += 1
+    end
+    @syntax = [result.highlight_map, offsets, ws]
+    result
+  end
+
+  def analyze_viewport
+    analyze_window(@scroll_top, @scroll_top + EDIT_ROWS - 1)
   end
 
   # -- Drawing --
 
+  # Cursor movement redraws this row on every key (repeat runs at
+  # 20 Hz), so it must stay allocation-light next to the audio fill:
+  # no display_slice (it allocates one String per character).
   def draw_status
     line_num = @buffer.cursor_y + 1
     col_num = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x) + 1
     modified = @buffer.changed ? " [+]" : ""
     status = " #{@filepath}#{modified}  #{line_num}:#{col_num}"
     status = " #{@message}" if @message
-    padding = Console::COLS - Editor.display_width(status)
-    status += " " * padding if padding > 0
-    @console.put_string_at(0, STATUS_ROW, Editor.display_slice(status, 0, Console::COLS), STATUS_ATTR)
+    width = Editor.display_width(status)
+    if width < Console::COLS
+      status += " " * (Console::COLS - width)
+    elsif width > Console::COLS
+      status = Editor.display_slice(status, 0, Console::COLS)
+    end
+    @console.put_string_at(0, STATUS_ROW, status, STATUS_ATTR)
   end
 
+  # The bar text only changes with the IME mode label; cache the
+  # padded string so per-key redraw is one put_string, no allocation.
   def draw_command_bar
-    bar = " F5:Eval  Ctrl-S:Save+Eval  Ctrl-Q:Quit  Ctrl-Z:Undo  Ctrl-Y:Redo"
     mode = $ime ? $ime.mode_label : nil
-    if mode
-      padding = Console::COLS - Editor.display_width(bar) - Editor.display_width(mode)
-      bar += " " * padding if padding > 0
-      bar += mode
-    else
-      padding = Console::COLS - Editor.display_width(bar)
-      bar += " " * padding if padding > 0
+    if @command_bar_text.nil? || mode != @command_bar_mode
+      @command_bar_mode = mode
+      bar = " F5:Eval  Ctrl-S:Save+Eval  Ctrl-Q:Quit  Ctrl-Z:Undo  Ctrl-Y:Redo"
+      if mode
+        padding = Console::COLS - Editor.display_width(bar) - Editor.display_width(mode)
+        bar += " " * padding if padding > 0
+        bar += mode
+      else
+        padding = Console::COLS - Editor.display_width(bar)
+        bar += " " * padding if padding > 0
+      end
+      @command_bar_text = bar
     end
-    @console.put_string_at(0, COMMAND_ROW, Editor.display_slice(bar, 0, Console::COLS), COMMAND_ATTR)
+    @console.put_string_at(0, COMMAND_ROW, @command_bar_text, COMMAND_ATTR)
   end
 
   # Prompt on the command bar. Keeps the show alive while waiting.
@@ -385,8 +473,13 @@ class JohakyuApp
     return if line_index >= @buffer.lines.length
 
     line = @buffer.lines[line_index]
-    if @highlight_map && @line_offsets
-      RubySyntax.draw_line(0, row, line, @highlight_map, @line_offsets[line_index] || 0, @scroll_left, Console::COLS, EDIT_ATTR)
+    line_offset = nil
+    if @syntax
+      rel = line_index - @syntax[2]
+      line_offset = @syntax[1][rel] if rel >= 0 && rel < @syntax[1].length
+    end
+    if line_offset
+      RubySyntax.draw_line(0, row, line, @syntax[0], line_offset, @scroll_left, Console::COLS, EDIT_ATTR)
     else
       text = Editor.display_slice(line, @scroll_left, Console::COLS)
       @console.put_string_at(0, row, text, EDIT_ATTR) if text && text.bytesize > 0
@@ -396,6 +489,47 @@ class JohakyuApp
   def draw_all_lines
     i = 0
     while i < EDIT_ROWS
+      draw_line(i)
+      i += 1
+    end
+  end
+
+  # Differential vertical scroll: shift with the DVI ring-buffer
+  # scroll (O(1)) and draw only the newly exposed lines. The ring
+  # scroll moves the whole screen, so the universe view, status row,
+  # and command bar are repainted in the same frame.
+  def scroll_view(vdelta)
+    if vdelta > 0
+      DVI::Text.scroll_up(vdelta, EDIT_ATTR)
+      row = EDIT_ROWS - vdelta
+      while row < EDIT_ROWS
+        draw_line(row)
+        row += 1
+      end
+    else
+      n = -vdelta
+      DVI::Text.scroll_down(n, EDIT_ATTR)
+      row = 0
+      while row < n
+        draw_line(row)
+        row += 1
+      end
+    end
+    @view.reset
+    draw_command_bar
+  end
+
+  # Horizontal scroll has no ring-buffer shortcut; redraw the visible
+  # lines whose content moved, skipping lines blank in both viewports.
+  def draw_hscroll(old_scroll_left)
+    threshold = old_scroll_left < @scroll_left ? old_scroll_left : @scroll_left
+    i = 0
+    while i < EDIT_ROWS
+      line = @buffer.lines[@scroll_top + i]
+      if line.nil? || Editor.display_width(line) <= threshold
+        i += 1
+        next
+      end
       draw_line(i)
       i += 1
     end
@@ -420,15 +554,20 @@ class JohakyuApp
     @scroll_top
   end
 
+  # Jump-scroll horizontally (re-center) when the cursor leaves the
+  # window, so per-column movement does not force full-width redraws.
   def adjust_horizontal_scroll
     line_width = Editor.display_width(@buffer.current_line)
     return 0 if line_width <= Console::COLS
     cursor_col = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x)
-    return cursor_col if cursor_col < @scroll_left
-    if cursor_col >= @scroll_left + Console::COLS
-      return cursor_col - Console::COLS + 1
+    if cursor_col >= @scroll_left && cursor_col < @scroll_left + Console::COLS
+      return @scroll_left
     end
-    @scroll_left
+    new_scroll = cursor_col - Console::COLS / 2
+    max_scroll = line_width - Console::COLS + 1
+    new_scroll = max_scroll if new_scroll > max_scroll
+    new_scroll = 0 if new_scroll < 0
+    new_scroll
   end
 
   # -- Key handling (edit.rb behavior + F5/Ctrl-S eval) --
@@ -438,6 +577,8 @@ class JohakyuApp
     @message = nil
     @preedit_width = 0
     old_dirty = @buffer.dirty
+    @old_scroll_top = @scroll_top
+    @old_scroll_left = @scroll_left
     @buffer.clear_dirty
 
     ime_handled = false
@@ -480,7 +621,6 @@ class JohakyuApp
         @scroll_top -= EDIT_ROWS
         @scroll_top = 0 if @scroll_top < 0
         @buffer.move_to(@buffer.cursor_x, @scroll_top)
-        @buffer.mark_dirty(:structure)
       when Keyboard::PAGEDOWN
         max_scroll = @buffer.lines.length - EDIT_ROWS
         max_scroll = 0 if max_scroll < 0
@@ -489,7 +629,6 @@ class JohakyuApp
         new_y = @scroll_top + EDIT_ROWS - 1
         new_y = @buffer.lines.length - 1 if new_y >= @buffer.lines.length
         @buffer.move_to(@buffer.cursor_x, new_y)
-        @buffer.mark_dirty(:structure)
       when Keyboard::HOME
         undo_record_break
         @buffer.head
@@ -541,11 +680,10 @@ class JohakyuApp
           undo_record([:insert, @buffer.cursor_y, @buffer.cursor_x, c.to_s])
           @buffer.put(c.to_s)
           if c.to_s == " " && RubySyntax.should_dedent_on_space?(@buffer.current_line)
-            source = @buffer.lines.join("\n")
-            result = RubySyntax.analyze(source)
+            result = analyze_window(@buffer.cursor_y, @buffer.cursor_y)
             if result
               old_line = @buffer.current_line
-              if RubySyntax.reindent_line(@buffer, @buffer.cursor_y, result.indent_level(@buffer.cursor_y))
+              if RubySyntax.reindent_line(@buffer, @buffer.cursor_y, result.indent_level(@buffer.cursor_y - @win_start))
                 undo_record([:replace_line, @buffer.cursor_y, old_line])
                 @buffer.mark_dirty(:content)
               end
@@ -562,17 +700,16 @@ class JohakyuApp
   end
 
   def auto_indent
-    source = @buffer.lines.join("\n")
-    result = RubySyntax.analyze(source)
+    result = analyze_window(@buffer.cursor_y - 1, @buffer.cursor_y)
     return unless result
     prev_y = @buffer.cursor_y - 1
     if prev_y >= 0
       old_line = @buffer.lines[prev_y]
-      if RubySyntax.reindent_line(@buffer, prev_y, result.indent_level(prev_y))
+      if RubySyntax.reindent_line(@buffer, prev_y, result.indent_level(prev_y - @win_start))
         undo_record([:replace_line, prev_y, old_line])
       end
     end
-    level = result.indent_level(@buffer.cursor_y)
+    level = result.indent_level(@buffer.cursor_y - @win_start)
     if level > 0
       spaces = "  " * level
       undo_record([:insert, @buffer.cursor_y, 0, spaces])
@@ -581,28 +718,37 @@ class JohakyuApp
   end
 
   def redraw_after_key(old_dirty)
-    new_vscroll = adjust_vertical_scroll
-    if new_vscroll != @scroll_top
-      @scroll_top = new_vscroll
-      @buffer.mark_dirty(:structure)
-    end
-    new_hscroll = adjust_horizontal_scroll
-    if new_hscroll != @scroll_left
-      @scroll_left = new_hscroll
-      @buffer.mark_dirty(:structure)
-    end
+    # Scrolling is a viewport change, not a buffer change: it does not
+    # mark the buffer dirty and does not reparse. The differential
+    # paths below redraw only what moved.
+    @scroll_top = adjust_vertical_scroll
+    @scroll_left = adjust_horizontal_scroll
 
     dirty = @buffer.dirty
     dirty = old_dirty if dirty == :none && old_dirty != :none
+    vdelta = @scroll_top - @old_scroll_top
+    hscrolled = @scroll_left != @old_scroll_left
 
-    if dirty == :content || dirty == :structure
-      rebuild_syntax
+    content_changed = dirty == :content || dirty == :structure
+    window_rebuilt = false
+    vis_bottom = @scroll_top + EDIT_ROWS
+    vis_bottom = @buffer.lines.length if vis_bottom > @buffer.lines.length
+    if content_changed || @scroll_top < @win_start || vis_bottom > @win_end
+      analyze_viewport
+      window_rebuilt = true
     end
 
-    case dirty
-    when :structure
+    if dirty == :structure || vdelta.abs >= EDIT_ROWS ||
+       (hscrolled && vdelta != 0) || (window_rebuilt && !content_changed)
       draw_all_lines
-    when :content
+    elsif hscrolled
+      draw_hscroll(@old_scroll_left)
+    elsif vdelta != 0
+      scroll_view(vdelta)
+      if dirty == :content
+        draw_line(@buffer.cursor_y - @scroll_top)
+      end
+    elsif dirty == :content
       draw_line(@buffer.cursor_y - @scroll_top)
     end
 
