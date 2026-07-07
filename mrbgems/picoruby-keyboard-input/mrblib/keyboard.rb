@@ -19,6 +19,18 @@ class Keyboard
     0x29 => :escape,
     0x2A => :bspace,
     0x2B => :tab,
+    0x3A => :f1,
+    0x3B => :f2,
+    0x3C => :f3,
+    0x3D => :f4,
+    0x3E => :f5,
+    0x3F => :f6,
+    0x40 => :f7,
+    0x41 => :f8,
+    0x42 => :f9,
+    0x43 => :f10,
+    0x44 => :f11,
+    0x45 => :f12,
     0x49 => :insert,
     0x4A => :home,
     0x4B => :pageup,
@@ -251,6 +263,7 @@ class Keyboard
   RIGHT    = key(:right)
   PAGEUP   = key(:pageup)
   PAGEDOWN = key(:pagedown)
+  F5       = key(:f5)
 
   def initialize
     @previous_keycodes = []
