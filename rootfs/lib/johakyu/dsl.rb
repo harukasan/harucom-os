@@ -137,13 +137,19 @@ module Johakyu
       DmxTarget.new(self, target)
     end
 
+    # Scheduler track name for one fixture attribute. Shared with the
+    # live layer so replace semantics can find stale tracks.
+    def self.dmx_track_name(target, attribute)
+      ("dmx_" + target.to_s + "_" + attribute.to_s).to_sym
+    end
+
     # Bind one fixture attribute track. Continuous patterns (signals)
     # are sampled every tick, discrete patterns are staged as events,
     # so dmx(:s1).pan(Johakyu.sine.slow(8)) and dmx(:s1).pan("0 0.5")
     # go through the same call. Used by dmx_seq, dmx_signal, DmxTarget.
     def bind_dmx(target, attribute, pattern)
       fixture = Johakyu.dmx(target)
-      track = ("dmx_" + target.to_s + "_" + attribute.to_s).to_sym
+      track = Session.dmx_track_name(target, attribute)
       if pattern.continuous?
         @scheduler.bind_continuous(track, pattern) do |value, _at_ms|
           Session.write_dmx(fixture, attribute, value)
