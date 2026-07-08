@@ -1,7 +1,8 @@
 # Board::PWMAudio: PWM audio output on the board's audio pins
 #
 # CHANNELS mixer channels, each playing an oscillator (sine, square,
-# triangle, sawtooth) or a mono QOA sample, decoded on demand. The
+# triangle, sawtooth) or a QOA/WAV sample (mono or stereo), held in
+# memory or streamed from a file on flash (PWMAudio::Stream). The
 # output is a wrap-paced DMA stream (50,000 samples/s) rendered
 # autonomously in C, so Ruby only changes parameters or schedules
 # events. See doc/pwm-audio.md for the design.
