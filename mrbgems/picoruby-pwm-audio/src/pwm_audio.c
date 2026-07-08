@@ -170,6 +170,7 @@ bool pwm_audio_l_is_pwm_a = true;
 
 typedef struct {
   uint64_t when;
+  uint32_t sequence; /* schedule order, tie-break for equal when */
   uint32_t frequency;
   uint8_t channel;
   uint8_t waveform;
@@ -178,6 +179,7 @@ typedef struct {
 } pwm_audio_event_t;
 
 static pwm_audio_event_t events[PWM_AUDIO_EVENT_MAX];
+static uint32_t event_sequence;
 
 bool
 pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
@@ -188,6 +190,7 @@ pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
   for (int i = 0; i < PWM_AUDIO_EVENT_MAX; i++) {
     if (events[i].used) continue;
     events[i].when = when;
+    events[i].sequence = event_sequence++;
     events[i].frequency = frequency;
     events[i].channel = channel;
     events[i].waveform = waveform;
@@ -210,6 +213,16 @@ pwm_audio_cancel_scheduled(uint8_t channel)
     }
   }
   pwm_audio_unlock(state);
+}
+
+/* Order events by position, then by schedule order for ties, so
+ * same-sample events (e.g. a stop and a retrigger) apply as the
+ * caller issued them. */
+static bool
+event_is_before(const pwm_audio_event_t *a, const pwm_audio_event_t *b)
+{
+  if (a->when != b->when) return a->when < b->when;
+  return (int32_t)(a->sequence - b->sequence) < 0;
 }
 
 static void
@@ -240,15 +253,25 @@ pwm_audio_render_block(uint64_t start_sample, uint32_t *dst, uint32_t count)
   while (i < count) {
     uint64_t now = start_sample + i;
     uint32_t run = count - i;
-    /* Apply due events, then shorten the run to the next event inside
-     * this block so it lands on its exact sample. */
+    /* Apply due events oldest first so an overdue tone/stop pair for
+     * one channel resolves as scheduled. */
+    for (;;) {
+      pwm_audio_event_t *due = NULL;
+      for (int e = 0; e < PWM_AUDIO_EVENT_MAX; e++) {
+        pwm_audio_event_t *event = &events[e];
+        if (!event->used || event->when > now) continue;
+        if (!due || event_is_before(event, due)) due = event;
+      }
+      if (!due) break;
+      apply_event(due);
+      due->used = false;
+    }
+    /* Shorten the run to the next event inside this block so it lands
+     * on its exact sample. */
     for (int e = 0; e < PWM_AUDIO_EVENT_MAX; e++) {
       pwm_audio_event_t *event = &events[e];
       if (!event->used) continue;
-      if (event->when <= now) {
-        apply_event(event);
-        event->used = false;
-      } else if (event->when < start_sample + count) {
+      if (event->when < start_sample + count) {
         uint32_t until = (uint32_t)(event->when - now);
         if (until < run) run = until;
       }

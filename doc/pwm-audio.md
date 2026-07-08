@@ -263,9 +263,11 @@ mixed, soft-clipped, and scaled to the PWM level range 0-999
 Scheduled events live in a fixed queue of 32 slots guarded by
 `pwm_audio_lock()`. During block rendering, due events are applied and
 the render run is shortened to the next event position inside the
-block, so each event takes effect on its exact sample. Events whose
-position is already behind the render position are applied at the
-start of the next rendered span; see
+block, so each event takes effect on its exact sample. Due events are
+applied oldest first, with ties resolved in scheduling order, so an
+overdue tone and stop for the same channel still resolve as
+scheduled. Events whose position is already behind the render
+position are applied at the start of the next rendered span; see
 [PWMAudio.tone_at](#pwmaudiotone_atsample-channel-frequency-waveform-volume---bool)
 for the resulting lead requirement.
 
