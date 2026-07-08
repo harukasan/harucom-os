@@ -5,6 +5,7 @@
  */
 
 #include <mruby.h>
+#include <mruby/array.h>
 #include <mruby/presym.h>
 
 #include "../../include/pwm_audio.h"
@@ -69,12 +70,69 @@ mrb_pwm_audio_stop_all(mrb_state *mrb, mrb_value self)
   return mrb_nil_value();
 }
 
-/* PWMAudio.update — fill the sample ring buffer */
+/* PWMAudio.update — kept for compatibility. The DMA half-transfer IRQ
+ * renders autonomously, so there is nothing to fill from Ruby. */
 static mrb_value
 mrb_pwm_audio_update(mrb_state *mrb, mrb_value self)
 {
   (void)mrb;
-  pwm_audio_fill_buffer();
+  return mrb_nil_value();
+}
+
+/* PWMAudio.sample_clock — playback position in samples (monotonic) */
+static mrb_value
+mrb_pwm_audio_sample_clock(mrb_state *mrb, mrb_value self)
+{
+  (void)mrb;
+  return mrb_int_value(mrb, (mrb_int)pwm_audio_sample_clock());
+}
+
+/* PWMAudio.tone_at(sample, channel, frequency, waveform, volume)
+ * Schedule a tone start at an absolute sample position. Returns false
+ * when the event queue is full. */
+static mrb_value
+mrb_pwm_audio_tone_at(mrb_state *mrb, mrb_value self)
+{
+  mrb_int sample, channel, frequency, waveform, volume;
+  mrb_get_args(mrb, "iiiii", &sample, &channel, &frequency, &waveform, &volume);
+  bool ok = pwm_audio_schedule((uint64_t)sample, (uint8_t)channel, (uint32_t)frequency,
+                               (uint8_t)waveform, (uint8_t)volume);
+  return mrb_bool_value(ok);
+}
+
+/* PWMAudio.stop_at(sample, channel) — schedule a channel stop */
+static mrb_value
+mrb_pwm_audio_stop_at(mrb_state *mrb, mrb_value self)
+{
+  mrb_int sample, channel;
+  mrb_get_args(mrb, "ii", &sample, &channel);
+  bool ok = pwm_audio_schedule((uint64_t)sample, (uint8_t)channel, 0, 0, 0);
+  return mrb_bool_value(ok);
+}
+
+/* PWMAudio.stats —
+ * [min_lead_samples, max_pump_gap_us, drift_now, drift_min] */
+static mrb_value
+mrb_pwm_audio_stats(mrb_state *mrb, mrb_value self)
+{
+  int32_t min_lead, drift_now, drift_min;
+  uint32_t max_gap_us;
+  pwm_audio_stats(&min_lead, &max_gap_us, &drift_now, &drift_min);
+  mrb_value ary = mrb_ary_new_capa(mrb, 4);
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, min_lead));
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)max_gap_us));
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, drift_now));
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, drift_min));
+  return ary;
+}
+
+/* PWMAudio.cancel_scheduled(channel) — drop pending events for a channel */
+static mrb_value
+mrb_pwm_audio_cancel_scheduled(mrb_state *mrb, mrb_value self)
+{
+  mrb_int channel;
+  mrb_get_args(mrb, "i", &channel);
+  pwm_audio_cancel_scheduled((uint8_t)channel);
   return mrb_nil_value();
 }
 
@@ -92,6 +150,7 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
 {
   struct RClass *mod = mrb_define_module_id(mrb, MRB_SYM(PWMAudio));
 
+  mrb_define_const_id(mrb, mod, MRB_SYM(SAMPLE_RATE), mrb_fixnum_value(PWM_AUDIO_SAMPLE_RATE));
   mrb_define_const_id(mrb, mod, MRB_SYM(SINE), mrb_fixnum_value(PWM_AUDIO_WAVE_SINE));
   mrb_define_const_id(mrb, mod, MRB_SYM(SQUARE), mrb_fixnum_value(PWM_AUDIO_WAVE_SQUARE));
   mrb_define_const_id(mrb, mod, MRB_SYM(TRIANGLE), mrb_fixnum_value(PWM_AUDIO_WAVE_TRIANGLE));
@@ -105,6 +164,15 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
   mrb_define_module_function_id(mrb, mod, MRB_SYM(stop_all), mrb_pwm_audio_stop_all,
                                 MRB_ARGS_NONE());
   mrb_define_module_function_id(mrb, mod, MRB_SYM(update), mrb_pwm_audio_update, MRB_ARGS_NONE());
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(sample_clock), mrb_pwm_audio_sample_clock,
+                                MRB_ARGS_NONE());
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(tone_at), mrb_pwm_audio_tone_at,
+                                MRB_ARGS_REQ(5));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(stop_at), mrb_pwm_audio_stop_at,
+                                MRB_ARGS_REQ(2));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(cancel_scheduled),
+                                mrb_pwm_audio_cancel_scheduled, MRB_ARGS_REQ(1));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(stats), mrb_pwm_audio_stats, MRB_ARGS_NONE());
   mrb_define_module_function_id(mrb, mod, MRB_SYM(deinit), mrb_pwm_audio_deinit, MRB_ARGS_NONE());
 }
 
