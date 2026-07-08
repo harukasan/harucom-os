@@ -299,6 +299,7 @@ M4 はタイマクロック + 既存発音で成立するため、音 DMA/WAV (M
 | [05-dsl-stages](research-johakyu-05-dsl-stages.md) | M4, M7, M8 | 段階的 DSL と DMX 統合 | R15/R17 再評価 |
 | [06-editor-ui](research-johakyu-06-editor-ui.md) | M9 | 上下分割 UI・ライブリロード・異常時ブラックアウト | R9, R10, R19 |
 | [07-demo](research-johakyu-07-demo.md) | M10 | 統合・演出プリセット・アドレス整合・本番ランブック | R13, R14, R19 |
+| [08-all-pattern](research-johakyu-08-all-pattern.md) | M10 (土台) | all-pattern 化 (control pattern 統一)、音エンジン先行の決定ログ、jo/ha/kyu ショー語彙 | R15, R17 再戦 |
 
 ## リスク一覧 (R1-R19)
 
