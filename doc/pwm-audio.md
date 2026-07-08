@@ -86,6 +86,10 @@ ruby scripts/wav2qoa.rb kick.wav --verify
 ruby scripts/wav2qoa.rb song.wav --mono --verify   # downmix stereo
 ```
 
+Samples can also be synthesized in Ruby, on the board or the host,
+with the [Synth](synth.md) render DSL; the drum kit in
+[rootfs/data/drums/](../rootfs/data/drums) is generated that way.
+
 ### PWMAudio::Stream
 
 `Stream.new(path)` plays a file on the flash filesystem by streaming:
