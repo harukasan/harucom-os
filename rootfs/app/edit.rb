@@ -612,8 +612,12 @@ while running
   scroll_top = adjust_vertical_scroll(buffer, scroll_top)
   scroll_left = adjust_horizontal_scroll(buffer, scroll_left)
 
-  # Redraw based on dirty level and viewport movement
+  # Redraw based on dirty level and viewport movement. content_changed is
+  # taken before the old_dirty carry-over: a carried value was already
+  # analyzed last frame and the buffer has not changed since, so the carry
+  # only affects the redraw choice below, not the re-analysis.
   dirty = buffer.dirty
+  content_changed = dirty == :content || dirty == :structure
   dirty = old_dirty if dirty == :none && old_dirty != :none
   vdelta = scroll_top - old_scroll_top
   hscrolled = scroll_left != old_scroll_left
@@ -621,7 +625,6 @@ while running
   # Rebuild the parsed window on content changes, or when the viewport scrolls
   # out of the cached window. Within the window the highlight map stays valid, so
   # pure scrolling reuses it and only newly exposed lines are redrawn.
-  content_changed = dirty == :content || dirty == :structure
   window_rebuilt = false
   if highlight_enabled
     vis_bottom = scroll_top + EDIT_ROWS
