@@ -448,11 +448,15 @@ as balance. The bias itself ramps up at init and down at deinit
 A source's instantaneous value is generally nonzero when it is cut,
 so an instant level change still clicks. The mixer therefore slews
 each channel's gain toward its target by a fixed step per sample
-(full scale in about 3.6 ms): starts fade in, stops and mute changes
-fade out, and a stopped source is released only when its fade reaches
-silence. A sample that runs out of data holds its last value while
-the fade drains it, so a one-shot that does not end at zero still
-stops cleanly.
+(full scale in about 3.6 ms): starts fade in (an idle channel's gain
+rests at zero), stops and mute changes fade out, and a stopped source
+is released only when its fade reaches silence. A sample that runs
+out of data holds its last value while the fade drains it, so a
+one-shot that does not end at zero still stops cleanly. Two paths
+remain outside this guarantee: retriggering a playing sample and
+switching a playing channel's source replace the signal at the
+current gain, so they can step by the difference between the old and
+new source values.
 
 The oscillator source is a 32-bit phase accumulator stepped by
 `frequency << 32 / SAMPLE_RATE`, generating a 12-bit sine (256-entry

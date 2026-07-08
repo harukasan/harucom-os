@@ -88,6 +88,10 @@ mrb_flash_file_extents(mrb_state *mrb, mrb_value self)
     blocks++;
   }
 
+  /* Allocate the result String before the temporary block list, so a
+   * raise from the allocator cannot leak the list. */
+  mrb_value extents = mrb_str_new(mrb, NULL, blocks * 8);
+
   /* Walk the skip list backward from the head to list every block. */
   uint32_t *block_list = (uint32_t *)mrb_malloc(mrb, blocks * sizeof(uint32_t));
   block_list[blocks - 1] = head;
@@ -103,7 +107,6 @@ mrb_flash_file_extents(mrb_state *mrb, mrb_value self)
     mrb_raise(mrb, E_RUNTIME_ERROR, "corrupt file: block out of range");
   }
 
-  mrb_value extents = mrb_str_new(mrb, NULL, blocks * 8);
   uint8_t *out = (uint8_t *)RSTRING_PTR(extents);
   uint32_t remaining = size;
   for (uint32_t i = 0; i < blocks; i++) {

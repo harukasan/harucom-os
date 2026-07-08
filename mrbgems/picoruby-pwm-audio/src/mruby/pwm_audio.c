@@ -165,6 +165,9 @@ mrb_pwm_audio_play(mrb_state *mrb, mrb_value self)
 {
   mrb_int channel, volume;
   mrb_get_args(mrb, "ii", &channel, &volume);
+  if (channel < 0 || channel >= PWM_AUDIO_NUM_CHANNELS) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid channel");
+  }
   pwm_audio_play((uint8_t)channel, (uint8_t)volume);
   return mrb_nil_value();
 }
@@ -175,6 +178,9 @@ mrb_pwm_audio_play_at(mrb_state *mrb, mrb_value self)
 {
   mrb_int sample, channel, volume;
   mrb_get_args(mrb, "iii", &sample, &channel, &volume);
+  if (channel < 0 || channel >= PWM_AUDIO_NUM_CHANNELS) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid channel");
+  }
   bool ok = pwm_audio_play_schedule((uint64_t)sample, (uint8_t)channel, (uint8_t)volume);
   return mrb_bool_value(ok);
 }
@@ -215,6 +221,9 @@ mrb_pwm_audio_set_stream(mrb_state *mrb, mrb_value self)
   if (RSTRING_LEN(extents) == 0 || RSTRING_LEN(extents) % 8 != 0) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "malformed extent list");
   }
+  if (total_length <= 0) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid total length");
+  }
   if (!pwm_audio_set_stream((uint8_t)channel, (const uint8_t *)RSTRING_PTR(extents),
                             (uint32_t)(RSTRING_LEN(extents) / 8), (uint32_t)total_length)) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "not a QOA or WAV stream");
@@ -233,6 +242,9 @@ mrb_pwm_audio_stream_info(mrb_state *mrb, mrb_value self)
   mrb_get_args(mrb, "Si", &extents, &total_length);
   if (RSTRING_LEN(extents) == 0 || RSTRING_LEN(extents) % 8 != 0) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "malformed extent list");
+  }
+  if (total_length <= 0) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid total length");
   }
   uint32_t samplerate, frames, channels;
   if (!pwm_audio_stream_info((const uint8_t *)RSTRING_PTR(extents),

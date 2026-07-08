@@ -58,9 +58,10 @@ void pwm_audio_render_block(uint64_t start_sample, uint32_t *dst, uint32_t count
 /* Channel control (immediate; applied to samples rendered after the
  * call). set_tone switches the channel's source to the oscillator and
  * starts it; stop/pan/mute work on either source. Starts, stops, and
- * mute changes fade over a few milliseconds (the mix domain is
- * unipolar, so an instant level change would click); a stop releases
- * its source once the fade reaches silence. */
+ * mute changes fade over a few milliseconds (a source's instantaneous
+ * value is generally nonzero when cut, so an instant level change
+ * would click); a stop releases its source once the fade reaches
+ * silence. */
 void pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_t volume);
 void pwm_audio_set_pan(uint8_t channel, uint8_t pan);
 void pwm_audio_set_mute(uint8_t channel, bool mute);
