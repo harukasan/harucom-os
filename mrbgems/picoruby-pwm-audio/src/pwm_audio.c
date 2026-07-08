@@ -73,25 +73,46 @@ typedef struct {
   uint8_t pan;      /* 0-15: 0=L, 8=center, 15=R */
   uint8_t source;   /* pwm_audio_source_t */
   bool muted;
-  /* Output gain ramp. Sources sit on a DC bias in the unipolar mix
-   * domain, so an instant start, stop, or mute steps the output and
-   * clicks; the mixer slews gain_current toward the target instead
-   * and releases the source once a stop ramp reaches zero. */
+  /* Output gain ramp. A source's instantaneous value is generally
+   * nonzero when it is cut, so an instant start, stop, or mute steps
+   * the output and clicks; the mixer slews gain_current toward the
+   * target instead and releases the source once a stop ramp reaches
+   * zero. */
   bool stopping;
   uint16_t gain_current;
 } pwm_audio_channel_t;
 
 static pwm_audio_channel_t channels[PWM_AUDIO_NUM_CHANNELS];
 
-/* Soft clip by tanh approximation (from picoruby-psg) */
-static inline uint16_t
-soft_clip(uint32_t x)
+/* Soft clip by tanh approximation (from picoruby-psg, reshaped for
+ * the signed mix domain) */
+static inline int32_t
+soft_clip(int32_t x)
 {
-  const uint32_t knee = 3600;
-  if (x <= knee) return (uint16_t)x;
-  uint32_t d = x - knee;
-  uint32_t y = knee + ((d >> 3) - (d >> 7));
-  return (y > 4095) ? 4095 : (uint16_t)y;
+  const int32_t knee = 1800;
+  int32_t magnitude = x < 0 ? -x : x;
+  if (magnitude > knee) {
+    int32_t d = magnitude - knee;
+    magnitude = knee + (d >> 3) - (d >> 7);
+    if (magnitude > 2047) magnitude = 2047;
+  }
+  return x < 0 ? -magnitude : magnitude;
+}
+
+/* The output idles at mid-scale (50 percent PWM duty) and signals mix
+ * around it, so starts and stops never move the DC level (a moving DC
+ * level thumps through the AC coupling). The bias itself ramps only
+ * at init and deinit. */
+#define PWM_AUDIO_BIAS_LEVEL 2048
+#define PWM_AUDIO_BIAS_STEP  4 /* full bias in ~10 ms */
+
+static int32_t master_bias;
+static bool bias_enabled = true;
+
+void
+pwm_audio_bias_fade(bool enable)
+{
+  bias_enabled = enable;
 }
 
 static inline uint32_t
@@ -361,11 +382,20 @@ pwm_audio_play(uint8_t channel, uint8_t volume)
 void
 pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
 {
-  uint32_t mix_l = 0, mix_r = 0;
+  int32_t bias_target = bias_enabled ? PWM_AUDIO_BIAS_LEVEL : 0;
+  if (master_bias < bias_target) {
+    master_bias += PWM_AUDIO_BIAS_STEP;
+    if (master_bias > bias_target) master_bias = bias_target;
+  } else if (master_bias > bias_target) {
+    master_bias -= PWM_AUDIO_BIAS_STEP;
+    if (master_bias < bias_target) master_bias = bias_target;
+  }
+
+  int32_t mix_l = 0, mix_r = 0;
 
   for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
     pwm_audio_channel_t *ch = &channels[i];
-    uint32_t amp_l, amp_r;
+    int32_t signal_l, signal_r;
 
     /* Slew the gain toward its target, then release a stopped source
      * once the fade reaches silence. */
@@ -399,10 +429,9 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
       int32_t sample_r =
           stream->prev_r +
           (int32_t)(((int64_t)(stream->next_r - stream->prev_r) * phase) >> 16);
-      /* Map signed 16-bit to the unipolar 12-bit mix domain (same
-       * convention as the tone waveforms). */
-      amp_l = (uint32_t)(sample_l + 32768) >> 4;
-      amp_r = (uint32_t)(sample_r + 32768) >> 4;
+      /* Map signed 16-bit to the signed 12-bit mix domain. */
+      signal_l = sample_l >> 4;
+      signal_r = sample_r >> 4;
 
       if (!stream->ended) {
         stream->phase += stream->phase_increment;
@@ -410,8 +439,8 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
           stream->phase -= 0x10000;
           if (!stream_pull(stream)) {
             /* Out of data: hold the last value and fade it out, so a
-             * sample that does not end at the bias level still stops
-             * without a step. */
+             * sample that does not end at zero still stops without a
+             * step. */
             stream->ended = true;
             stream->prev_l = stream->next_l;
             stream->prev_r = stream->next_r;
@@ -423,20 +452,27 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
     } else {
       if (!ch->phase_increment) continue;
       ch->phase += ch->phase_increment;
-      amp_l = generate_waveform(ch);
-      amp_r = amp_l;
+      signal_l = (int32_t)generate_waveform(ch) - 2048;
+      signal_r = signal_l;
     }
 
     /* Pan acts as balance: 8=center keeps both sides at the same
      * -3 dB point as a centered mono source. */
     uint8_t bal = ch->pan & 0x0F;
-    mix_l += (((amp_l * gain) >> 12) * pan_tab_l[bal]) >> 12;
-    mix_r += (((amp_r * gain) >> 12) * pan_tab_r[bal]) >> 12;
+    mix_l += (((signal_l * (int32_t)gain) >> 12) * (int32_t)pan_tab_l[bal]) >> 12;
+    mix_r += (((signal_r * (int32_t)gain) >> 12) * (int32_t)pan_tab_r[bal]) >> 12;
   }
 
-  /* Soft clip and scale to the PWM level range (0 to PWM_AUDIO_PWM_WRAP) */
-  *out_l = (uint16_t)((uint32_t)soft_clip(mix_l) * PWM_AUDIO_PWM_WRAP >> 12);
-  *out_r = (uint16_t)((uint32_t)soft_clip(mix_r) * PWM_AUDIO_PWM_WRAP >> 12);
+  /* Soft clip around the bias and scale to the PWM level range
+   * (0 to PWM_AUDIO_PWM_WRAP) */
+  int32_t level_l = master_bias + soft_clip(mix_l);
+  int32_t level_r = master_bias + soft_clip(mix_r);
+  if (level_l < 0) level_l = 0;
+  if (level_l > 4095) level_l = 4095;
+  if (level_r < 0) level_r = 0;
+  if (level_r > 4095) level_r = 4095;
+  *out_l = (uint16_t)(((uint32_t)level_l * PWM_AUDIO_PWM_WRAP) >> 12);
+  *out_r = (uint16_t)(((uint32_t)level_r * PWM_AUDIO_PWM_WRAP) >> 12);
 }
 
 void

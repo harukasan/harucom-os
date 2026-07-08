@@ -129,6 +129,12 @@ uint64_t pwm_audio_sample_clock(void);
 void pwm_audio_stats(int32_t *min_lead, uint32_t *max_gap_us, int32_t *drift_now,
                      int32_t *drift_min);
 
+/* The output idles at mid-scale and signals mix around it, so channel
+ * starts and stops never move the DC level. This ramps the bias
+ * itself up (init) or down (deinit, before teardown); the fade takes
+ * about 10 ms of rendered output. */
+void pwm_audio_bias_fade(bool enable);
+
 /* Platform-specific: short critical section guarding the event queue
  * and channel state against the render IRQ. */
 uint32_t pwm_audio_lock(void);

@@ -220,6 +220,7 @@ pwm_audio_init(uint8_t l_pin, uint8_t r_pin)
                   AUDIO_PACER_WRAP + 1 - (PWM_AUDIO_PWM_WRAP + 1) / 2);
 
   pwm_audio_stop_all();
+  pwm_audio_bias_fade(true);
 
   /* Set default pan to center for all channels */
   for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
@@ -279,7 +280,15 @@ void
 pwm_audio_deinit(void)
 {
   if (!audio_running) return;
-  /* Drop the flag first so pwm_audio_sample_clock() cannot touch the
+
+  /* Fade the channels and the output bias to silence while the pump
+   * still renders, so the teardown does not step the DC level. The
+   * ring holds ~41 ms, so wait for the fade plus one pump period. */
+  pwm_audio_stop_all();
+  pwm_audio_bias_fade(false);
+  sleep_ms(60);
+
+  /* Drop the flag so pwm_audio_sample_clock() cannot touch the
    * channel mid-teardown. */
   audio_running = false;
 

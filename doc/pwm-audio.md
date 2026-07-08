@@ -435,19 +435,24 @@ operations that stall XIP.
 
 Each of the `CHANNELS` channels plays one source, selected by
 `set_tone` / `set_sample` / `set_stream`, into a shared volume
-(1.5 dB steps), pan, and mute stage; the mix is soft-clipped and
-scaled to the PWM level range 0-999 (1000 output levels). A mono
-source contributes the same signal to both sides; a stereo sample
-keeps its sides separate, with pan acting as balance.
+(1.5 dB steps), pan, and mute stage. Channels mix as signed signals
+around a constant mid-scale bias (the output idles at 50 percent PWM
+duty), so playing or stopping a channel never moves the DC level; a
+moving DC level would thump through the AC coupling. The mix is
+soft-clipped around the bias and scaled to the PWM level range 0-999
+(1000 output levels). A mono source contributes the same signal to
+both sides; a stereo sample keeps its sides separate, with pan acting
+as balance. The bias itself ramps up at init and down at deinit
+(about 10 ms), the only times the DC level moves.
 
-Sources sit on a DC bias in the unipolar mix domain, so an instant
-level change steps the output and pops. The mixer therefore slews
+A source's instantaneous value is generally nonzero when it is cut,
+so an instant level change still clicks. The mixer therefore slews
 each channel's gain toward its target by a fixed step per sample
 (full scale in about 3.6 ms): starts fade in, stops and mute changes
 fade out, and a stopped source is released only when its fade reaches
 silence. A sample that runs out of data holds its last value while
-the fade drains it, so a one-shot that does not end at the bias level
-still stops cleanly.
+the fade drains it, so a one-shot that does not end at zero still
+stops cleanly.
 
 The oscillator source is a 32-bit phase accumulator stepped by
 `frequency << 32 / SAMPLE_RATE`, generating a 12-bit sine (256-entry
@@ -479,7 +484,7 @@ A 16.16 fixed-point phase accumulator resamples the source rate to
 the output rate with linear interpolation, so any source sample rate
 works. Triggers restart the stream from the file start by re-reading
 the first frame header; playback ends when the stream is exhausted.
-Samples are mixed into the same unipolar 12-bit domain as the
+Samples are mixed into the same signed 12-bit domain as the
 oscillator waveforms.
 
 ### Flash streaming
