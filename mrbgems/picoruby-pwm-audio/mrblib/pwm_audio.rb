@@ -20,23 +20,25 @@
 # and a Channel object on the same channel index can leave the
 # object's #source stale, so use one style per channel.
 module PWMAudio
-  # A loaded mono sample, QOA or 16-bit PCM WAV (detected by header).
-  # Owns the file bytes, so a Sample referenced by a Channel keeps its
-  # data alive for the engine.
+  # A loaded sample, QOA or 16-bit PCM WAV, mono or stereo (detected
+  # by header). Owns the file bytes, so a Sample referenced by a
+  # Channel keeps its data alive for the engine.
   class Sample
-    attr_reader :data, :samplerate, :frames
+    attr_reader :data, :samplerate, :frames, :channels
 
     def initialize(data)
       info = PWMAudio.sample_info(data)
       @data = data
       @samplerate = info[0]
       @frames = info[1]
+      @channels = info[2]
     end
 
     # The default inspect dumps @data (kilobytes of escaped binary),
     # which takes seconds to print on the console.
     def inspect
-      "#<PWMAudio::Sample #{@samplerate}Hz #{@frames} frames>"
+      kind = @channels == 2 ? "stereo" : "mono"
+      "#<PWMAudio::Sample #{@samplerate}Hz #{@frames} frames #{kind}>"
     end
   end
 

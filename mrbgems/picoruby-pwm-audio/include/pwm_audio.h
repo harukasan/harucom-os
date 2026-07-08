@@ -21,7 +21,7 @@ extern "C" {
 #define PWM_AUDIO_PWM_WRAP     999
 
 /* Mixer channels. Each channel plays one source at a time: an
- * oscillator (set_tone) or a mono QOA or WAV sample (set_sample + play).
+ * oscillator (set_tone) or a QOA or WAV sample (set_sample + play).
  * stop/pan/mute and the scheduled variants work on any channel
  * regardless of its source. */
 #define PWM_AUDIO_NUM_CHANNELS 8
@@ -64,23 +64,24 @@ void pwm_audio_set_mute(uint8_t channel, bool mute);
 void pwm_audio_stop_channel(uint8_t channel);
 void pwm_audio_stop_all(void);
 
-/* Switch the channel's source to a mono QOA or 16-bit PCM WAV sample
- * (see doc/pwm-audio.md). The format is detected from the header. Data
- * is pulled on demand during rendering (QOA in slices of 20 samples,
- * WAV sample by sample), so only the file bytes are held in memory.
- * The data pointer must stay valid while attached; the mruby binding
- * pins the backing String. Stops the channel but does not start
- * playback. Returns false when the data is not a mono QOA or WAV stream. */
+/* Switch the channel's source to a QOA or 16-bit PCM WAV sample, mono
+ * or stereo (see doc/pwm-audio.md). The format is detected from the
+ * header. Data is pulled on demand during rendering (QOA in slices of
+ * 20 samples, WAV frame by frame), so only the file bytes are held in
+ * memory. The data pointer must stay valid while attached; the mruby
+ * binding pins the backing String. Stops the channel but does not
+ * start playback. Returns false when the data is not a supported QOA
+ * or WAV stream. */
 bool pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length);
 
 /* One-shot playback of the channel's sample from the beginning (a
  * retrigger restarts it). No-op when the channel has no sample. */
 void pwm_audio_play(uint8_t channel, uint8_t volume);
 
-/* Parse a QOA or WAV header without touching any channel; used to validate
- * sample data up front. */
+/* Parse a QOA or WAV header without touching any channel; used to
+ * validate sample data up front. frames counts per channel. */
 bool pwm_audio_sample_info(const uint8_t *data, uint32_t length, uint32_t *samplerate,
-                           uint32_t *frames);
+                           uint32_t *frames, uint32_t *channels);
 
 /* Sample-accurate scheduling. when is an absolute position on the
  * playback timeline (compare with pwm_audio_sample_clock()).

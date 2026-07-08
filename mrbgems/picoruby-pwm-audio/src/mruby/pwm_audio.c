@@ -139,7 +139,8 @@ mrb_pwm_audio_stats(mrb_state *mrb, mrb_value self)
 }
 
 /* PWMAudio.set_sample(channel, data): switch the channel's source to
- * a mono QOA or 16-bit PCM WAV sample, detected by header */
+ * a QOA or 16-bit PCM WAV sample (mono or stereo), detected by
+ * header */
 static mrb_value
 mrb_pwm_audio_set_sample(mrb_state *mrb, mrb_value self)
 {
@@ -151,7 +152,7 @@ mrb_pwm_audio_set_sample(mrb_state *mrb, mrb_value self)
   }
   if (!pwm_audio_set_sample((uint8_t)channel, (const uint8_t *)RSTRING_PTR(data),
                             (uint32_t)RSTRING_LEN(data))) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a mono QOA or WAV sample");
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a QOA or WAV sample");
   }
   pwm_audio_pin_sample(mrb, channel, data);
   return mrb_true_value();
@@ -178,21 +179,23 @@ mrb_pwm_audio_play_at(mrb_state *mrb, mrb_value self)
   return mrb_bool_value(ok);
 }
 
-/* PWMAudio.sample_info(data): [samplerate, frames] of a QOA or WAV blob,
- * raising when it is not a mono QOA or WAV stream */
+/* PWMAudio.sample_info(data): [samplerate, frames, channels] of a QOA
+ * or WAV blob, raising when it is not a supported stream. frames
+ * counts per channel. */
 static mrb_value
 mrb_pwm_audio_sample_info(mrb_state *mrb, mrb_value self)
 {
   mrb_value data;
   mrb_get_args(mrb, "S", &data);
-  uint32_t samplerate, frames;
+  uint32_t samplerate, frames, channels;
   if (!pwm_audio_sample_info((const uint8_t *)RSTRING_PTR(data), (uint32_t)RSTRING_LEN(data),
-                             &samplerate, &frames)) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a mono QOA or WAV sample");
+                             &samplerate, &frames, &channels)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a QOA or WAV sample");
   }
-  mrb_value ary = mrb_ary_new_capa(mrb, 2);
+  mrb_value ary = mrb_ary_new_capa(mrb, 3);
   mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)samplerate));
   mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)frames));
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)channels));
   return ary;
 }
 
