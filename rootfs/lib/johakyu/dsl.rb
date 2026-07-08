@@ -264,14 +264,14 @@ module Johakyu
       end
     end
 
-    # Advance the scheduler, fire due events, release finished notes,
-    # and keep the audio ring buffer filled. Call every loop iteration.
+    # Advance the scheduler, fire due events, and release finished
+    # notes. Call every loop iteration. The audio engine renders
+    # autonomously in C and needs no pumping from here.
     def update
       flush_sound if @sound_dirty
       @scheduler.tick
       @scheduler.pump
       pump_gates
-      @audio.update if @audio
     end
 
     # Silence all voices (does not touch DMX).
