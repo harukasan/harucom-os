@@ -378,7 +378,9 @@ def draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, synt
   i = 0
   while i < EDIT_ROWS
     line = buffer.lines[scroll_top + i]
-    if line.nil? || Editor.display_width(line) <= threshold
+    # bytesize is a cheap upper bound of display width, checked first so short
+    # lines skip the O(n) width scan.
+    if line.nil? || line.bytesize <= threshold || Editor.display_width(line) <= threshold
       i += 1
       next
     end
@@ -400,12 +402,15 @@ def adjust_vertical_scroll(buffer, scroll_top)
 end
 
 def adjust_horizontal_scroll(buffer, scroll_left)
-  line_width = Editor.display_width(buffer.current_line)
+  line = buffer.current_line
+  # Display width never exceeds bytesize (a character is at least as many
+  # bytes as columns), so typical short lines skip the O(n) width scan that
+  # would otherwise run on every keystroke.
+  return 0 if line.bytesize <= COLS
+  line_width = Editor.display_width(line)
   # Current line fits on screen: reset scroll
-  if line_width <= COLS
-    return 0
-  end
-  cursor_col = Editor.byte_to_display_col(buffer.current_line, buffer.cursor_x)
+  return 0 if line_width <= COLS
+  cursor_col = Editor.byte_to_display_col(line, buffer.cursor_x)
   # Cursor still inside the visible window: no scroll. Horizontal scroll cannot
   # use the ring buffer, so every step forces a full-width redraw; keeping the
   # cursor inside the window avoids redrawing on each column of movement.
