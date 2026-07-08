@@ -857,6 +857,11 @@ dvi_start_mode(dvi_mode_t mode)
     gpio_set_drive_strength(i, GPIO_DRIVE_STRENGTH_8MA);
   }
 
+  // Register the fixed channels in the SDK claim bitmap so that other
+  // subsystems calling dma_claim_unused_channel() cannot take them.
+  dma_channel_claim(DMACH_CMD);
+  dma_channel_claim(DMACH_DATA);
+
   // Build DMA control words for scanline descriptors.
   dma_channel_config c;
 
