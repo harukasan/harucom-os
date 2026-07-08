@@ -66,6 +66,10 @@ mrb_hal_task_init(mrb_state *mrb)
 {
   mrb_ = mrb;
   hal_stdin_init();
+  /* Register the alarm in the SDK claim ledger so dynamic claimers
+   * (hardware_alarm_claim_unused, alarm pools) cannot take it. The
+   * tick itself keeps driving the alarm registers directly. */
+  timer_hardware_alarm_claim(timer_hw, ALARM_NUM);
   hw_set_bits(&timer_hw->inte, 1u << ALARM_NUM);
   irq_set_exclusive_handler(ALARM_IRQ, alarm_handler);
   irq_set_enabled(ALARM_IRQ, true);
