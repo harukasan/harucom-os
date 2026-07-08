@@ -186,7 +186,11 @@ end
 # window_end] where syntax is [highlight_map, window_offsets, window_start] (or
 # nil if parsing failed). window_offsets[k] is the byte offset of line
 # (window_start + k) within the parsed window source.
-def analyze_window(buffer, top, bottom)
+#
+# margin_below can be reduced when only indent levels are needed: the
+# indentation of a line is determined by the constructs opened above it, so
+# lines below it add parse cost without changing the result.
+def analyze_window(buffer, top, bottom, margin_below = SYNTAX_MARGIN)
   lines = buffer.lines
   n = lines.length
   return [nil, nil, 0, 0] if n == 0
@@ -195,7 +199,7 @@ def analyze_window(buffer, top, bottom)
   bottom = top if bottom < top
 
   window_start = syntax_anchor_line(buffer, top - SYNTAX_MARGIN)
-  window_end = bottom + SYNTAX_MARGIN + 1
+  window_end = bottom + margin_below + 1
   window_end = n if window_end > n
 
   total = 0
@@ -546,9 +550,11 @@ while running
     undo_record(undo_stack, [:split, buffer.cursor_y, buffer.cursor_x])
     undo_record_break(undo_stack)
     buffer.put(c.to_buffer_input)
-    # Auto-indent: re-analyze the window around the cursor to get correct indent
+    # Auto-indent: re-analyze the window around the cursor to get correct
+    # indent. No margin below the cursor: indentation only depends on the
+    # lines above.
     if highlight_enabled
-      result, _syntax, indent_window_start, _window_end = analyze_window(buffer, buffer.cursor_y - 1, buffer.cursor_y)
+      result, _syntax, indent_window_start, _window_end = analyze_window(buffer, buffer.cursor_y - 1, buffer.cursor_y, 0)
       if result
         # Re-indent previous line (e.g. de-indent end/else/ensure)
         prev_y = buffer.cursor_y - 1
@@ -590,7 +596,7 @@ while running
       buffer.put(c.to_s)
       # De-indent on space after keywords like when, elsif, rescue, in
       if highlight_enabled && c.to_s == " " && RubySyntax.should_dedent_on_space?(buffer.current_line)
-        result, _syntax, indent_window_start, _window_end = analyze_window(buffer, buffer.cursor_y, buffer.cursor_y)
+        result, _syntax, indent_window_start, _window_end = analyze_window(buffer, buffer.cursor_y, buffer.cursor_y, 0)
         if result
           old_line = buffer.current_line
           if RubySyntax.reindent_line(buffer, buffer.cursor_y, result.indent_level(buffer.cursor_y - indent_window_start))
