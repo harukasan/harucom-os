@@ -259,18 +259,29 @@ def draw_status(console, filepath, buffer, scroll_top, message)
   console.put_string_at(0, STATUS_ROW, Editor.display_slice(status, 0, Console::COLS), STATUS_ATTR)
 end
 
+# The command bar is redrawn every frame to recover from ring buffer scrolls,
+# but its content only changes with the IME mode label, so the composed string
+# is cached per label (a small fixed set) instead of rebuilding the padding
+# and scanning display widths on every keystroke.
+COMMAND_BAR_CACHE = {}
+
 def draw_command_bar(console)
-  bar = " Ctrl-S:Save  Ctrl-Q:Quit  Ctrl-Z:Undo  Ctrl-Y:Redo"
   mode = $ime ? $ime.mode_label : nil
-  if mode
-    padding = Console::COLS - Editor.display_width(bar) - Editor.display_width(mode)
-    bar += " " * padding if padding > 0
-    bar += mode
-  else
-    padding = Console::COLS - Editor.display_width(bar)
-    bar += " " * padding if padding > 0
+  bar = COMMAND_BAR_CACHE[mode]
+  unless bar
+    bar = " Ctrl-S:Save  Ctrl-Q:Quit  Ctrl-Z:Undo  Ctrl-Y:Redo"
+    if mode
+      padding = Console::COLS - Editor.display_width(bar) - Editor.display_width(mode)
+      bar += " " * padding if padding > 0
+      bar += mode
+    else
+      padding = Console::COLS - Editor.display_width(bar)
+      bar += " " * padding if padding > 0
+    end
+    bar = Editor.display_slice(bar, 0, Console::COLS)
+    COMMAND_BAR_CACHE[mode] = bar
   end
-  console.put_string_at(0, COMMAND_ROW, Editor.display_slice(bar, 0, Console::COLS), COMMAND_ATTR)
+  console.put_string_at(0, COMMAND_ROW, bar, COMMAND_ATTR)
 end
 
 # Prompt for text input on the command bar row.
