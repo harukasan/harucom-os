@@ -44,14 +44,18 @@ message = nil
 # parsed and cached. The window is rebuilt on content edits and whenever the
 # viewport scrolls outside it. SYNTAX_MARGIN lines of headroom above and below
 # absorb normal scrolling so a rebuild fires roughly once per that many
-# scrolled lines.
+# scrolled lines, and the rebuild is normally prefetched on an idle frame
+# when the viewport nears the window edge, keeping the parse cost off the
+# scroll frames themselves.
 highlight_enabled = filepath && filepath.end_with?(".rb")
 SYNTAX_MARGIN      = 40 # extra lines parsed above/below the viewport
 SYNTAX_ANCHOR_SCAN = 60 # max lines scanned upward to find a parse anchor
 SYNTAX_MAX_BYTES   = 8100 # window source byte budget, under the 8192 analyze limit
+SYNTAX_PREFETCH_MARGIN = 10 # prefetch a rebuild when this close to the window edge
 syntax = nil       # [highlight_map, window_offsets, window_start] or nil
 window_start = 0   # first line index covered by the parsed window
 window_end = 0     # one past the last line index covered (exclusive)
+prefetched_scroll_top = -1 # scroll_top the idle prefetch last ran for
 
 # Undo stack
 # Each entry: [:insert, y, x, text] | [:delete, y, x, text]
@@ -488,6 +492,30 @@ console.commit
 while running
   c = keyboard.read_char
   unless c
+    # Idle frame: rebuild the syntax window before scrolling reaches its
+    # edge, so the parse cost lands between key repeats instead of on the
+    # scroll frame that crosses the edge. Runs once per scroll position
+    # because a byte-budget-trimmed window can stay near the edge even
+    # after a rebuild. Skipped while an IME preedit overlay is shown, as
+    # redrawing its line would erase the overlay.
+    if highlight_enabled && scroll_top != prefetched_scroll_top &&
+       (!$ime || $ime.preedit.bytesize == 0)
+      vis_bottom = scroll_top + EDIT_ROWS
+      vis_bottom = buffer.lines.length if vis_bottom > buffer.lines.length
+      if (window_start > 0 && scroll_top - window_start < SYNTAX_PREFETCH_MARGIN) ||
+         (window_end < buffer.lines.length && window_end - vis_bottom < SYNTAX_PREFETCH_MARGIN)
+        prefetched_scroll_top = scroll_top
+        old_syntax = syntax
+        _result, syntax, window_start, window_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
+        console.hide_cursor
+        redrawn = sync_highlight_changes(console, buffer, scroll_top, scroll_left, 0, EDIT_ROWS, -1, old_syntax, syntax)
+        console.show_cursor
+        if redrawn
+          console.commit
+          next
+        end
+      end
+    end
     DVI.wait_vsync
     next
   end
