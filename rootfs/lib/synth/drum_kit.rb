@@ -6,6 +6,8 @@
 #
 # Every sound is computed from elementary DSP, so no third-party audio
 # enters the repository.
+require "synth"
+
 module Synth
   module DrumKit
     @definitions = {}
@@ -23,7 +25,7 @@ module Synth
     end
 
     # Render one sound to a WAV String.
-    def self.render(name, rate: 44100, seed: DEFAULT_SEED)
+    def self.render(name, rate: 44100, seed: Synth::DEFAULT_SEED)
       block = @definitions[name]
       raise ArgumentError, "unknown drum #{name}" unless block
       Synth.render(rate: rate, seed: seed, &block)

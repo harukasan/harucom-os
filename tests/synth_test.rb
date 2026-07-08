@@ -1,5 +1,6 @@
 require "picotest"
-require "synth"
+# drum_kit first, so the test exercises its own require of synth (the
+# board loads it standalone).
 require "synth/drum_kit"
 
 class SynthTest < Picotest::Test

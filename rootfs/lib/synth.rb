@@ -247,7 +247,7 @@ module Synth
       Buffer.new(out, @rate)
     end
 
-    def metallic(seconds, decay:, partials: HIHAT_PARTIALS)
+    def metallic(seconds, decay:, partials: Synth::HIHAT_PARTIALS)
       n = (@rate * seconds).round
       phases = Array.new(partials.length, 0.0)
       out = Array.new(n)
