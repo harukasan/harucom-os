@@ -233,8 +233,11 @@ relation holds from the first cycle: the pacer wrap (and thus the CC
 write) always lands in the middle of a carrier period, and the value
 latches at the next carrier wrap.
 
-On deinit, the channel enable is cleared before `dma_channel_abort`
-per erratum RP2350-E5, so the abort cannot retrigger the channel.
+On deinit, the pacer slice stops first so no DREQ pulses arrive
+during the teardown, the channel enable is cleared before
+`dma_channel_abort` per erratum RP2350-E5 so the abort cannot
+retrigger, and the channel is released through `dma_channel_cleanup`
+so the next claimer receives it in a clean state.
 
 ### Render pump
 

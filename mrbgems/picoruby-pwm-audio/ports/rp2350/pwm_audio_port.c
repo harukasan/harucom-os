@@ -113,9 +113,10 @@ pwm_audio_stats(int32_t *min_lead, uint32_t *max_gap_us, int32_t *drift_now,
 uint64_t
 pwm_audio_sample_clock(void)
 {
-  if (!audio_running) return 0;
+  /* The flag is checked inside the critical section so a caller can
+   * never race pwm_audio_deinit() into a released channel. */
   uint32_t state = save_and_disable_interrupts();
-  uint64_t clock = accumulate_played();
+  uint64_t clock = audio_running ? accumulate_played() : 0;
   restore_interrupts(state);
   return clock;
 }
@@ -157,6 +158,26 @@ pump_callback(repeating_timer_t *t)
   (void)t;
   pump_render();
   return true;
+}
+
+/* Stop the output stage and release the DMA channel. The pacer stops
+ * first so no DREQ pulses arrive during the abort (RP2350-E5: an
+ * abort does not clear the DREQ counter), and the channel enable is
+ * cleared before the abort so the abort cannot retrigger (also
+ * RP2350-E5). dma_channel_cleanup() hands the channel back in a
+ * clean state for the next claimer. */
+static void
+release_output_stage(void)
+{
+  pwm_set_enabled(AUDIO_PACER_SLICE, false);
+  hw_clear_bits(&dma_channel_hw_addr(dma_chan)->al1_ctrl, DMA_CH0_CTRL_TRIG_EN_BITS);
+  dma_channel_abort(dma_chan);
+  dma_channel_cleanup(dma_chan);
+  dma_channel_unclaim(dma_chan);
+  dma_chan = -1;
+
+  pwm_set_both_levels(slice_num, 0, 0);
+  pwm_set_enabled(slice_num, false);
 }
 
 void
@@ -244,6 +265,10 @@ pwm_audio_init(uint8_t l_pin, uint8_t r_pin)
   }
   if (!alarm_pool_add_repeating_timer_us(audio_alarm_pool, -AUDIO_PUMP_INTERVAL_US,
                                          pump_callback, NULL, &pump_timer)) {
+    /* Without the pump the engine cannot run; release the output
+     * stage so repeated init attempts do not leak DMA channels. */
+    printf("pwm_audio: failed to start the render pump\n");
+    release_output_stage();
     return;
   }
 
@@ -254,6 +279,9 @@ void
 pwm_audio_deinit(void)
 {
   if (!audio_running) return;
+  /* Drop the flag first so pwm_audio_sample_clock() cannot touch the
+   * channel mid-teardown. */
+  audio_running = false;
 
   cancel_repeating_timer(&pump_timer);
   if (audio_alarm_pool) {
@@ -261,17 +289,6 @@ pwm_audio_deinit(void)
     audio_alarm_pool = NULL;
   }
 
-  /* RP2350-E5: clear the channel enable before aborting so the abort
-   * cannot retrigger. */
-  hw_clear_bits(&dma_channel_hw_addr(dma_chan)->al1_ctrl, DMA_CH0_CTRL_TRIG_EN_BITS);
-  dma_channel_abort(dma_chan);
-  dma_channel_unclaim(dma_chan);
-  dma_chan = -1;
-
+  release_output_stage();
   pwm_audio_stop_all();
-  pwm_set_both_levels(slice_num, 0, 0);
-  pwm_set_enabled(slice_num, false);
-  pwm_set_enabled(AUDIO_PACER_SLICE, false);
-
-  audio_running = false;
 }
