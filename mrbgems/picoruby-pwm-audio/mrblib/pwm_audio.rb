@@ -20,8 +20,9 @@
 # and a Channel object on the same channel index can leave the
 # object's #source stale, so use one style per channel.
 module PWMAudio
-  # A loaded mono QOA sample. Owns the compressed bytes, so a Sample
-  # referenced by a Channel keeps its data alive for the engine.
+  # A loaded mono sample, QOA or 16-bit PCM WAV (detected by header).
+  # Owns the file bytes, so a Sample referenced by a Channel keeps its
+  # data alive for the engine.
   class Sample
     attr_reader :data, :samplerate, :frames
 

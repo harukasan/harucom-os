@@ -12,7 +12,7 @@
 
 #include "../../include/pwm_audio.h"
 
-/* Pin the QOA String attached to a channel in an instance variable on
+/* Pin the sample String attached to a channel in an instance variable on
  * the PWMAudio module so the C engine's data pointer stays valid:
  * mruby's GC does not move objects, but it would collect an
  * unreferenced String. The Channel objects in mrblib also keep their
@@ -139,7 +139,7 @@ mrb_pwm_audio_stats(mrb_state *mrb, mrb_value self)
 }
 
 /* PWMAudio.set_sample(channel, data): switch the channel's source to
- * a mono QOA sample */
+ * a mono QOA or 16-bit PCM WAV sample, detected by header */
 static mrb_value
 mrb_pwm_audio_set_sample(mrb_state *mrb, mrb_value self)
 {
@@ -151,7 +151,7 @@ mrb_pwm_audio_set_sample(mrb_state *mrb, mrb_value self)
   }
   if (!pwm_audio_set_sample((uint8_t)channel, (const uint8_t *)RSTRING_PTR(data),
                             (uint32_t)RSTRING_LEN(data))) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a mono QOA sample");
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a mono QOA or WAV sample");
   }
   pwm_audio_pin_sample(mrb, channel, data);
   return mrb_true_value();
@@ -178,8 +178,8 @@ mrb_pwm_audio_play_at(mrb_state *mrb, mrb_value self)
   return mrb_bool_value(ok);
 }
 
-/* PWMAudio.sample_info(data): [samplerate, frames] of a QOA blob,
- * raising when it is not a mono QOA stream */
+/* PWMAudio.sample_info(data): [samplerate, frames] of a QOA or WAV blob,
+ * raising when it is not a mono QOA or WAV stream */
 static mrb_value
 mrb_pwm_audio_sample_info(mrb_state *mrb, mrb_value self)
 {
@@ -188,7 +188,7 @@ mrb_pwm_audio_sample_info(mrb_state *mrb, mrb_value self)
   uint32_t samplerate, frames;
   if (!pwm_audio_sample_info((const uint8_t *)RSTRING_PTR(data), (uint32_t)RSTRING_LEN(data),
                              &samplerate, &frames)) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a mono QOA sample");
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a mono QOA or WAV sample");
   }
   mrb_value ary = mrb_ary_new_capa(mrb, 2);
   mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)samplerate));

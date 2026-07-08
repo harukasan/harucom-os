@@ -104,21 +104,31 @@ generate_waveform(pwm_audio_channel_t *ch)
   }
 }
 
-/* --- QOA sample playback ---
+/* --- Sample playback (QOA and WAV) ---
  *
- * A channel whose source is a sample streams one mono QOA file. The
- * format decoding lives in qoa_decoder.c; this layer adds the linear
- * resampler to the output rate and the one-shot playback state.
- * Slices are decoded on demand while mixing, so only the compressed
- * bytes are held in memory and the PSRAM read rate stays tiny. A
- * retrigger restarts the stream from the file start. */
+ * A channel whose source is a sample streams one mono file, either
+ * QOA (decoded slice by slice in qoa_decoder.c) or WAV holding plain
+ * 16-bit PCM (read sample by sample, no decoding). This layer detects
+ * the format, adds the linear resampler to the output rate, and keeps
+ * the one-shot playback state. Data is pulled on demand while mixing,
+ * so only the file bytes are held in memory and the PSRAM read rate
+ * stays tiny. A retrigger restarts the stream from the file start. */
+
+typedef enum {
+  PWM_AUDIO_SAMPLE_QOA = 0,
+  PWM_AUDIO_SAMPLE_PCM16,
+} pwm_audio_sample_format_t;
 
 typedef struct {
-  /* loaded sample (compressed bytes, owned by the caller) */
+  /* loaded sample (file bytes, owned by the caller) */
   const uint8_t *data;
   uint32_t length;
   uint32_t total_samples;
   uint32_t phase_increment; /* 16.16 source samples per output sample */
+  uint8_t format;           /* pwm_audio_sample_format_t */
+  /* PCM16: data chunk position and read cursor (source samples) */
+  uint32_t pcm_offset;
+  uint32_t pcm_pos;
   qoa_decoder_t decoder;
   /* linear resampler to the output rate */
   uint32_t phase; /* 16.16 position between prev and next */
@@ -129,12 +139,69 @@ typedef struct {
 
 static pwm_audio_sample_stream_t sample_streams[PWM_AUDIO_NUM_CHANNELS];
 
+static inline uint32_t
+read_u32le(const uint8_t *p)
+{
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static inline uint16_t
+read_u16le(const uint8_t *p)
+{
+  return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+/* Parse a WAV (RIFF) header and locate the PCM payload. Only mono
+ * 16-bit PCM is accepted. Chunks other than fmt and data are skipped,
+ * so files with LIST/INFO metadata still load. */
+static bool
+wav_parse_header(const uint8_t *data, uint32_t length, uint32_t *samplerate, uint32_t *frames,
+                 uint32_t *pcm_offset)
+{
+  if (length < 44) return false;
+  if (memcmp(data, "RIFF", 4) != 0 || memcmp(data + 8, "WAVE", 4) != 0) return false;
+
+  uint32_t pos = 12;
+  bool have_format = false;
+  uint16_t wav_channels = 0;
+  uint32_t wav_rate = 0;
+  while (pos + 8 <= length) {
+    const uint8_t *chunk = data + pos;
+    uint32_t chunk_size = read_u32le(chunk + 4);
+    uint32_t body = pos + 8;
+    if (chunk_size > length - body) return false;
+    if (memcmp(chunk, "fmt ", 4) == 0 && chunk_size >= 16) {
+      uint16_t codec = read_u16le(data + body);
+      wav_channels = read_u16le(data + body + 2);
+      wav_rate = read_u32le(data + body + 4);
+      uint16_t bits = read_u16le(data + body + 14);
+      if (codec != 1 || bits != 16) return false; /* 16-bit PCM only */
+      have_format = true;
+    } else if (memcmp(chunk, "data", 4) == 0) {
+      if (!have_format || wav_channels != 1 || wav_rate == 0) return false;
+      *samplerate = wav_rate;
+      *frames = chunk_size / 2;
+      *pcm_offset = body;
+      return *frames > 0;
+    }
+    pos = body + chunk_size + (chunk_size & 1); /* chunks are word aligned */
+  }
+  return false;
+}
+
 /* Advance the resampler window by one source sample. */
 static bool
 stream_pull(pwm_audio_sample_stream_t *stream)
 {
   int16_t sample;
-  if (!qoa_decoder_next(&stream->decoder, &sample)) return false;
+  if (stream->format == PWM_AUDIO_SAMPLE_PCM16) {
+    if (stream->pcm_pos >= stream->total_samples) return false;
+    const uint8_t *p = stream->data + stream->pcm_offset + stream->pcm_pos * 2;
+    sample = (int16_t)read_u16le(p);
+    stream->pcm_pos++;
+  } else {
+    if (!qoa_decoder_next(&stream->decoder, &sample)) return false;
+  }
   stream->prev = stream->next;
   stream->next = sample;
   return true;
@@ -144,7 +211,9 @@ bool
 pwm_audio_sample_info(const uint8_t *data, uint32_t length, uint32_t *samplerate,
                       uint32_t *frames)
 {
-  return qoa_decoder_parse_header(data, length, samplerate, frames);
+  uint32_t pcm_offset;
+  if (qoa_decoder_parse_header(data, length, samplerate, frames)) return true;
+  return wav_parse_header(data, length, samplerate, frames, &pcm_offset);
 }
 
 bool
@@ -152,13 +221,23 @@ pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
   uint32_t samplerate, frames;
-  if (!qoa_decoder_parse_header(data, length, &samplerate, &frames)) return false;
+  uint8_t format;
+  uint32_t pcm_offset = 0;
+  if (qoa_decoder_parse_header(data, length, &samplerate, &frames)) {
+    format = PWM_AUDIO_SAMPLE_QOA;
+  } else if (wav_parse_header(data, length, &samplerate, &frames, &pcm_offset)) {
+    format = PWM_AUDIO_SAMPLE_PCM16;
+  } else {
+    return false;
+  }
   uint32_t state = pwm_audio_lock();
   pwm_audio_sample_stream_t *stream = &sample_streams[channel];
   stream->playing = false;
   stream->data = data;
   stream->length = length;
   stream->total_samples = frames;
+  stream->format = format;
+  stream->pcm_offset = pcm_offset;
   stream->phase_increment = (uint32_t)(((uint64_t)samplerate << 16) / PWM_AUDIO_SAMPLE_RATE);
   channels[channel].source = PWM_AUDIO_SOURCE_SAMPLE;
   channels[channel].phase_increment = 0; /* silence the oscillator */
@@ -173,7 +252,11 @@ play_locked(uint8_t channel, uint8_t volume)
 {
   pwm_audio_sample_stream_t *stream = &sample_streams[channel];
   if (channels[channel].source != PWM_AUDIO_SOURCE_SAMPLE || stream->data == NULL) return;
-  qoa_decoder_reset(&stream->decoder, stream->data, stream->length, stream->total_samples);
+  if (stream->format == PWM_AUDIO_SAMPLE_PCM16) {
+    stream->pcm_pos = 0;
+  } else {
+    qoa_decoder_reset(&stream->decoder, stream->data, stream->length, stream->total_samples);
+  }
   stream->phase = 0;
   stream->prev = 0;
   stream->next = 0;
