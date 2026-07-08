@@ -45,6 +45,7 @@ Design documents and implementation notes are in `doc/`:
 - [doc/dvi/stability.md](doc/dvi/stability.md) — DVI stability analysis (bus contention, flash write safety, diagnostics)
 - [doc/usb-host-keyboard.md](doc/usb-host-keyboard.md) — USB host keyboard (PIO-USB, HID, Ruby/C API)
 - [doc/keyboard-input.md](doc/keyboard-input.md) — Keyboard input (background polling task, input queue, Ctrl-C interrupt, key repeat)
+- [doc/editor-rendering.md](doc/editor-rendering.md) — Editor rendering (differential redraw dispatch, windowed syntax analysis, idle-frame parsing)
 - [doc/filesystem.md](doc/filesystem.md) — LittleFS filesystem on flash (littlefs, VFS, flash write safety)
 - [doc/editor-buffer-improvements.md](doc/editor-buffer-improvements.md) — Editor::Buffer improvement plan (desired column, tab width)
 

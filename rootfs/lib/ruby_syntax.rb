@@ -77,57 +77,61 @@ module RubySyntax
   # scroll:        horizontal scroll offset (display columns)
   # max_width:     maximum display columns to render
   # default_attr:  attribute byte for unhighlighted text
+  #
+  # This runs for every highlighted line on every redraw, so the loop avoids
+  # per-character work: spans of equal attribute are tracked as byte ranges
+  # and emitted with a single byteslice, and the UTF-8 character length is
+  # derived from the lead byte inline instead of through method calls.
   def self.draw_line(col_start, row, line, highlight_map, line_offset, scroll, max_width, default_attr)
     return unless line
 
     start_byte = scroll > 0 ? Editor.display_col_to_byte(line, scroll) : 0
+    line_size = line.bytesize
+    map_size = highlight_map ? highlight_map.bytesize : 0
     col = col_start
     pos = start_byte
-    span_start = col
-    span_text = ""
+    span_col = col       # screen column where the current span starts
+    span_byte = pos      # byte offset where the current span starts
     span_attr = default_attr
     span_bold = false
 
-    while pos < line.bytesize && (col - col_start) < max_width
-      clen = Editor.char_bytesize_at(line, pos)
+    while pos < line_size && (col - col_start) < max_width
+      lead = line.getbyte(pos)
+      clen = lead < 0x80 ? 1 : (lead < 0xE0 ? 2 : (lead < 0xF0 ? 3 : 4))
       cw = clen > 1 ? 2 : 1
       break if (col - col_start) + cw > max_width
 
       cat = 0
-      if highlight_map
-        src_offset = line_offset + pos
-        if src_offset < highlight_map.bytesize
-          cat = highlight_map.getbyte(src_offset)
-        end
-      end
+      src_offset = line_offset + pos
+      cat = highlight_map.getbyte(src_offset) if src_offset < map_size
       attr = CATEGORY_ATTRS[cat] || default_attr
       bold = CATEGORY_BOLD[cat] || false
 
-      if (attr != span_attr || bold != span_bold) && span_text.bytesize > 0
-        if span_bold
-          DVI::Text.put_string_bold(span_start, row, span_text, span_attr)
-        else
-          DVI::Text.put_string(span_start, row, span_text, span_attr)
+      if attr != span_attr || bold != span_bold
+        if pos > span_byte
+          text = line.byteslice(span_byte, pos - span_byte).to_s
+          if span_bold
+            DVI::Text.put_string_bold(span_col, row, text, span_attr)
+          else
+            DVI::Text.put_string(span_col, row, text, span_attr)
+          end
+          span_col = col
+          span_byte = pos
         end
-        span_start = col
-        span_text = ""
-        span_attr = attr
-        span_bold = bold
-      elsif span_text.bytesize == 0
         span_attr = attr
         span_bold = bold
       end
 
-      span_text += line.byteslice(pos, clen).to_s
       col += cw
       pos += clen
     end
 
-    if span_text.bytesize > 0
+    if pos > span_byte
+      text = line.byteslice(span_byte, pos - span_byte).to_s
       if span_bold
-        DVI::Text.put_string_bold(span_start, row, span_text, span_attr)
+        DVI::Text.put_string_bold(span_col, row, text, span_attr)
       else
-        DVI::Text.put_string(span_start, row, span_text, span_attr)
+        DVI::Text.put_string(span_col, row, text, span_attr)
       end
     end
   end
