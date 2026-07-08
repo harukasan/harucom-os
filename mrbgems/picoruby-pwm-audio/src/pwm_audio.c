@@ -43,6 +43,11 @@ static const uint16_t sine_table[256] = {
 static const uint16_t vol_tab[16] = {0,   258,  307,  365,  434,  516,  613,  728,
                                      865, 1029, 1223, 1453, 1727, 2052, 2439, 2899};
 
+/* Gain slew per output sample. vol_tab tops out at 2899, so a full
+ * fade takes about 180 samples (3.6 ms at 50 kHz): fast enough to
+ * feel immediate, slow enough to kill the stop click. */
+#define PWM_AUDIO_GAIN_STEP 16
+
 /* Pan tables: 1=L-only, 8=center, 15=R-only.
  * Copied from picoruby-psg. */
 static const uint16_t pan_tab_l[16] = {4095, 4095, 4069, 3992, 3865, 3689, 3467, 3202,
@@ -67,6 +72,12 @@ typedef struct {
   uint8_t pan;      /* 0-15: 0=L, 8=center, 15=R */
   uint8_t source;   /* pwm_audio_source_t */
   bool muted;
+  /* Output gain ramp. Sources sit on a DC bias in the unipolar mix
+   * domain, so an instant start, stop, or mute steps the output and
+   * clicks; the mixer slews gain_current toward the target instead
+   * and releases the source once a stop ramp reaches zero. */
+  bool stopping;
+  uint16_t gain_current;
 } pwm_audio_channel_t;
 
 static pwm_audio_channel_t channels[PWM_AUDIO_NUM_CHANNELS];
@@ -138,6 +149,8 @@ typedef struct {
   int16_t prev_l, prev_r;
   int16_t next_l, next_r;
   bool playing;
+  /* Out of data: hold the last value while the stop ramp fades it. */
+  bool ended;
 } pwm_audio_sample_stream_t;
 
 static pwm_audio_sample_stream_t sample_streams[PWM_AUDIO_NUM_CHANNELS];
@@ -273,8 +286,10 @@ play_locked(uint8_t channel, uint8_t volume)
   stream->prev_r = 0;
   stream->next_l = 0;
   stream->next_r = 0;
+  stream->ended = false;
   channels[channel].volume = volume & 0x0F;
   channels[channel].muted = false;
+  channels[channel].stopping = false;
   /* Prime the resampler: the first outputs interpolate from silence
    * into the first source sample. */
   stream->playing = stream_pull(stream);
@@ -298,7 +313,26 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
     pwm_audio_channel_t *ch = &channels[i];
     uint32_t amp_l, amp_r;
 
-    if (ch->muted) continue;
+    /* Slew the gain toward its target, then release a stopped source
+     * once the fade reaches silence. */
+    uint16_t target = (ch->muted || ch->stopping) ? 0 : vol_tab[ch->volume & 0x0F];
+    uint16_t gain = ch->gain_current;
+    if (gain != target) {
+      if (gain < target) {
+        gain = (target - gain > PWM_AUDIO_GAIN_STEP) ? gain + PWM_AUDIO_GAIN_STEP : target;
+      } else {
+        gain = (gain - target > PWM_AUDIO_GAIN_STEP) ? gain - PWM_AUDIO_GAIN_STEP : target;
+      }
+      ch->gain_current = gain;
+    }
+    if (ch->stopping && gain == 0) {
+      ch->stopping = false;
+      ch->phase_increment = 0;
+      ch->phase = 0;
+      sample_streams[i].playing = false;
+      sample_streams[i].ended = false;
+    }
+    if (gain == 0 && target == 0) continue;
 
     if (ch->source == PWM_AUDIO_SOURCE_SAMPLE) {
       pwm_audio_sample_stream_t *stream = &sample_streams[i];
@@ -316,12 +350,20 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
       amp_l = (uint32_t)(sample_l + 32768) >> 4;
       amp_r = (uint32_t)(sample_r + 32768) >> 4;
 
-      stream->phase += stream->phase_increment;
-      while (stream->phase >= 0x10000) {
-        stream->phase -= 0x10000;
-        if (!stream_pull(stream)) {
-          stream->playing = false;
-          break;
+      if (!stream->ended) {
+        stream->phase += stream->phase_increment;
+        while (stream->phase >= 0x10000) {
+          stream->phase -= 0x10000;
+          if (!stream_pull(stream)) {
+            /* Out of data: hold the last value and fade it out, so a
+             * sample that does not end at the bias level still stops
+             * without a step. */
+            stream->ended = true;
+            stream->prev_l = stream->next_l;
+            stream->prev_r = stream->next_r;
+            ch->stopping = true;
+            break;
+          }
         }
       }
     } else {
@@ -330,8 +372,6 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
       amp_l = generate_waveform(ch);
       amp_r = amp_l;
     }
-
-    uint32_t gain = vol_tab[ch->volume & 0x0F];
 
     /* Pan acts as balance: 8=center keeps both sides at the same
      * -3 dB point as a centered mono source. */
@@ -355,10 +395,12 @@ pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_
   uint32_t state = pwm_audio_lock();
   ch->source = PWM_AUDIO_SOURCE_OSC;
   sample_streams[channel].playing = false;
+  sample_streams[channel].ended = false;
   ch->phase_increment = increment;
   ch->waveform = waveform;
   ch->volume = volume & 0x0F;
   ch->muted = false;
+  ch->stopping = false;
   pwm_audio_unlock(state);
 }
 
@@ -385,10 +427,19 @@ pwm_audio_stop_channel(uint8_t channel)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
   uint32_t state = pwm_audio_lock();
-  channels[channel].phase_increment = 0;
-  channels[channel].phase = 0;
-  channels[channel].muted = true;
-  sample_streams[channel].playing = false;
+  pwm_audio_channel_t *ch = &channels[channel];
+  /* Fade out instead of cutting; the mixer releases the source once
+   * the ramp reaches silence. An already-silent channel releases
+   * immediately. */
+  if (ch->gain_current == 0) {
+    ch->stopping = false;
+    ch->phase_increment = 0;
+    ch->phase = 0;
+    sample_streams[channel].playing = false;
+    sample_streams[channel].ended = false;
+  } else {
+    ch->stopping = true;
+  }
   pwm_audio_unlock(state);
 }
 
