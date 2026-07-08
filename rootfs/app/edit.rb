@@ -39,18 +39,19 @@ message = nil
 
 # Syntax analysis state (highlighting and indentation)
 #
-# RubySyntax.analyze rejects sources larger than ~8KB, so the whole file cannot
-# be parsed at once. Instead a window of lines around the viewport is parsed and
-# cached. The window is rebuilt on content edits and whenever the viewport
-# scrolls outside it. SYNTAX_MARGIN lines of headroom above and below absorb
-# normal scrolling so a rebuild fires roughly once per that many scrolled lines.
+# RubySyntax.analyze rejects sources larger than 8192 bytes, so the whole file
+# cannot be parsed at once. Instead a window of lines around the viewport is
+# parsed and cached. The window is rebuilt on content edits and whenever the
+# viewport scrolls outside it. SYNTAX_MARGIN lines of headroom above and below
+# absorb normal scrolling so a rebuild fires roughly once per that many
+# scrolled lines.
 highlight_enabled = filepath && filepath.end_with?(".rb")
 SYNTAX_MARGIN      = 40 # extra lines parsed above/below the viewport
 SYNTAX_ANCHOR_SCAN = 60 # max lines scanned upward to find a parse anchor
-SYNTAX_MAX_BYTES   = 8100 # window source byte budget (RubySyntax.analyze limit)
-syntax = nil   # [highlight_map, window_offsets, win_start] or nil
-win_start = 0  # first line index covered by the parsed window
-win_end = 0    # one past the last line index covered (exclusive)
+SYNTAX_MAX_BYTES   = 8100 # window source byte budget, under the 8192 analyze limit
+syntax = nil       # [highlight_map, window_offsets, window_start] or nil
+window_start = 0   # first line index covered by the parsed window
+window_end = 0     # one past the last line index covered (exclusive)
 
 # Undo stack
 # Each entry: [:insert, y, x, text] | [:delete, y, x, text]
@@ -181,10 +182,10 @@ def syntax_anchor_line(buffer, from_line)
 end
 
 # Parse a window of lines covering [top, bottom] (absolute line indices) plus
-# margins, capped to SYNTAX_MAX_BYTES. Returns [result, syntax, win_start,
-# win_end] where syntax is [highlight_map, window_offsets, win_start] (or nil if
-# parsing failed). window_offsets[k] is the byte offset of line (win_start + k)
-# within the parsed window source.
+# margins, capped to SYNTAX_MAX_BYTES. Returns [result, syntax, window_start,
+# window_end] where syntax is [highlight_map, window_offsets, window_start] (or
+# nil if parsing failed). window_offsets[k] is the byte offset of line
+# (window_start + k) within the parsed window source.
 def analyze_window(buffer, top, bottom)
   lines = buffer.lines
   n = lines.length
@@ -193,45 +194,45 @@ def analyze_window(buffer, top, bottom)
   bottom = n - 1 if bottom > n - 1
   bottom = top if bottom < top
 
-  ws = syntax_anchor_line(buffer, top - SYNTAX_MARGIN)
-  we = bottom + SYNTAX_MARGIN + 1
-  we = n if we > n
+  window_start = syntax_anchor_line(buffer, top - SYNTAX_MARGIN)
+  window_end = bottom + SYNTAX_MARGIN + 1
+  window_end = n if window_end > n
 
   total = 0
-  i = ws
-  while i < we
+  i = window_start
+  while i < window_end
     total += lines[i].bytesize + 1
     i += 1
   end
   # Trim the bottom margin, then the top context, to fit the byte budget while
   # always keeping the requested [top, bottom] range covered.
-  while total > SYNTAX_MAX_BYTES && we > bottom + 1
-    we -= 1
-    total -= lines[we].bytesize + 1
+  while total > SYNTAX_MAX_BYTES && window_end > bottom + 1
+    window_end -= 1
+    total -= lines[window_end].bytesize + 1
   end
-  while total > SYNTAX_MAX_BYTES && ws < top
-    total -= lines[ws].bytesize + 1
-    ws += 1
+  while total > SYNTAX_MAX_BYTES && window_start < top
+    total -= lines[window_start].bytesize + 1
+    window_start += 1
   end
 
-  source = lines[ws...we].join("\n")
+  source = lines[window_start...window_end].join("\n")
   result = RubySyntax.analyze(source)
-  return [nil, nil, ws, we] unless result
+  return [nil, nil, window_start, window_end] unless result
 
   offsets = []
   off = 0
-  i = ws
-  while i < we
+  i = window_start
+  while i < window_end
     offsets.push(off)
     off += lines[i].bytesize + 1
     i += 1
   end
-  [result, [result.highlight_map, offsets, ws], ws, we]
+  [result, [result.highlight_map, offsets, window_start], window_start, window_end]
 end
 
 # Initial syntax analysis around the top of the file
 if highlight_enabled
-  _r, syntax, win_start, win_end = analyze_window(buffer, 0, EDIT_ROWS - 1)
+  _result, syntax, window_start, window_end = analyze_window(buffer, 0, EDIT_ROWS - 1)
 end
 
 # -- Drawing helpers --
@@ -310,8 +311,8 @@ def prompt_input(console, keyboard, label, y_or_n: false)
 end
 
 # Draw one visible line. The syntax bundle is [highlight_map, window_offsets,
-# win_start]; a line inside the parsed window is highlighted, otherwise it is
-# drawn as plain text.
+# window_start]; a line inside the parsed window is highlighted, otherwise it
+# is drawn as plain text.
 def draw_line(console, buffer, screen_row, scroll_top, scroll_left, syntax)
   row = EDIT_TOP + screen_row
   line_index = scroll_top + screen_row
@@ -547,18 +548,18 @@ while running
     buffer.put(c.to_buffer_input)
     # Auto-indent: re-analyze the window around the cursor to get correct indent
     if highlight_enabled
-      result, _s, ind_ws, _e = analyze_window(buffer, buffer.cursor_y - 1, buffer.cursor_y)
+      result, _syntax, indent_window_start, _window_end = analyze_window(buffer, buffer.cursor_y - 1, buffer.cursor_y)
       if result
         # Re-indent previous line (e.g. de-indent end/else/ensure)
         prev_y = buffer.cursor_y - 1
         if prev_y >= 0
           old_line = buffer.lines[prev_y]
-          if RubySyntax.reindent_line(buffer, prev_y, result.indent_level(prev_y - ind_ws))
+          if RubySyntax.reindent_line(buffer, prev_y, result.indent_level(prev_y - indent_window_start))
             undo_record(undo_stack, [:replace_line, prev_y, old_line])
           end
         end
         # Indent new line
-        level = result.indent_level(buffer.cursor_y - ind_ws)
+        level = result.indent_level(buffer.cursor_y - indent_window_start)
         if level > 0
           spaces = "  " * level
           undo_record(undo_stack, [:insert, buffer.cursor_y, 0, spaces])
@@ -589,10 +590,10 @@ while running
       buffer.put(c.to_s)
       # De-indent on space after keywords like when, elsif, rescue, in
       if highlight_enabled && c.to_s == " " && RubySyntax.should_dedent_on_space?(buffer.current_line)
-        result, _s, ind_ws, _e = analyze_window(buffer, buffer.cursor_y, buffer.cursor_y)
+        result, _syntax, indent_window_start, _window_end = analyze_window(buffer, buffer.cursor_y, buffer.cursor_y)
         if result
           old_line = buffer.current_line
-          if RubySyntax.reindent_line(buffer, buffer.cursor_y, result.indent_level(buffer.cursor_y - ind_ws))
+          if RubySyntax.reindent_line(buffer, buffer.cursor_y, result.indent_level(buffer.cursor_y - indent_window_start))
             undo_record(undo_stack, [:replace_line, buffer.cursor_y, old_line])
             buffer.mark_dirty(:content)
           end
@@ -625,8 +626,8 @@ while running
   if highlight_enabled
     vis_bottom = scroll_top + EDIT_ROWS
     vis_bottom = buffer.lines.length if vis_bottom > buffer.lines.length
-    if content_changed || scroll_top < win_start || vis_bottom > win_end
-      _r, syntax, win_start, win_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
+    if content_changed || scroll_top < window_start || vis_bottom > window_end
+      _result, syntax, window_start, window_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
       window_rebuilt = true
     end
   end
