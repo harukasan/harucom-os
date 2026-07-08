@@ -29,6 +29,10 @@ Ruby に渡す。
 
 ## 設計詳細
 
+注: (b)(c) は当初案。実装は異なる形で完了しており、現状の正は
+[doc/pwm-audio.md](../pwm-audio.md) と本ファイル末尾の「実装結果」。(a) のサンプル再生は
+未実装で、QOA 圧縮を含めて別途計画する。
+
 ### (a) WAV ワンショット PCM ch
 
 - LittleFS 上の `.wav` を Ruby で読み `String` (PSRAM ヒープ) として保持。WAV ヘッダ解析は
@@ -117,6 +121,35 @@ DSL に依存せず公開 API を直接叩く。既存 `audio_demo.rb` を拡張
 - 変更/拡張: `rootfs/lib/board/pwm_audio.rb`、`rootfs/app/audio_demo.rb`
 - 新規: `rootfs/lib/johakyu/wav.rb`
 - 新規 `MRB_SYM()` 追加時は `rake distclean` が必要。
+
+## 実装結果 (2026-07-08、M5/M6 実機確認済み)
+
+計画と異なる点を含む最終形:
+
+- **fs = 50000Hz、搬送波 250kHz** (wrap=999、1 サンプル = ちょうど 5 搬送波周期、分解能
+  1000 レベル)。22050Hz は放棄した: clk_sys 250MHz (dvi_clock.c がオーバークロック) =
+  2^7·5^9 は因数 3 を持たず 22.05k/24k/48k 系は整数分周できない
+- **ペーシングは DMA タイマではなく、ピンレスなペーサスライス (slice 8) の wrap DREQ**
+  (wrap+1=5000、1 wrap = 1 サンプル = 1 CC 書込)。DMA の DREQ には分周が無いため音声
+  スライス自身では 1/5 レートを作れない。両スライスのカウンタをプリセットして同時
+  イネーブルすることで、CC 書込が常に搬送波周期の中央に着地する (位相自由度ゼロ)
+- 根本原因の記録: 従来の高音「パチパチ」は **fs と搬送波の非整数比ビート** だった。CC は
+  wrap 時のみラッチされるため、非整数比ではサンプル境界が搬送波グリッド上で揺れ、ビートが
+  信号スロープ比例のクラックになる (旧 ISR 版も 500kHz/22050=22.68 周期で該当)。整数比化で
+  消滅を実機確認 (pacing drift が定数のまま伸びない)
+- 転送は単一 DMA チャネル + read リング (8KB align) + RP2350 ENDLESS モード (継ぎ目なし)。
+  deinit は RP2350-E5 対応 (abort 前に EN クリア)
+- レンダは TIMER1 alarm 1 の 10ms ポンプで **C が自律充填** (Ruby の update は互換 no-op)。
+  VM が止まってもアンダーランしない
+- `PWMAudio.sample_clock` / `tone_at` / `stop_at` / `cancel_scheduled` / `SAMPLE_RATE` を追加
+  (イベントキュー 32 件、レンダ中にサンプル精度で適用)。診断 `PWMAudio.stats` =
+  [min_lead, max_gap_us, drift_now, drift_min]
+- audio_demo.rb は不変 (デモに検証機能は足さない方針)。検証は irb から `PWMAudio.stats` /
+  `sample_clock` / `tone_at` を直接叩く
+- この改修は main の PR 14 (pwm-audio-wrap-dreq) としてマージ済み。API と構造の正式な
+  ドキュメントは [doc/pwm-audio.md](../pwm-audio.md)
+- 未実施: サンプル再生 (計画 (a)、QOA 圧縮対応を含めて別途計画) と R8。M10 のゲートには
+  しない
 
 ## 次のハンドオフ先
 

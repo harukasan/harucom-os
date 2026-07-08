@@ -41,10 +41,10 @@
 #define DMX_RXD_PIN  21
 #define DMX_BAUDRATE 250000
 
-/* TIMER0 alarms are all taken: 0 = mruby task tick (hal_task.c),
- * 1 = pwm-audio, 2 = PIO-USB SOF, 3 = SDK default alarm pool. DMX runs
- * its pool on TIMER1, which is otherwise unused. Alarm 1 is avoided
- * because pwm_audio_port.c raises the TIMER1_IRQ_1 priority. */
+/* TIMER0 alarms: 0 = mruby task tick (hal_task.c), 2 = PIO-USB SOF,
+ * 3 = SDK default alarm pool. TIMER1: alarm 0 = this DMX frame pool,
+ * alarm 1 = pwm-audio render pump (low rate; the sample cadence itself
+ * is DMA paced). */
 #define DMX_TIMER_NUM 1
 #define DMX_HW_ALARM  0
 
