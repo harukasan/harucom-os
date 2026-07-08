@@ -138,9 +138,9 @@ GPIO pins. `Board::PWMAudio.new` calls this with the board's audio pins.
 ### PWMAudio.tone(channel, frequency, waveform, volume)
 
 Switch a channel's source to the oscillator and start it immediately
-(a playing sample stops). The change is applied to samples rendered
-after the call, so it becomes audible after the buffered samples play
-out (up to one buffer, about 41 ms).
+(a playing sample stops). Immediate verbs re-render the buffered
+lead, so the change becomes audible after a few milliseconds (see
+[Render pump](#render-pump)).
 
 ### PWMAudio.pan(channel, pan)
 
@@ -430,6 +430,18 @@ underrun the output; the pump would have to stall for about one
 buffer duration (41 ms) before the reader reaches unrendered data.
 The DMA itself reads only SRAM, so playback continues through flash
 operations that stall XIP.
+
+The rendered lead would delay immediate changes by up to a full
+buffer, so the immediate channel verbs (tone, play, stop, pan, mute,
+and source attachment) rewind the rendered-ahead region to just in
+front of the reader and re-render it with the new state. The change
+becomes audible after a small guard (about 4 ms) while the underrun
+protection stays at the full buffer. The refill runs in short bites
+with interrupts enabled between them, so IRQ latency stays bounded.
+One caveat: scheduled events already applied inside the rewound span
+shift to its start, so immediate verbs should not race in-flight
+scheduled events; the scheduled path (tone_at, play_at, stop_at) is
+unaffected and stays sample accurate.
 
 ### Mixer
 

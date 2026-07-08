@@ -136,6 +136,15 @@ void pwm_audio_stats(int32_t *min_lead, uint32_t *max_gap_us, int32_t *drift_now
  * about 10 ms of rendered output. */
 void pwm_audio_bias_fade(bool enable);
 
+/* Platform-specific: make an immediate change audible quickly by
+ * rewinding the rendered-ahead region to just in front of the DMA
+ * reader and re-rendering it with the current state (a few ms
+ * instead of the full rendered lead). Called by the immediate
+ * channel verbs. Scheduled events already applied inside the rewound
+ * span shift to its start, so avoid mixing immediate verbs with
+ * in-flight scheduled events. */
+void pwm_audio_flush_rendered(void);
+
 /* Platform-specific: short critical section guarding the event queue
  * and channel state against the render IRQ. */
 uint32_t pwm_audio_lock(void);
