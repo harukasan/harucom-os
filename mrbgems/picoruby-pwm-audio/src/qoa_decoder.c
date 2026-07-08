@@ -76,6 +76,7 @@ qoa_decoder_reset(qoa_decoder_t *decoder, pwm_audio_byte_source_t *source,
   decoder->slice_pos = 0;
   decoder->frame_samples_left = 0;
   decoder->total_samples_left = total_samples;
+  decoder->total_samples = total_samples;
   decoder->channels = channels;
   decoder->slice_count = 0;
   decoder->slice_index = 0;
@@ -164,5 +165,45 @@ qoa_decoder_next(qoa_decoder_t *decoder, int16_t *left, int16_t *right)
   uint8_t i = decoder->slice_index++;
   *left = decoder->slice_samples[0][i];
   *right = decoder->channels == 2 ? decoder->slice_samples[1][i] : *left;
+  return true;
+}
+
+bool
+qoa_decoder_seek(qoa_decoder_t *decoder, uint32_t sample_index)
+{
+  if (sample_index >= decoder->total_samples) return false;
+  qoa_decoder_reset(decoder, decoder->source, decoder->total_samples, decoder->channels);
+
+  /* Skip whole frames by walking their headers. */
+  uint32_t remaining = sample_index;
+  for (;;) {
+    uint32_t pos = decoder->frame_pos;
+    uint8_t header[8];
+    if (!pwm_audio_byte_source_read(decoder->source, pos, header, sizeof(header))) return false;
+    uint32_t frame_samples = read_u16be(header + 4);
+    uint32_t frame_size = read_u16be(header + 6);
+    if (header[0] != decoder->channels || frame_samples == 0) return false;
+    if (pos + frame_size > decoder->source->length) return false;
+    if (remaining < frame_samples) break;
+    remaining -= frame_samples;
+    decoder->total_samples_left -= frame_samples;
+    decoder->frame_pos = pos + frame_size;
+  }
+
+  /* Decode slice groups inside the target frame up to the index. The
+   * LMS state is sequential within a frame, so skipped groups still
+   * decode; only their samples are discarded. */
+  while (remaining >= QOA_SLICE_LEN) {
+    if (!decode_slice_group(decoder)) return false;
+    remaining -= decoder->slice_count;
+  }
+  if (remaining > 0) {
+    if (!decode_slice_group(decoder)) return false;
+    decoder->slice_index = (uint8_t)remaining;
+  } else if (decoder->slice_count > 0) {
+    /* Landed on a group boundary: the buffered group is fully
+     * consumed, the next read decodes the following one. */
+    decoder->slice_index = decoder->slice_count;
+  }
   return true;
 }

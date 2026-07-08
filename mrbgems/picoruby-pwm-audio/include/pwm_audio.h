@@ -136,6 +136,23 @@ void pwm_audio_stats(int32_t *min_lead, uint32_t *max_gap_us, int32_t *drift_now
  * about 10 ms of rendered output. */
 void pwm_audio_bias_fade(bool enable);
 
+/* Platform-specific pair making an immediate change audible quickly
+ * (a few ms instead of the full rendered lead). The immediate verbs
+ * call rewind under the lock BEFORE changing state, so sources step
+ * back along their old trajectories, and refill after unlocking.
+ * Scheduled events already applied inside the rewound span shift to
+ * its start, so avoid mixing immediate verbs with in-flight
+ * scheduled events. */
+void pwm_audio_rewind_lead(void);
+void pwm_audio_refill_lead(void);
+
+/* Step every active source back by output_samples on the mix
+ * timeline (oscillator phase, sample and stream positions), so the
+ * re-rendered span continues bit-exact from the rewind point instead
+ * of jumping to where the discarded rendering had advanced. Called by
+ * pwm_audio_rewind_lead with the rewound distance, under the lock. */
+void pwm_audio_rewind_sources(uint32_t output_samples);
+
 /* Platform-specific: short critical section guarding the event queue
  * and channel state against the render IRQ. */
 uint32_t pwm_audio_lock(void);

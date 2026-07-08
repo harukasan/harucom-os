@@ -66,6 +66,7 @@ waveform_idx = 1
 prev_octave_up = false
 prev_octave_down = false
 prev_note_keycodes = []
+prev_status = nil
 
 loop do
   # Consume key events for Ctrl-C detection
@@ -118,6 +119,7 @@ loop do
   end
 
   # Update channels only when held notes change
+  dirty = false
   if note_keycodes != prev_note_keycodes
     # Scale volume by number of simultaneous notes to avoid clipping
     count = note_keycodes.length
@@ -147,10 +149,25 @@ loop do
     end
 
     prev_note_keycodes = note_keycodes
+    dirty = true
   end
 
   # Status display
-  DVI::Text.put_string(0, 8, "Octave: #{octave}  Waveform: #{WAVEFORM_NAMES[waveform_idx]}       ", LABEL_ATTR)
+  status = "Octave: #{octave}  Waveform: #{WAVEFORM_NAMES[waveform_idx]}       "
+  if status != prev_status
+    DVI::Text.put_string(0, 8, status, LABEL_ATTR)
+    prev_status = status
+    dirty = true
+  end
 
-  DVI::Text.commit
+  # Commit blocks until vsync, so only pay for it when the display
+  # changed. Idle iterations sleep briefly instead, which samples the
+  # key state at millisecond granularity and lets the USB host task
+  # run, cutting key-to-sound latency. Sound is already triggered
+  # above, so a commit never delays it.
+  if dirty
+    DVI::Text.commit
+  else
+    sleep_ms 1
+  end
 end

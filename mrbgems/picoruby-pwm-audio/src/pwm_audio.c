@@ -169,6 +169,10 @@ typedef struct {
   qoa_decoder_t decoder;
   /* linear resampler to the output rate */
   uint32_t phase; /* 16.16 position between prev and next */
+  uint32_t source_pos; /* source frames pulled since the trigger */
+  uint32_t rendered;   /* output samples rendered since the trigger;
+                        * bounds a rendered-lead rewind so it cannot
+                        * step back past the trigger */
   int16_t prev_l, prev_r;
   int16_t next_l, next_r;
   bool playing;
@@ -273,6 +277,7 @@ stream_pull(pwm_audio_sample_stream_t *stream)
   stream->prev_r = stream->next_r;
   stream->next_l = left;
   stream->next_r = right;
+  stream->source_pos++;
   return true;
 }
 
@@ -311,6 +316,7 @@ attach_source(uint8_t channel, const pwm_audio_byte_source_t *source)
     return false;
   }
   uint32_t state = pwm_audio_lock();
+  pwm_audio_rewind_lead();
   pwm_audio_sample_stream_t *stream = &sample_streams[channel];
   stream->playing = false;
   stream->ended = false;
@@ -323,6 +329,7 @@ attach_source(uint8_t channel, const pwm_audio_byte_source_t *source)
   channels[channel].source = PWM_AUDIO_SOURCE_SAMPLE;
   channels[channel].phase_increment = 0; /* silence the oscillator */
   pwm_audio_unlock(state);
+  pwm_audio_refill_lead();
   return true;
 }
 
@@ -357,6 +364,8 @@ play_locked(uint8_t channel, uint8_t volume)
                       stream->channels);
   }
   stream->phase = 0;
+  stream->source_pos = 0;
+  stream->rendered = 0;
   stream->prev_l = 0;
   stream->prev_r = 0;
   stream->next_l = 0;
@@ -375,8 +384,63 @@ pwm_audio_play(uint8_t channel, uint8_t volume)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
   uint32_t state = pwm_audio_lock();
+  pwm_audio_rewind_lead();
   play_locked(channel, volume);
   pwm_audio_unlock(state);
+  pwm_audio_refill_lead();
+}
+
+/* Step a playing stream back by output_samples on the mix timeline:
+ * re-seek the source and rebuild the resampler window so a
+ * rendered-lead rewind stays continuous. Runs under the lock. */
+static void
+stream_rewind_locked(uint8_t channel, uint32_t output_samples)
+{
+  pwm_audio_sample_stream_t *stream = &sample_streams[channel];
+  uint32_t back = output_samples < stream->rendered ? output_samples : stream->rendered;
+  if (back == 0) return;
+
+  /* 16.16 source position: source_pos whole pulls plus the resampler
+   * phase. Bounded below by the primed state right after a trigger
+   * (one pull, phase zero), which `back <= rendered` guarantees. */
+  uint64_t position = (((uint64_t)stream->source_pos) << 16) + stream->phase;
+  position -= (uint64_t)back * stream->phase_increment;
+  uint32_t pulls = (uint32_t)(position >> 16);
+  uint32_t base = pulls > 2 ? pulls - 2 : 0;
+
+  if (stream->format == PWM_AUDIO_SAMPLE_PCM16) {
+    stream->pcm_pos = base;
+  } else if (!qoa_decoder_seek(&stream->decoder, base)) {
+    stream->playing = false;
+    return;
+  }
+  stream->phase = (uint32_t)(position & 0xFFFF);
+  stream->source_pos = base;
+  stream->rendered -= back;
+  stream->prev_l = 0;
+  stream->prev_r = 0;
+  stream->next_l = 0;
+  stream->next_r = 0;
+  while (stream->source_pos < pulls) {
+    if (!stream_pull(stream)) {
+      stream->playing = false;
+      return;
+    }
+  }
+}
+
+void
+pwm_audio_rewind_sources(uint32_t output_samples)
+{
+  for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
+    pwm_audio_channel_t *ch = &channels[i];
+    if (ch->source == PWM_AUDIO_SOURCE_OSC) {
+      /* The phase accumulator is cyclic, so this is exact. */
+      ch->phase -= output_samples * ch->phase_increment;
+    } else if (sample_streams[i].playing && !sample_streams[i].ended) {
+      stream_rewind_locked((uint8_t)i, output_samples);
+    }
+  }
 }
 
 void
@@ -442,6 +506,7 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
       signal_r = sample_r >> 4;
 
       if (!stream->ended) {
+        stream->rendered++;
         stream->phase += stream->phase_increment;
         while (stream->phase >= 0x10000) {
           stream->phase -= 0x10000;
@@ -483,48 +548,27 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
   *out_r = (uint16_t)(((uint32_t)level_r * PWM_AUDIO_PWM_WRAP) >> 12);
 }
 
-void
-pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_t volume)
+/* Locked variants: state changes without the lock or the rendered
+ * lead flush. Used by the public verbs (which add both) and by the
+ * event queue, which runs inside rendering and must not flush. */
+static void
+set_tone_locked(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_t volume)
 {
-  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
   pwm_audio_channel_t *ch = &channels[channel];
-  uint32_t increment =
-      frequency ? (uint32_t)(((uint64_t)frequency << 32) / PWM_AUDIO_SAMPLE_RATE) : 0;
-  uint32_t state = pwm_audio_lock();
   ch->source = PWM_AUDIO_SOURCE_OSC;
   sample_streams[channel].playing = false;
   sample_streams[channel].ended = false;
-  ch->phase_increment = increment;
+  ch->phase_increment =
+      frequency ? (uint32_t)(((uint64_t)frequency << 32) / PWM_AUDIO_SAMPLE_RATE) : 0;
   ch->waveform = waveform;
   ch->volume = volume & 0x0F;
   ch->muted = false;
   ch->stopping = false;
-  pwm_audio_unlock(state);
 }
 
-void
-pwm_audio_set_pan(uint8_t channel, uint8_t pan)
+static void
+stop_channel_locked(uint8_t channel)
 {
-  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
-  uint32_t state = pwm_audio_lock();
-  channels[channel].pan = pan & 0x0F;
-  pwm_audio_unlock(state);
-}
-
-void
-pwm_audio_set_mute(uint8_t channel, bool mute)
-{
-  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
-  uint32_t state = pwm_audio_lock();
-  channels[channel].muted = mute;
-  pwm_audio_unlock(state);
-}
-
-void
-pwm_audio_stop_channel(uint8_t channel)
-{
-  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
-  uint32_t state = pwm_audio_lock();
   pwm_audio_channel_t *ch = &channels[channel];
   /* Fade out instead of cutting; the mixer releases the source once
    * the ramp reaches silence. An already-silent channel releases
@@ -538,19 +582,63 @@ pwm_audio_stop_channel(uint8_t channel)
   } else {
     ch->stopping = true;
   }
+}
+
+void
+pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_t volume)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
+  pwm_audio_rewind_lead();
+  set_tone_locked(channel, frequency, waveform, volume);
   pwm_audio_unlock(state);
+  pwm_audio_refill_lead();
+}
+
+void
+pwm_audio_set_pan(uint8_t channel, uint8_t pan)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
+  pwm_audio_rewind_lead();
+  channels[channel].pan = pan & 0x0F;
+  pwm_audio_unlock(state);
+  pwm_audio_refill_lead();
+}
+
+void
+pwm_audio_set_mute(uint8_t channel, bool mute)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
+  pwm_audio_rewind_lead();
+  channels[channel].muted = mute;
+  pwm_audio_unlock(state);
+  pwm_audio_refill_lead();
+}
+
+void
+pwm_audio_stop_channel(uint8_t channel)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
+  pwm_audio_rewind_lead();
+  stop_channel_locked(channel);
+  pwm_audio_unlock(state);
+  pwm_audio_refill_lead();
 }
 
 void
 pwm_audio_stop_all(void)
 {
-  /* One critical section so no rendered block sees a partial stop.
-   * The nested locks in the per-channel stops are save/restore safe. */
+  /* One critical section so no rendered block sees a partial stop. */
   uint32_t state = pwm_audio_lock();
+  pwm_audio_rewind_lead();
   for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
-    pwm_audio_stop_channel(i);
+    stop_channel_locked(i);
   }
   pwm_audio_unlock(state);
+  pwm_audio_refill_lead();
 }
 
 /* --- Sample buffer and block renderer --- */
@@ -651,9 +739,9 @@ apply_event(const pwm_audio_event_t *event)
   if (event->kind == PWM_AUDIO_EVENT_PLAY) {
     play_locked(event->channel, event->volume);
   } else if (event->frequency) {
-    pwm_audio_set_tone(event->channel, event->frequency, event->waveform, event->volume);
+    set_tone_locked(event->channel, event->frequency, event->waveform, event->volume);
   } else {
-    pwm_audio_stop_channel(event->channel);
+    stop_channel_locked(event->channel);
   }
 }
 
