@@ -151,10 +151,14 @@ def read_wav(path, force_mono: false)
 end
 
 # Encode one slice (up to 20 samples starting at offset) with the
-# scalefactor giving the least squared error. Returns [slice_u64,
-# best_lms, best_scalefactor]. prev_scalefactor seeds the search order.
+# scalefactor giving the least squared error. Candidates are ranked by
+# error plus a squared penalty on the LMS weights magnitude, as in the
+# reference encoder: the frame header stores weights as int16, so
+# unchecked growth would silently truncate and desync the decoder.
+# Returns [slice_u64, best_lms, best_scalefactor]. prev_scalefactor
+# seeds the search order.
 def encode_slice(samples, offset, count, lms, prev_scalefactor)
-  best_error = nil
+  best_rank = nil
   best_slice = nil
   best_lms = nil
   best_sf = 0
@@ -178,8 +182,12 @@ def encode_slice(samples, offset, count, lms, prev_scalefactor)
       slice = (slice << 3) | quantized
     end
     slice <<= (QOA_SLICE_LEN - count) * 3
-    if best_error.nil? || error < best_error
-      best_error = error
+    w = trial.weights
+    penalty = ((w[0] * w[0] + w[1] * w[1] + w[2] * w[2] + w[3] * w[3]) >> 18) - 0x8FF
+    penalty = 0 if penalty < 0
+    rank = error + penalty * penalty
+    if best_rank.nil? || rank < best_rank
+      best_rank = rank
       best_slice = slice
       best_lms = trial
       best_sf = sf
@@ -203,6 +211,11 @@ def encode_qoa(channel_samples, samplerate)
     frame_size = 8 + channels * 16 + slices * channels * 8
     out << [channels, samplerate >> 16, samplerate & 0xFFFF, frame_samples, frame_size].pack("CCnnn")
     channels.times do |c|
+      lms[c].weights.each do |v|
+        # The weights penalty in encode_slice keeps these in range;
+        # pack("s>") would truncate silently if it ever failed.
+        raise "LMS weight out of int16 range (#{v})" if v < -32768 || v > 32767
+      end
       out << lms[c].history.pack("s>4")
       out << lms[c].weights.pack("s>4")
     end
