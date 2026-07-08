@@ -38,18 +38,23 @@ The block uses the vocabulary below and must return a `Synth::Buffer`;
 the result is peak-normalized and tail-faded.
 
 Rendering is deterministic: the same seed produces the same bytes on
-a given platform (noise comes from a seeded xorshift, not the system
+a given backend (noise comes from a seeded xorshift, not the system
 RNG), so generated files are reproducible and testable. Pass
 `seed: RNG.random_int` on the board for a different noise take each
-time. Host and board outputs can differ in the last bit through libm
-differences; the sound is identical.
+time.
 
-On the board a render costs roughly one to three seconds per drum
-sized sound (tens of thousands of interpreted samples). That suits
-sound design at the prompt and one-time generation; it is too slow
-inside a running show tick. Every Buffer operation is a coarse
-whole-buffer pass, so a C-backed buffer can replace the internals
-later without changing this API if in-show synthesis is ever needed.
+The per-sample loops run through a small fixed kernel set with two
+interchangeable backends: `Synth::Native` (the picoruby-synth-native
+mrbgem, single-precision C) and `Synth::Kernels` (pure Ruby, the
+backend on host CRuby where the gem does not exist). The kernels
+(curves, oscillators, noise, elementwise math, a generic biquad, WAV
+packing) carry no musical meaning and do not change when sounds do;
+everything musical, from filter coefficients to the drum definitions,
+lives only in the Ruby layer, so editing a sound applies to every
+platform at once. Backends produce the same sound but not the same
+bits (float vs double); a test keeps them within tolerance of each
+other. Interpreted rendering costs seconds per drum on the board, the
+C kernels tens of milliseconds.
 
 ### Render vocabulary
 
