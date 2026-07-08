@@ -48,15 +48,17 @@ read_u64be(const uint8_t *p)
 }
 
 bool
-qoa_decoder_parse_header(const uint8_t *data, uint32_t length, uint32_t *samplerate,
+qoa_decoder_parse_header(pwm_audio_byte_source_t *source, uint32_t *samplerate,
                          uint32_t *frames, uint32_t *channels)
 {
   /* File header, first frame header, mono LMS state, and one slice. */
-  if (data == NULL || length < 8 + 8 + 16 + 8) return false;
-  if (data[0] != 'q' || data[1] != 'o' || data[2] != 'a' || data[3] != 'f') return false;
-  uint32_t total_samples = read_u32be(data + 4);
-  uint8_t file_channels = data[8];
-  uint32_t rate = ((uint32_t)data[9] << 16) | ((uint32_t)data[10] << 8) | data[11];
+  if (source == NULL || source->length < 8 + 8 + 16 + 8) return false;
+  uint8_t header[12];
+  if (!pwm_audio_byte_source_read(source, 0, header, sizeof(header))) return false;
+  if (header[0] != 'q' || header[1] != 'o' || header[2] != 'a' || header[3] != 'f') return false;
+  uint32_t total_samples = read_u32be(header + 4);
+  uint8_t file_channels = header[8];
+  uint32_t rate = ((uint32_t)header[9] << 16) | ((uint32_t)header[10] << 8) | header[11];
   if (total_samples == 0 || rate == 0) return false;
   if (file_channels < 1 || file_channels > QOA_MAX_CHANNELS) return false;
   *samplerate = rate;
@@ -66,11 +68,10 @@ qoa_decoder_parse_header(const uint8_t *data, uint32_t length, uint32_t *sampler
 }
 
 void
-qoa_decoder_reset(qoa_decoder_t *decoder, const uint8_t *data, uint32_t length,
+qoa_decoder_reset(qoa_decoder_t *decoder, pwm_audio_byte_source_t *source,
                   uint32_t total_samples, uint8_t channels)
 {
-  decoder->data = data;
-  decoder->length = length;
+  decoder->source = source;
   decoder->frame_pos = 8;
   decoder->slice_pos = 0;
   decoder->frame_samples_left = 0;
@@ -88,12 +89,12 @@ read_frame(qoa_decoder_t *decoder)
   if (decoder->total_samples_left == 0) return false;
   uint32_t pos = decoder->frame_pos;
   uint32_t header_size = 8 + (uint32_t)decoder->channels * 16;
-  if (pos + header_size > decoder->length) return false;
-  const uint8_t *p = decoder->data + pos;
+  uint8_t p[8 + QOA_MAX_CHANNELS * 16];
+  if (!pwm_audio_byte_source_read(decoder->source, pos, p, header_size)) return false;
   uint32_t frame_samples = read_u16be(p + 4);
   uint32_t frame_size = read_u16be(p + 6);
   if (p[0] != decoder->channels || frame_samples == 0) return false;
-  if (frame_size < header_size || pos + frame_size > decoder->length) return false;
+  if (frame_size < header_size || pos + frame_size > decoder->source->length) return false;
   for (int c = 0; c < decoder->channels; c++) {
     const uint8_t *lms = p + 8 + c * 16;
     for (int i = 0; i < 4; i++) {
@@ -119,8 +120,11 @@ decode_slice_group(qoa_decoder_t *decoder)
   uint32_t n = decoder->frame_samples_left < QOA_SLICE_LEN ? decoder->frame_samples_left
                                                            : QOA_SLICE_LEN;
   for (int c = 0; c < decoder->channels; c++) {
-    if (decoder->slice_pos + 8 > decoder->length) return false;
-    uint64_t slice = read_u64be(decoder->data + decoder->slice_pos);
+    uint8_t slice_bytes[8];
+    if (!pwm_audio_byte_source_read(decoder->source, decoder->slice_pos, slice_bytes, 8)) {
+      return false;
+    }
+    uint64_t slice = read_u64be(slice_bytes);
     decoder->slice_pos += 8;
     const int16_t *dequant = qoa_dequant_tab[slice >> 60];
     int32_t *history = decoder->history[c];

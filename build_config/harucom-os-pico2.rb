@@ -57,4 +57,5 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.gem File.expand_path('../../mrbgems/picoruby-keyboard-input', __FILE__)
   conf.gem File.expand_path('../../mrbgems/harucom-os-dict', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-ruby-syntax', __FILE__)
+  conf.gem File.expand_path('../../mrbgems/picoruby-flash-file', __FILE__)
 end

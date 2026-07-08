@@ -199,6 +199,54 @@ mrb_pwm_audio_sample_info(mrb_state *mrb, mrb_value self)
   return ary;
 }
 
+/* PWMAudio.set_stream(channel, extents, total_length): switch the
+ * channel's source to a file streamed through its flash extent map
+ * (packed u32 LE address and length pairs; see FlashFile.extents).
+ * The file bytes stay in flash, so tracks larger than RAM play. */
+static mrb_value
+mrb_pwm_audio_set_stream(mrb_state *mrb, mrb_value self)
+{
+  mrb_int channel, total_length;
+  mrb_value extents;
+  mrb_get_args(mrb, "iSi", &channel, &extents, &total_length);
+  if (channel < 0 || channel >= PWM_AUDIO_NUM_CHANNELS) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid channel");
+  }
+  if (RSTRING_LEN(extents) == 0 || RSTRING_LEN(extents) % 8 != 0) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "malformed extent list");
+  }
+  if (!pwm_audio_set_stream((uint8_t)channel, (const uint8_t *)RSTRING_PTR(extents),
+                            (uint32_t)(RSTRING_LEN(extents) / 8), (uint32_t)total_length)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a QOA or WAV stream");
+  }
+  pwm_audio_pin_sample(mrb, channel, extents);
+  return mrb_true_value();
+}
+
+/* PWMAudio.stream_info(extents, total_length): sample_info over an
+ * extent map */
+static mrb_value
+mrb_pwm_audio_stream_info(mrb_state *mrb, mrb_value self)
+{
+  mrb_value extents;
+  mrb_int total_length;
+  mrb_get_args(mrb, "Si", &extents, &total_length);
+  if (RSTRING_LEN(extents) == 0 || RSTRING_LEN(extents) % 8 != 0) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "malformed extent list");
+  }
+  uint32_t samplerate, frames, channels;
+  if (!pwm_audio_stream_info((const uint8_t *)RSTRING_PTR(extents),
+                             (uint32_t)(RSTRING_LEN(extents) / 8), (uint32_t)total_length,
+                             &samplerate, &frames, &channels)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a QOA or WAV stream");
+  }
+  mrb_value ary = mrb_ary_new_capa(mrb, 3);
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)samplerate));
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)frames));
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)channels));
+  return ary;
+}
+
 /* PWMAudio.cancel_scheduled(channel): drop pending events for a channel */
 static mrb_value
 mrb_pwm_audio_cancel_scheduled(mrb_state *mrb, mrb_value self)
@@ -252,6 +300,10 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
                                 MRB_ARGS_REQ(3));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(sample_info), mrb_pwm_audio_sample_info,
                                 MRB_ARGS_REQ(1));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(set_stream), mrb_pwm_audio_set_stream,
+                                MRB_ARGS_REQ(3));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(stream_info), mrb_pwm_audio_stream_info,
+                                MRB_ARGS_REQ(2));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(stats), mrb_pwm_audio_stats, MRB_ARGS_NONE());
   mrb_define_module_function_id(mrb, mod, MRB_SYM(deinit), mrb_pwm_audio_deinit, MRB_ARGS_NONE());
 }

@@ -9,6 +9,7 @@
  */
 
 #include "../include/pwm_audio.h"
+#include "byte_source.h"
 #include "qoa_decoder.h"
 #include <string.h>
 
@@ -119,13 +120,15 @@ generate_waveform(pwm_audio_channel_t *ch)
  *
  * A channel whose source is a sample streams one mono or stereo file,
  * either QOA (decoded slice by slice in qoa_decoder.c) or WAV holding
- * plain 16-bit PCM (read sample by sample, no decoding). This layer
- * detects the format, adds the linear resampler to the output rate,
- * and keeps the one-shot playback state. Data is pulled on demand
- * while mixing, so only the file bytes are held in memory and the
- * PSRAM read rate stays tiny. A retrigger restarts the stream from
- * the file start. A mono stream mirrors its samples to both sides so
- * the mixer has a single code path. */
+ * plain 16-bit PCM (read sample by sample, no decoding). The bytes
+ * come through a byte source: a contiguous buffer for in-memory
+ * samples (set_sample) or the flash extent map of a LittleFS file
+ * (set_stream), so a multi-megabyte track plays with no RAM buffer.
+ * This layer detects the format, adds the linear resampler to the
+ * output rate, and keeps the one-shot playback state. Data is pulled
+ * on demand while mixing, so the read rate stays tiny. A retrigger
+ * restarts the stream from the file start. A mono stream mirrors its
+ * samples to both sides so the mixer has a single code path. */
 
 typedef enum {
   PWM_AUDIO_SAMPLE_QOA = 0,
@@ -133,9 +136,8 @@ typedef enum {
 } pwm_audio_sample_format_t;
 
 typedef struct {
-  /* loaded sample (file bytes, owned by the caller) */
-  const uint8_t *data;
-  uint32_t length;
+  /* sample bytes (backing memory owned by the caller) */
+  pwm_audio_byte_source_t source;
   uint32_t total_samples;   /* per channel */
   uint32_t phase_increment; /* 16.16 source samples per output sample */
   uint8_t format;           /* pwm_audio_sample_format_t */
@@ -171,26 +173,32 @@ read_u16le(const uint8_t *p)
  * stereo 16-bit PCM are accepted. Chunks other than fmt and data are
  * skipped, so files with LIST/INFO metadata still load. */
 static bool
-wav_parse_header(const uint8_t *data, uint32_t length, uint32_t *samplerate, uint32_t *frames,
+wav_parse_header(pwm_audio_byte_source_t *source, uint32_t *samplerate, uint32_t *frames,
                  uint32_t *channels, uint32_t *pcm_offset)
 {
+  uint32_t length = source->length;
   if (length < 44) return false;
-  if (memcmp(data, "RIFF", 4) != 0 || memcmp(data + 8, "WAVE", 4) != 0) return false;
+  uint8_t header[12];
+  if (!pwm_audio_byte_source_read(source, 0, header, sizeof(header))) return false;
+  if (memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) return false;
 
   uint32_t pos = 12;
   bool have_format = false;
   uint16_t wav_channels = 0;
   uint32_t wav_rate = 0;
   while (pos + 8 <= length) {
-    const uint8_t *chunk = data + pos;
+    uint8_t chunk[8];
+    if (!pwm_audio_byte_source_read(source, pos, chunk, sizeof(chunk))) return false;
     uint32_t chunk_size = read_u32le(chunk + 4);
     uint32_t body = pos + 8;
     if (chunk_size > length - body) return false;
     if (memcmp(chunk, "fmt ", 4) == 0 && chunk_size >= 16) {
-      uint16_t codec = read_u16le(data + body);
-      wav_channels = read_u16le(data + body + 2);
-      wav_rate = read_u32le(data + body + 4);
-      uint16_t bits = read_u16le(data + body + 14);
+      uint8_t fmt[16];
+      if (!pwm_audio_byte_source_read(source, body, fmt, sizeof(fmt))) return false;
+      uint16_t codec = read_u16le(fmt);
+      wav_channels = read_u16le(fmt + 2);
+      wav_rate = read_u32le(fmt + 4);
+      uint16_t bits = read_u16le(fmt + 14);
       if (codec != 1 || bits != 16) return false; /* 16-bit PCM only */
       have_format = true;
     } else if (memcmp(chunk, "data", 4) == 0) {
@@ -206,6 +214,23 @@ wav_parse_header(const uint8_t *data, uint32_t length, uint32_t *samplerate, uin
   return false;
 }
 
+/* Detect the sample format and report its parameters. */
+static bool
+probe_source(pwm_audio_byte_source_t *source, uint32_t *samplerate, uint32_t *frames,
+             uint32_t *channels, uint8_t *format, uint32_t *pcm_offset)
+{
+  *pcm_offset = 0;
+  if (qoa_decoder_parse_header(source, samplerate, frames, channels)) {
+    *format = PWM_AUDIO_SAMPLE_QOA;
+    return true;
+  }
+  if (wav_parse_header(source, samplerate, frames, channels, pcm_offset)) {
+    *format = PWM_AUDIO_SAMPLE_PCM16;
+    return true;
+  }
+  return false;
+}
+
 /* Advance the resampler window by one source frame. */
 static bool
 stream_pull(pwm_audio_sample_stream_t *stream)
@@ -213,10 +238,12 @@ stream_pull(pwm_audio_sample_stream_t *stream)
   int16_t left, right;
   if (stream->format == PWM_AUDIO_SAMPLE_PCM16) {
     if (stream->pcm_pos >= stream->total_samples) return false;
-    const uint8_t *p =
-        stream->data + stream->pcm_offset + stream->pcm_pos * 2 * stream->channels;
-    left = (int16_t)read_u16le(p);
-    right = stream->channels == 2 ? (int16_t)read_u16le(p + 2) : left;
+    uint8_t frame[4];
+    uint32_t frame_bytes = 2 * stream->channels;
+    uint32_t offset = stream->pcm_offset + stream->pcm_pos * frame_bytes;
+    if (!pwm_audio_byte_source_read(&stream->source, offset, frame, frame_bytes)) return false;
+    left = (int16_t)read_u16le(frame);
+    right = stream->channels == 2 ? (int16_t)read_u16le(frame + 2) : left;
     stream->pcm_pos++;
   } else {
     if (!qoa_decoder_next(&stream->decoder, &left, &right)) return false;
@@ -232,31 +259,41 @@ bool
 pwm_audio_sample_info(const uint8_t *data, uint32_t length, uint32_t *samplerate,
                       uint32_t *frames, uint32_t *channels)
 {
+  pwm_audio_byte_source_t source;
+  uint8_t format;
   uint32_t pcm_offset;
-  if (qoa_decoder_parse_header(data, length, samplerate, frames, channels)) return true;
-  return wav_parse_header(data, length, samplerate, frames, channels, &pcm_offset);
+  pwm_audio_byte_source_memory(&source, data, length);
+  return probe_source(&source, samplerate, frames, channels, &format, &pcm_offset);
 }
 
 bool
-pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length)
+pwm_audio_stream_info(const uint8_t *extent_pairs, uint32_t extent_count,
+                      uint32_t total_length, uint32_t *samplerate, uint32_t *frames,
+                      uint32_t *channels)
+{
+  pwm_audio_byte_source_t source;
+  uint8_t format;
+  uint32_t pcm_offset;
+  pwm_audio_byte_source_extents(&source, extent_pairs, extent_count, total_length);
+  return probe_source(&source, samplerate, frames, channels, &format, &pcm_offset);
+}
+
+/* Validate a byte source and attach it to a channel. */
+static bool
+attach_source(uint8_t channel, const pwm_audio_byte_source_t *source)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
-  uint32_t samplerate, frames, sample_channels;
+  uint32_t samplerate, frames, sample_channels, pcm_offset;
   uint8_t format;
-  uint32_t pcm_offset = 0;
-  if (qoa_decoder_parse_header(data, length, &samplerate, &frames, &sample_channels)) {
-    format = PWM_AUDIO_SAMPLE_QOA;
-  } else if (wav_parse_header(data, length, &samplerate, &frames, &sample_channels,
-                              &pcm_offset)) {
-    format = PWM_AUDIO_SAMPLE_PCM16;
-  } else {
+  pwm_audio_byte_source_t probe = *source;
+  if (!probe_source(&probe, &samplerate, &frames, &sample_channels, &format, &pcm_offset)) {
     return false;
   }
   uint32_t state = pwm_audio_lock();
   pwm_audio_sample_stream_t *stream = &sample_streams[channel];
   stream->playing = false;
-  stream->data = data;
-  stream->length = length;
+  stream->ended = false;
+  stream->source = *source;
   stream->total_samples = frames;
   stream->format = format;
   stream->channels = (uint8_t)sample_channels;
@@ -268,17 +305,34 @@ pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length)
   return true;
 }
 
+bool
+pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length)
+{
+  pwm_audio_byte_source_t source;
+  pwm_audio_byte_source_memory(&source, data, length);
+  return attach_source(channel, &source);
+}
+
+bool
+pwm_audio_set_stream(uint8_t channel, const uint8_t *extent_pairs, uint32_t extent_count,
+                     uint32_t total_length)
+{
+  pwm_audio_byte_source_t source;
+  pwm_audio_byte_source_extents(&source, extent_pairs, extent_count, total_length);
+  return attach_source(channel, &source);
+}
+
 /* Restart the stream from the file start. Runs under the lock; also
  * called by the event queue inside the render IRQ. */
 static void
 play_locked(uint8_t channel, uint8_t volume)
 {
   pwm_audio_sample_stream_t *stream = &sample_streams[channel];
-  if (channels[channel].source != PWM_AUDIO_SOURCE_SAMPLE || stream->data == NULL) return;
+  if (channels[channel].source != PWM_AUDIO_SOURCE_SAMPLE || stream->source.length == 0) return;
   if (stream->format == PWM_AUDIO_SAMPLE_PCM16) {
     stream->pcm_pos = 0;
   } else {
-    qoa_decoder_reset(&stream->decoder, stream->data, stream->length, stream->total_samples,
+    qoa_decoder_reset(&stream->decoder, &stream->source, stream->total_samples,
                       stream->channels);
   }
   stream->phase = 0;

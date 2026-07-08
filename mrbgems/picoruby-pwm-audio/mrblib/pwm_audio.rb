@@ -42,6 +42,34 @@ module PWMAudio
     end
   end
 
+  # A file on the flash filesystem played by streaming. The file's
+  # flash blocks are mapped once at creation (FlashFile.extents) and
+  # the engine decodes straight from memory-mapped flash, so a track
+  # larger than RAM plays with no buffer and no feeder task. The file
+  # must not be rewritten while attached; writing it moves its blocks.
+  class Stream
+    attr_reader :path, :samplerate, :frames, :channels, :extents, :bytesize
+
+    def initialize(path)
+      @path = path
+      result = FlashFile.extents(path)
+      if result.nil?
+        raise ArgumentError, "#{path} is stored inline; load it with Sample"
+      end
+      @extents = result[0]
+      @bytesize = result[1]
+      info = PWMAudio.stream_info(@extents, @bytesize)
+      @samplerate = info[0]
+      @frames = info[1]
+      @channels = info[2]
+    end
+
+    def inspect
+      kind = @channels == 2 ? "stereo" : "mono"
+      "#<PWMAudio::Stream #{@path} #{@samplerate}Hz #{@frames} frames #{kind}>"
+    end
+  end
+
   # An oscillator source: frequency and waveform. A plain value
   # object; the engine is configured when the channel plays it.
   class Tone
@@ -69,11 +97,13 @@ module PWMAudio
       @volume = 15
     end
 
-    # Assign the playback source. A Sample is attached to the engine
-    # immediately; a Tone is kept and sent when played.
+    # Assign the playback source. A Sample or Stream is attached to
+    # the engine immediately; a Tone is kept and sent when played.
     def source=(source)
       if source.is_a?(Sample)
         PWMAudio.set_sample(@index, source.data)
+      elsif source.is_a?(Stream)
+        PWMAudio.set_stream(@index, source.extents, source.bytesize)
       end
       @source = source
     end

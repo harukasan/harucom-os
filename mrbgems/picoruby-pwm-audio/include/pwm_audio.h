@@ -86,6 +86,22 @@ void pwm_audio_play(uint8_t channel, uint8_t volume);
 bool pwm_audio_sample_info(const uint8_t *data, uint32_t length, uint32_t *samplerate,
                            uint32_t *frames, uint32_t *channels);
 
+/* Like set_sample, but the bytes come from a list of memory extents
+ * instead of one buffer: packed little-endian (u32 address, u32
+ * length) pairs covering the file in order, e.g. the flash blocks of
+ * a LittleFS file mapped into XIP (FlashFile.extents). Playback reads
+ * the extents directly, so a track larger than RAM streams with no
+ * buffer and no task; the file must not be rewritten while attached.
+ * The extent list must stay valid while attached; the mruby binding
+ * pins the backing String. */
+bool pwm_audio_set_stream(uint8_t channel, const uint8_t *extent_pairs, uint32_t extent_count,
+                          uint32_t total_length);
+
+/* sample_info over an extent list. */
+bool pwm_audio_stream_info(const uint8_t *extent_pairs, uint32_t extent_count,
+                           uint32_t total_length, uint32_t *samplerate, uint32_t *frames,
+                           uint32_t *channels);
+
 /* Sample-accurate scheduling. when is an absolute position on the
  * playback timeline (compare with pwm_audio_sample_clock()).
  * pwm_audio_schedule starts a tone (frequency 0 schedules a stop);

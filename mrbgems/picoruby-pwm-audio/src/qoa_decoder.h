@@ -18,6 +18,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "byte_source.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,8 +29,7 @@ extern "C" {
 
 typedef struct {
   /* compressed stream (owned by the caller) */
-  const uint8_t *data;
-  uint32_t length;
+  pwm_audio_byte_source_t *source;
   /* stream position */
   uint32_t frame_pos; /* byte offset of the next frame header */
   uint32_t slice_pos; /* byte offset of the next slice */
@@ -48,12 +49,13 @@ typedef struct {
 
 /* Validate a QOA file header and report the samplerate, per-channel
  * sample count, and channel count. Mono and stereo are accepted. */
-bool qoa_decoder_parse_header(const uint8_t *data, uint32_t length, uint32_t *samplerate,
+bool qoa_decoder_parse_header(pwm_audio_byte_source_t *source, uint32_t *samplerate,
                               uint32_t *frames, uint32_t *channels);
 
-/* Rewind the decoder to the start of the stream. total_samples and
- * channels come from qoa_decoder_parse_header. */
-void qoa_decoder_reset(qoa_decoder_t *decoder, const uint8_t *data, uint32_t length,
+/* Rewind the decoder to the start of the stream. The source must stay
+ * valid while decoding. total_samples and channels come from
+ * qoa_decoder_parse_header. */
+void qoa_decoder_reset(qoa_decoder_t *decoder, pwm_audio_byte_source_t *source,
                        uint32_t total_samples, uint8_t channels);
 
 /* Decode the next sample pair. A mono stream writes the same value to
