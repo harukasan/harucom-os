@@ -8,21 +8,14 @@
 extern "C" {
 #endif
 
-/* One sample spans exactly five carrier periods, and the pacing is
- * still a PWM wrap: a second pin-less slice wraps once per sample
- * (wrap+1 = 5000) and its DREQ paces the DMA. The CC register latches
- * only at carrier wrap, so the write must land at a fixed, safe phase
- * of the carrier period; both slices count the same clk_sys, and the
- * port presets their counters and enables them in one register write,
- * which pins every CC write to the middle of a carrier period. A
- * non-integer rate ratio (or an uncontrolled pacing phase) re-
- * quantizes sample boundaries on the carrier grid and the beat is
- * audible as a slope-proportional crackle.
- *
- * clk_sys is 250 MHz on this board (dvi_clock.c overclocks it for
- * HSTX). 250 MHz = 2^7 * 5^9 has no factor 3, so 48k/44.1k/24k are
- * impossible exactly; 50000 divides it. pwm_audio_init() checks the
- * divisibility at runtime and warns if the clock changes. */
+/* One sample spans exactly five carrier periods: a pin-less pacer
+ * slice wraps once per sample and its DREQ paces the DMA that writes
+ * the CC register, so every sample boundary lands at a fixed phase of
+ * the carrier (any other ratio or phase beats audibly; see
+ * doc/pwm-audio.md). The sample rate must divide clk_sys exactly:
+ * 250 MHz has no factor 3, so 48k/44.1k/24k are impossible, and 50000
+ * divides it. pwm_audio_init() checks the divisibility at runtime and
+ * warns if the clock changes. */
 #define PWM_AUDIO_SAMPLE_RATE  50000
 #define PWM_AUDIO_CARRIER_HZ   250000
 #define PWM_AUDIO_PWM_WRAP     999
@@ -49,7 +42,7 @@ typedef struct {
  * Each word is in PWM CC register format so the DMA can write it to
  * the slice CC register unmodified. */
 #define PWM_AUDIO_BUF_BITS  11
-#define PWM_AUDIO_BUF_SIZE  (1u << PWM_AUDIO_BUF_BITS) /* 2048 samples (~43 ms) */
+#define PWM_AUDIO_BUF_SIZE  (1u << PWM_AUDIO_BUF_BITS) /* 2048 samples (~41 ms) */
 #define PWM_AUDIO_BUF_MASK  (PWM_AUDIO_BUF_SIZE - 1)
 
 extern uint32_t pwm_audio_buf[PWM_AUDIO_BUF_SIZE];
@@ -66,7 +59,8 @@ void pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r);
  * positions. Called from the render pump ahead of the DMA reader. */
 void pwm_audio_render_block(uint64_t start_sample, uint32_t *dst, uint32_t count);
 
-/* Channel control (immediate; takes effect at the next half render) */
+/* Channel control (immediate; applied to samples rendered after the
+ * call) */
 void pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_t volume);
 void pwm_audio_set_pan(uint8_t channel, uint8_t pan);
 void pwm_audio_set_mute(uint8_t channel, bool mute);

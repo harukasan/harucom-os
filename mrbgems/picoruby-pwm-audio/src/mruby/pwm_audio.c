@@ -70,8 +70,8 @@ mrb_pwm_audio_stop_all(mrb_state *mrb, mrb_value self)
   return mrb_nil_value();
 }
 
-/* PWMAudio.update — kept for compatibility. The DMA half-transfer IRQ
- * renders autonomously, so there is nothing to fill from Ruby. */
+/* PWMAudio.update: kept for compatibility. The engine renders
+ * autonomously in C, so there is nothing to fill from Ruby. */
 static mrb_value
 mrb_pwm_audio_update(mrb_state *mrb, mrb_value self)
 {
@@ -79,7 +79,7 @@ mrb_pwm_audio_update(mrb_state *mrb, mrb_value self)
   return mrb_nil_value();
 }
 
-/* PWMAudio.sample_clock — playback position in samples (monotonic) */
+/* PWMAudio.sample_clock: playback position in samples (monotonic) */
 static mrb_value
 mrb_pwm_audio_sample_clock(mrb_state *mrb, mrb_value self)
 {
@@ -100,7 +100,7 @@ mrb_pwm_audio_tone_at(mrb_state *mrb, mrb_value self)
   return mrb_bool_value(ok);
 }
 
-/* PWMAudio.stop_at(sample, channel) — schedule a channel stop */
+/* PWMAudio.stop_at(sample, channel): schedule a channel stop */
 static mrb_value
 mrb_pwm_audio_stop_at(mrb_state *mrb, mrb_value self)
 {
@@ -110,7 +110,7 @@ mrb_pwm_audio_stop_at(mrb_state *mrb, mrb_value self)
   return mrb_bool_value(ok);
 }
 
-/* PWMAudio.stats —
+/* PWMAudio.stats:
  * [min_lead_samples, max_pump_gap_us, drift_now, drift_min] */
 static mrb_value
 mrb_pwm_audio_stats(mrb_state *mrb, mrb_value self)
@@ -126,7 +126,7 @@ mrb_pwm_audio_stats(mrb_state *mrb, mrb_value self)
   return ary;
 }
 
-/* PWMAudio.cancel_scheduled(channel) — drop pending events for a channel */
+/* PWMAudio.cancel_scheduled(channel): drop pending events for a channel */
 static mrb_value
 mrb_pwm_audio_cancel_scheduled(mrb_state *mrb, mrb_value self)
 {

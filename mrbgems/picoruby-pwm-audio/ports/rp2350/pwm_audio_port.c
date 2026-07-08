@@ -2,30 +2,17 @@
  * picoruby-pwm-audio/ports/rp2350/pwm_audio_port.c
  *
  * DMA-paced PWM output for RP2350. Runs entirely on Core 0 so DVI
- * (Core 1, DMA_IRQ_1) is not affected.
+ * (Core 1, DMA_IRQ_1) is not affected. See doc/pwm-audio.md for the
+ * full design.
  *
- * A single DMA channel in endless mode (RP2350 TRANS_COUNT MODE=0xF)
- * reads pwm_audio_buf through a read ring wrap and writes CC-format
- * words straight into the PWM slice CC register, paced by the wrap
- * DREQ of a second, pin-less pacer slice that wraps once per sample
- * (5 carrier periods, see pwm_audio.h). Both slices count clk_sys and
- * are enabled in one register write with preset counters, so every CC
- * write lands mid carrier period and latches at the next carrier
- * wrap with a fixed phase; there is nothing to jitter or beat. One
- * channel with no re-arming also means no seams (a chained
- * two-channel ping-pong audibly hiccuped at each half).
- *
- * A low-rate render pump (repeating timer, ~10 ms) tracks the DMA
- * read pointer and renders fresh samples ahead of it via
+ * A single DMA channel in endless mode streams pwm_audio_buf through
+ * a read ring wrap into the PWM slice CC register, paced by the wrap
+ * DREQ of a pin-less pacer slice that wraps once per sample (see
+ * pwm_audio.h). A render pump (repeating timer, ~10 ms) tracks the
+ * DMA read pointer and renders fresh samples ahead of it via
  * pwm_audio_render_block(), so the engine is autonomous: Ruby only
  * changes tone parameters or schedules events, and a stalled VM
- * cannot underrun the output. The pump needs no timing precision;
- * its budget is the render lead (about two pump periods short of the
- * full buffer).
- *
- * The sample rate is clk_sys / (pacer wrap + 1) = 250 MHz / 5000 =
- * 50000 Hz exactly, which also removes the pitch error of the old
- * integer-microsecond repeating timer.
+ * cannot underrun the output.
  */
 
 #include "pico/stdlib.h"
@@ -40,8 +27,8 @@
 
 #include "../../include/pwm_audio.h"
 
-/* TIMER1 alarm 1: alarm 0 is the DMX frame pool (dmx_port.c), TIMER0
- * alarms belong to the task tick, PIO-USB SOF, and the SDK pool. */
+/* Pump timer on TIMER1: TIMER0's alarms serve the task tick, the
+ * PIO-USB SOF pool, and the SDK default pool. */
 #define AUDIO_TIMER_NUM 1
 #define AUDIO_HW_ALARM  1
 
@@ -70,7 +57,7 @@ static bool audio_running = false;
  * accumulates ring-wrap deltas of the DMA read pointer; consumed_mod
  * is the pointer's last seen word offset. render_position is where
  * rendering continues on the sample timeline. The pump runs well
- * inside one buffer duration (~46 ms), so wrap deltas are unambiguous. */
+ * inside one buffer duration (~41 ms), so wrap deltas are unambiguous. */
 static uint64_t played_total;
 static uint32_t consumed_mod;
 static uint64_t render_position;

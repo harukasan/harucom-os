@@ -1,11 +1,10 @@
-# Board::PWMAudio — PWM waveform synthesizer
+# Board::PWMAudio: PWM waveform synthesizer
 #
 # 3-channel audio output using PWM on the board's audio pins.
 # Supports sine, square, triangle, and sawtooth waveforms.
-# Output is DMA paced by the PWM wrap itself (50,000 Hz, one PWM
-# period per sample); the
-# engine renders autonomously in the DMA IRQ, so Ruby only changes
-# tone parameters or schedules events.
+# The output is a wrap-paced DMA stream (50,000 samples/s) rendered
+# autonomously in C, so Ruby only changes tone parameters or
+# schedules events. See doc/pwm-audio.md for the design.
 #
 # Usage:
 #   audio = Board::PWMAudio.new
@@ -66,8 +65,8 @@ module Board
       ::PWMAudio.stop_all
     end
 
-    # Kept for compatibility: the engine fills its own buffer from the
-    # DMA IRQ, so this is a no-op.
+    # Kept for compatibility: the engine renders its own buffer in C,
+    # so this is a no-op.
     def update
       ::PWMAudio.update
     end

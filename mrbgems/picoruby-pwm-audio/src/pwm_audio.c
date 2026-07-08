@@ -3,9 +3,9 @@
  *
  * 3-channel waveform synthesizer with phase accumulator.
  * Supports sine, square, triangle, and sawtooth waveforms.
- * All computation is platform-independent; the DMA half-transfer IRQ
- * that calls pwm_audio_render_block() lives in
- * ports/rp2350/pwm_audio_port.c.
+ * All computation is platform-independent; the render pump that calls
+ * pwm_audio_render_block() lives in ports/rp2350/pwm_audio_port.c.
+ * See doc/pwm-audio.md for the full design.
  */
 
 #include "../include/pwm_audio.h"
@@ -107,7 +107,7 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
     mix_r += (amp * pan_tab_r[bal]) >> 12;
   }
 
-  /* Soft clip and scale to PWM range (0-499) */
+  /* Soft clip and scale to the PWM level range (0 to PWM_AUDIO_PWM_WRAP) */
   *out_l = (uint16_t)((uint32_t)soft_clip(mix_l) * PWM_AUDIO_PWM_WRAP >> 12);
   *out_r = (uint16_t)((uint32_t)soft_clip(mix_r) * PWM_AUDIO_PWM_WRAP >> 12);
 }
