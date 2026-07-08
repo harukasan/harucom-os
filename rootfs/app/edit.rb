@@ -531,6 +531,7 @@ while running
   old_scroll_top = scroll_top
   old_scroll_left = scroll_left
   split_line = -1 # line index of a newly inserted line (Enter), for the shift redraw
+  join_line = -1  # line index of a merged line (Backspace/Delete join), for the shift redraw
   buffer.clear_dirty
 
   # Process through input method if active
@@ -621,6 +622,7 @@ while running
       buffer.lines.delete_at(buffer.cursor_y + 1)
       buffer.changed = true
       buffer.mark_dirty(:structure)
+      join_line = buffer.cursor_y
     else
       if buffer.cursor_x < buffer.current_line.bytesize
         deleted = Editor.char_at_bytepos(buffer.current_line, buffer.cursor_x)
@@ -667,6 +669,7 @@ while running
     elsif buffer.cursor_y > 0
       undo_record_break(undo_stack)
       undo_record(undo_stack, [:join, buffer.cursor_y - 1, buffer.lines[buffer.cursor_y - 1].bytesize])
+      join_line = buffer.cursor_y - 1
     end
     buffer.put(c.to_buffer_input)
   when Keyboard::UP, Keyboard::DOWN, Keyboard::LEFT, Keyboard::RIGHT
@@ -719,16 +722,16 @@ while running
   # idle frame: this frame draws the cursor line with the previous map and the
   # idle frame recolors whatever changed, keeping expensive recolors (e.g. a
   # typed quote that restyles the rest of the screen) off the keystroke frame.
-  # A single-line split (Enter) is also deferred: its shift redraw below only
-  # touches two lines, so it does not need fresh offsets either. stale_syntax
-  # keeps the bundle the screen was drawn with, so the deferred diff stays
-  # consistent across several edits.
+  # A single-line split (Enter) or join (Backspace/Delete) is also deferred:
+  # their shift redraws below only touch two lines, so they do not need fresh
+  # offsets either. stale_syntax keeps the bundle the screen was drawn with,
+  # so the deferred diff stays consistent across several edits.
   window_rebuilt = false
   sync_base = nil
   if highlight_enabled
     vis_bottom = scroll_top + EDIT_ROWS
     vis_bottom = buffer.lines.length if vis_bottom > buffer.lines.length
-    if (structure_changed && split_line < 0) || scroll_top < window_start || vis_bottom > window_end
+    if (structure_changed && split_line < 0 && join_line < 0) || scroll_top < window_start || vis_bottom > window_end
       sync_base = highlight_stale ? stale_syntax : syntax
       _result, syntax, window_start, window_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
       window_rebuilt = true
@@ -756,6 +759,22 @@ while running
     end
     draw_line(console, buffer, split_row - 1, scroll_top, scroll_left, syntax) if split_row > 0
     draw_line(console, buffer, split_row, scroll_top, scroll_left, syntax)
+  elsif join_line >= 0 && !window_rebuilt && !hscrolled && vdelta >= -1 && vdelta <= 0
+    # Single-line join (Backspace at column 0, Delete at end of line): shift
+    # the rows below the join up instead of redrawing them. When the join
+    # scrolled the viewport up onto the merged line, the rows below already
+    # show the right lines and only the merged line needs drawing; otherwise
+    # the newly exposed bottom row is drawn as well.
+    join_row = join_line - scroll_top
+    if vdelta == 0
+      row = join_row + 1
+      while row < EDIT_ROWS - 1
+        DVI::Text.write_line(EDIT_TOP + row, DVI::Text.read_line(EDIT_TOP + row + 1))
+        row += 1
+      end
+      draw_line(console, buffer, EDIT_ROWS - 1, scroll_top, scroll_left, syntax) if join_row < EDIT_ROWS - 1
+    end
+    draw_line(console, buffer, join_row, scroll_top, scroll_left, syntax)
   elsif dirty == :structure || vdelta.abs >= EDIT_ROWS || (hscrolled && vdelta != 0)
     draw_all_lines(console, buffer, scroll_top, scroll_left, syntax)
   elsif hscrolled
