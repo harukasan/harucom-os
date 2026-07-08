@@ -143,7 +143,7 @@ add_dependencies(picoruby-pwm-audio build_picoruby)
 target_include_directories(picoruby-pwm-audio PUBLIC
     mrbgems/picoruby-pwm-audio/include
 )
-target_link_libraries(picoruby-pwm-audio pico_stdlib hardware_pwm pico_time)
+target_link_libraries(picoruby-pwm-audio pico_stdlib hardware_pwm hardware_dma hardware_clocks pico_time)
 
 # --- Ruby scripts (rootfs/ -> ruby_scripts.h) ---
 # Track all rootfs files (Ruby, YAML, images, etc.) so that edits

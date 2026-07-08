@@ -656,6 +656,9 @@ that wakes WFE on any core:
 ### DMA Architecture
 
 Two-channel CMD-to-DATA DMA with double-buffered descriptor buffers.
+Both channels are registered in the pico-sdk claim bitmap at
+`dvi_start_mode()` so that other subsystems allocating channels with
+`dma_claim_unused_channel()` cannot take them.
 
 - **Channel 0 (CMD)**: reads 4-word descriptors, writes to channel 1's
   Alias 3 registers via RING_WRITE (size = 4, 2^4 = 16 bytes)

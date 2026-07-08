@@ -3,8 +3,9 @@
  *
  * 3-channel waveform synthesizer with phase accumulator.
  * Supports sine, square, triangle, and sawtooth waveforms.
- * All computation is platform-independent; the timer ISR that calls
- * pwm_audio_calc_sample() lives in ports/rp2350/pwm_audio_port.c.
+ * All computation is platform-independent; the render pump that calls
+ * pwm_audio_render_block() lives in ports/rp2350/pwm_audio_port.c.
+ * See doc/pwm-audio.md for the full design.
  */
 
 #include "../include/pwm_audio.h"
@@ -48,7 +49,8 @@ static const uint16_t pan_tab_l[16] = {4095, 4095, 4069, 3992, 3865, 3689, 3467,
 static const uint16_t pan_tab_r[16] = {0,    0,    458,  911,  1352, 1777, 2179, 2553,
                                        2896, 3202, 3467, 3689, 3865, 3992, 4069, 4095};
 
-/* Channel state */
+/* Channel state. Mutated under pwm_audio_lock() so the render IRQ
+ * never sees a half-applied update. */
 static pwm_audio_channel_t channels[PWM_AUDIO_NUM_CHANNELS];
 
 /* Soft clip by tanh approximation (from picoruby-psg) */
@@ -106,7 +108,7 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
     mix_r += (amp * pan_tab_r[bal]) >> 12;
   }
 
-  /* Soft clip and scale to PWM range (0-499) */
+  /* Soft clip and scale to the PWM level range (0 to PWM_AUDIO_PWM_WRAP) */
   *out_l = (uint16_t)((uint32_t)soft_clip(mix_l) * PWM_AUDIO_PWM_WRAP >> 12);
   *out_r = (uint16_t)((uint32_t)soft_clip(mix_r) * PWM_AUDIO_PWM_WRAP >> 12);
 }
@@ -116,58 +118,184 @@ pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
   pwm_audio_channel_t *ch = &channels[channel];
-  ch->phase_increment =
+  uint32_t increment =
       frequency ? (uint32_t)(((uint64_t)frequency << 32) / PWM_AUDIO_SAMPLE_RATE) : 0;
+  uint32_t state = pwm_audio_lock();
+  ch->phase_increment = increment;
   ch->waveform = waveform;
   ch->volume = volume & 0x0F;
   ch->muted = false;
+  pwm_audio_unlock(state);
 }
 
 void
 pwm_audio_set_pan(uint8_t channel, uint8_t pan)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
   channels[channel].pan = pan & 0x0F;
+  pwm_audio_unlock(state);
 }
 
 void
 pwm_audio_set_mute(uint8_t channel, bool mute)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
   channels[channel].muted = mute;
+  pwm_audio_unlock(state);
 }
 
 void
 pwm_audio_stop_channel(uint8_t channel)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
   channels[channel].phase_increment = 0;
   channels[channel].phase = 0;
   channels[channel].muted = true;
+  pwm_audio_unlock(state);
 }
 
 void
 pwm_audio_stop_all(void)
 {
+  /* One critical section so no rendered block sees a partial stop.
+   * The nested lock in pwm_audio_stop_channel is save/restore safe. */
+  uint32_t state = pwm_audio_lock();
   for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
     pwm_audio_stop_channel(i);
   }
+  pwm_audio_unlock(state);
 }
 
-/* --- Ring buffer --- */
+/* --- Sample buffer and block renderer --- */
 
-uint32_t pwm_audio_buf[PWM_AUDIO_BUF_SIZE];
-volatile uint32_t pwm_audio_wr = 0;
-volatile uint32_t pwm_audio_rd = 0;
+/* Aligned to its own byte size so the DMA read ring can wrap on it. */
+uint32_t pwm_audio_buf[PWM_AUDIO_BUF_SIZE]
+    __attribute__((aligned(PWM_AUDIO_BUF_SIZE * 4)));
+bool pwm_audio_l_is_pwm_a = true;
+
+/* Scheduled events, applied at exact sample positions during block
+ * rendering. frequency 0 means a channel stop. The queue is mutated
+ * with pwm_audio_lock() held; the renderer runs in an IRQ, so a
+ * locked writer cannot be interrupted by it. */
+#define PWM_AUDIO_EVENT_MAX 32
+
+typedef struct {
+  uint64_t when;
+  uint32_t sequence; /* schedule order, tie-break for equal when */
+  uint32_t frequency;
+  uint8_t channel;
+  uint8_t waveform;
+  uint8_t volume;
+  bool used;
+} pwm_audio_event_t;
+
+static pwm_audio_event_t events[PWM_AUDIO_EVENT_MAX];
+static uint32_t event_sequence;
+
+bool
+pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
+                   uint8_t waveform, uint8_t volume)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
+  uint32_t state = pwm_audio_lock();
+  for (int i = 0; i < PWM_AUDIO_EVENT_MAX; i++) {
+    if (events[i].used) continue;
+    events[i].when = when;
+    events[i].sequence = event_sequence++;
+    events[i].frequency = frequency;
+    events[i].channel = channel;
+    events[i].waveform = waveform;
+    events[i].volume = volume;
+    events[i].used = true;
+    pwm_audio_unlock(state);
+    return true;
+  }
+  pwm_audio_unlock(state);
+  return false;
+}
 
 void
-pwm_audio_fill_buffer(void)
+pwm_audio_cancel_scheduled(uint8_t channel)
 {
-  /* Fill up to half-buffer ahead of the read pointer */
-  while ((pwm_audio_wr - pwm_audio_rd) < PWM_AUDIO_BUF_SIZE - 1) {
-    uint16_t l, r;
-    pwm_audio_calc_sample(&l, &r);
-    pwm_audio_buf[pwm_audio_wr & PWM_AUDIO_BUF_MASK] = ((uint32_t)l << 16) | r;
-    pwm_audio_wr++;
+  uint32_t state = pwm_audio_lock();
+  for (int i = 0; i < PWM_AUDIO_EVENT_MAX; i++) {
+    if (events[i].used && events[i].channel == channel) {
+      events[i].used = false;
+    }
+  }
+  pwm_audio_unlock(state);
+}
+
+/* Order events by position, then by schedule order for ties, so
+ * same-sample events (e.g. a stop and a retrigger) apply as the
+ * caller issued them. */
+static bool
+event_is_before(const pwm_audio_event_t *a, const pwm_audio_event_t *b)
+{
+  if (a->when != b->when) return a->when < b->when;
+  return (int32_t)(a->sequence - b->sequence) < 0;
+}
+
+static void
+apply_event(const pwm_audio_event_t *event)
+{
+  if (event->frequency) {
+    pwm_audio_set_tone(event->channel, event->frequency, event->waveform, event->volume);
+  } else {
+    pwm_audio_stop_channel(event->channel);
+  }
+}
+
+/* Pack an L/R pair in PWM CC register format: channel A in the low
+ * half-word, channel B in the high half-word. */
+static inline uint32_t
+pack_cc(uint16_t l, uint16_t r)
+{
+  if (pwm_audio_l_is_pwm_a) {
+    return ((uint32_t)r << 16) | l;
+  }
+  return ((uint32_t)l << 16) | r;
+}
+
+void
+pwm_audio_render_block(uint64_t start_sample, uint32_t *dst, uint32_t count)
+{
+  uint32_t i = 0;
+  while (i < count) {
+    uint64_t now = start_sample + i;
+    uint32_t run = count - i;
+    /* Apply due events oldest first so an overdue tone/stop pair for
+     * one channel resolves as scheduled. */
+    for (;;) {
+      pwm_audio_event_t *due = NULL;
+      for (int e = 0; e < PWM_AUDIO_EVENT_MAX; e++) {
+        pwm_audio_event_t *event = &events[e];
+        if (!event->used || event->when > now) continue;
+        if (!due || event_is_before(event, due)) due = event;
+      }
+      if (!due) break;
+      apply_event(due);
+      due->used = false;
+    }
+    /* Shorten the run to the next event inside this block so it lands
+     * on its exact sample. */
+    for (int e = 0; e < PWM_AUDIO_EVENT_MAX; e++) {
+      pwm_audio_event_t *event = &events[e];
+      if (!event->used) continue;
+      if (event->when < start_sample + count) {
+        uint32_t until = (uint32_t)(event->when - now);
+        if (until < run) run = until;
+      }
+    }
+    while (run > 0) {
+      uint16_t l, r;
+      pwm_audio_calc_sample(&l, &r);
+      dst[i] = pack_cc(l, r);
+      i++;
+      run--;
+    }
   }
 }

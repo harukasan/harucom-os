@@ -1,14 +1,18 @@
-# Board::PWMAudio — PWM waveform synthesizer
+# Board::PWMAudio: PWM waveform synthesizer
 #
 # 3-channel audio output using PWM on the board's audio pins.
 # Supports sine, square, triangle, and sawtooth waveforms.
-# Runs on Core 0 timer ISR (22,050 Hz sample rate, 250 kHz carrier).
+# The output is a wrap-paced DMA stream (50,000 samples/s) rendered
+# autonomously in C, so Ruby only changes tone parameters or
+# schedules events. See doc/pwm-audio.md for the design.
 #
 # Usage:
 #   audio = Board::PWMAudio.new
 #   audio.tone(0, 440, waveform: Board::PWMAudio::SINE)
-#   audio.update       # call every loop iteration to fill sample buffer
 #   audio.stop(0)
+#   at = audio.sample_clock + Board::PWMAudio::SAMPLE_RATE   # 1s ahead
+#   audio.tone_at(at, 0, 880)
+#   audio.stop_at(at + 4410, 0)
 #   audio.deinit
 
 module Board
@@ -16,6 +20,8 @@ module Board
   AUDIO_R_PIN = 25
 
   class PWMAudio
+    SAMPLE_RATE = ::PWMAudio::SAMPLE_RATE
+
     SINE     = ::PWMAudio::SINE
     SQUARE   = ::PWMAudio::SQUARE
     TRIANGLE = ::PWMAudio::TRIANGLE
@@ -59,9 +65,32 @@ module Board
       ::PWMAudio.stop_all
     end
 
-    # Fill the sample ring buffer. Call every main loop iteration.
+    # Kept for compatibility: the engine renders its own buffer in C,
+    # so this is a no-op.
     def update
       ::PWMAudio.update
+    end
+
+    # Current playback position in samples (monotonic, SAMPLE_RATE/s).
+    def sample_clock
+      ::PWMAudio.sample_clock
+    end
+
+    # Schedule a tone start at an absolute sample position. Returns
+    # false when the event queue is full.
+    def tone_at(sample, channel, frequency, waveform: SQUARE, volume: 15)
+      ::PWMAudio.tone_at(sample, channel, frequency, waveform, volume)
+    end
+
+    # Schedule a channel stop at an absolute sample position.
+    def stop_at(sample, channel)
+      ::PWMAudio.stop_at(sample, channel)
+    end
+
+    # Drop scheduled events for a channel (call before retriggering so
+    # a stale scheduled stop cannot cut the new note).
+    def cancel_scheduled(channel)
+      ::PWMAudio.cancel_scheduled(channel)
     end
 
     # Play a tone for a given duration, then stop. Blocking.
