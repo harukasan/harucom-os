@@ -160,30 +160,42 @@ pump_callback(repeating_timer_t *t)
   return true;
 }
 
-/* Rewind the rendered-ahead region to just in front of the DMA
- * reader and re-render it, so an immediate parameter change becomes
- * audible after AUDIO_FLUSH_GUARD samples instead of after the full
- * rendered lead (up to one buffer, about 41 ms). The refill runs in
- * short bites with interrupts enabled between them, so USB and timer
- * IRQ latency stays bounded; the pump IRQ may interleave and simply
- * continues from the shared render position. */
+/* Rewinding the rendered-ahead region to just in front of the DMA
+ * reader makes an immediate parameter change audible after
+ * AUDIO_FLUSH_GUARD samples instead of after the full rendered lead
+ * (up to one buffer, about 41 ms). The rewind runs before the state
+ * change (under the same lock) so the sources step back along their
+ * old trajectories; the refill runs after it, in short bites with
+ * interrupts enabled between them, so USB and timer IRQ latency
+ * stays bounded. The pump IRQ may interleave with the refill and
+ * simply continues from the shared render position. */
 #define AUDIO_FLUSH_GUARD 192 /* ~3.8 ms at 50 kHz */
 #define AUDIO_FLUSH_SPAN  256
 
 void
-pwm_audio_flush_rendered(void)
+pwm_audio_rewind_lead(void)
 {
   if (!audio_running) return;
-
   uint32_t state = save_and_disable_interrupts();
   uint64_t played = accumulate_played();
   uint64_t restart = played + AUDIO_FLUSH_GUARD;
-  if (restart < render_position) render_position = restart;
+  if (restart < render_position) {
+    /* Step the sources back with the timeline, so the re-rendered
+     * span continues from the rewind point without a discontinuity
+     * (an oscillator phase jump clicks; a sample would skip). */
+    pwm_audio_rewind_sources((uint32_t)(render_position - restart));
+    render_position = restart;
+  }
   restore_interrupts(state);
+}
 
+void
+pwm_audio_refill_lead(void)
+{
+  if (!audio_running) return;
   for (;;) {
-    state = save_and_disable_interrupts();
-    played = accumulate_played();
+    uint32_t state = save_and_disable_interrupts();
+    uint64_t played = accumulate_played();
     uint64_t limit = played + PWM_AUDIO_BUF_SIZE - AUDIO_RENDER_GUARD;
     if (render_position >= limit) {
       restore_interrupts(state);

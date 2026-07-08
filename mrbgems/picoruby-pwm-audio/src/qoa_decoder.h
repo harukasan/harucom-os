@@ -35,6 +35,7 @@ typedef struct {
   uint32_t slice_pos; /* byte offset of the next slice */
   uint32_t frame_samples_left;  /* per channel */
   uint32_t total_samples_left;  /* per channel */
+  uint32_t total_samples;       /* per channel, from the file header */
   uint8_t channels;
   /* LMS predictor per channel; 32-bit like the reference
    * implementation (weights can exceed the int16 range between
@@ -62,6 +63,13 @@ void qoa_decoder_reset(qoa_decoder_t *decoder, pwm_audio_byte_source_t *source,
  * both sides. Returns false at the end of the stream or on malformed
  * data. */
 bool qoa_decoder_next(qoa_decoder_t *decoder, int16_t *left, int16_t *right);
+
+/* Position the decoder so the next qoa_decoder_next returns the
+ * sample at sample_index. Frame headers are walked from the start
+ * (cheap) and slices are re-decoded only inside the target frame,
+ * since each frame carries its own LMS snapshot. Returns false on
+ * malformed data or when the index is out of range. */
+bool qoa_decoder_seek(qoa_decoder_t *decoder, uint32_t sample_index);
 
 #ifdef __cplusplus
 }

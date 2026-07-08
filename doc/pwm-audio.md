@@ -436,12 +436,17 @@ buffer, so the immediate channel verbs (tone, play, stop, pan, mute,
 and source attachment) rewind the rendered-ahead region to just in
 front of the reader and re-render it with the new state. The change
 becomes audible after a small guard (about 4 ms) while the underrun
-protection stays at the full buffer. The refill runs in short bites
-with interrupts enabled between them, so IRQ latency stays bounded.
-One caveat: scheduled events already applied inside the rewound span
-shift to its start, so immediate verbs should not race in-flight
-scheduled events; the scheduled path (tone_at, play_at, stop_at) is
-unaffected and stays sample accurate.
+protection stays at the full buffer. Every active source steps back
+along the timeline with the rewind, before the state change applies:
+oscillator phases rewind exactly, and sample positions re-seek (QOA
+by frame, since each frame carries its own predictor snapshot), so
+the re-rendered span continues seamlessly from the rewind point
+instead of jumping to where the discarded rendering had advanced.
+The refill runs in short bites with interrupts enabled between them,
+so IRQ latency stays bounded. One caveat: scheduled events already
+applied inside the rewound span shift to its start, so immediate
+verbs should not race in-flight scheduled events; the scheduled path
+(tone_at, play_at, stop_at) is unaffected and stays sample accurate.
 
 ### Mixer
 
