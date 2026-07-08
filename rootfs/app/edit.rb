@@ -400,6 +400,40 @@ def draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, synt
   end
 end
 
+# Returns the highlight map bytes covering the line at line_index, or nil
+# when the line is outside the parsed window.
+def highlight_slice(syntax, line_index, line)
+  return nil unless syntax
+  rel = line_index - syntax[2]
+  offsets = syntax[1]
+  return nil if rel < 0 || rel >= offsets.length
+  syntax[0].byteslice(offsets[rel], line.bytesize)
+end
+
+# Redraw the visible lines whose highlight changed between two parsed
+# windows (after a window rebuild). Lines whose highlight bytes are
+# identical render the same and are skipped, so a rebuild for pure
+# scrolling usually redraws nothing, while an edit that recolors following
+# lines (e.g. an opened string literal) updates exactly those lines.
+# Rows outside [first_row, last_row) and skip_row are drawn elsewhere in
+# the same frame. Returns true if any line was drawn.
+def sync_highlight_changes(console, buffer, scroll_top, scroll_left, first_row, last_row, skip_row, old_syntax, syntax)
+  drawn = false
+  row = first_row
+  while row < last_row
+    if row != skip_row
+      line_index = scroll_top + row
+      line = buffer.lines[line_index]
+      if line && highlight_slice(old_syntax, line_index, line) != highlight_slice(syntax, line_index, line)
+        draw_line(console, buffer, row, scroll_top, scroll_left, syntax)
+        drawn = true
+      end
+    end
+    row += 1
+  end
+  drawn
+end
+
 # -- Viewport scrolling --
 
 def adjust_vertical_scroll(buffer, scroll_top)
@@ -652,27 +686,33 @@ while running
     vis_bottom = scroll_top + EDIT_ROWS
     vis_bottom = buffer.lines.length if vis_bottom > buffer.lines.length
     if content_changed || scroll_top < window_start || vis_bottom > window_end
+      old_syntax = syntax
       _result, syntax, window_start, window_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
       window_rebuilt = true
     end
   end
 
-  # A window rebuilt for scrolling (not editing) changes the highlight of every
-  # visible line, so it needs a full redraw rather than the differential path.
-  if dirty == :structure || vdelta.abs >= EDIT_ROWS || (hscrolled && vdelta != 0) ||
-     (window_rebuilt && !content_changed)
+  if dirty == :structure || vdelta.abs >= EDIT_ROWS || (hscrolled && vdelta != 0)
     draw_all_lines(console, buffer, scroll_top, scroll_left, syntax)
   elsif hscrolled
+    # A rebuild here only happens for content edits, and draw_hscroll already
+    # redraws every line that can be visible in either viewport.
     draw_hscroll(console, buffer, scroll_top, old_scroll_left, scroll_left, syntax)
-  elsif vdelta != 0
-    scroll_view(console, buffer, scroll_top, scroll_left, vdelta, syntax)
-    if dirty == :content
-      screen_row = buffer.cursor_y - scroll_top
-      draw_line(console, buffer, screen_row, scroll_top, scroll_left, syntax)
+  else
+    cursor_row = dirty == :content ? buffer.cursor_y - scroll_top : -1
+    if vdelta != 0
+      scroll_view(console, buffer, scroll_top, scroll_left, vdelta, syntax)
     end
-  elsif dirty == :content
-    screen_row = buffer.cursor_y - scroll_top
-    draw_line(console, buffer, screen_row, scroll_top, scroll_left, syntax)
+    # After a rebuild, redraw exactly the lines whose highlight bytes changed.
+    # Rows exposed by scroll_view and the cursor row are drawn separately.
+    if window_rebuilt
+      first_row = vdelta < 0 ? -vdelta : 0
+      last_row = vdelta > 0 ? EDIT_ROWS - vdelta : EDIT_ROWS
+      sync_highlight_changes(console, buffer, scroll_top, scroll_left, first_row, last_row, cursor_row, old_syntax, syntax)
+    end
+    if cursor_row >= 0
+      draw_line(console, buffer, cursor_row, scroll_top, scroll_left, syntax)
+    end
   end
 
   draw_status(console, filepath, buffer, scroll_top, message)
