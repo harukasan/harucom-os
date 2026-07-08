@@ -398,8 +398,16 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
     int32_t signal_l, signal_r;
 
     /* Slew the gain toward its target, then release a stopped source
-     * once the fade reaches silence. */
-    uint16_t target = (ch->muted || ch->stopping) ? 0 : vol_tab[ch->volume & 0x0F];
+     * once the fade reaches silence. An idle source keeps the target
+     * at zero; without this the gain would climb back while silent
+     * and the next start would begin at full level instead of fading
+     * in. A playing source keeps its target, so a legato set_tone
+     * does not dip. */
+    bool source_active = ch->source == PWM_AUDIO_SOURCE_SAMPLE
+                             ? sample_streams[i].playing
+                             : ch->phase_increment != 0;
+    uint16_t target =
+        (ch->muted || ch->stopping || !source_active) ? 0 : vol_tab[ch->volume & 0x0F];
     uint16_t gain = ch->gain_current;
     if (gain != target) {
       if (gain < target) {
