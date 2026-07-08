@@ -1,18 +1,22 @@
-# Board::PWMAudio: PWM waveform synthesizer
+# Board::PWMAudio: PWM audio output on the board's audio pins
 #
-# 3-channel audio output using PWM on the board's audio pins.
-# Supports sine, square, triangle, and sawtooth waveforms.
-# The output is a wrap-paced DMA stream (50,000 samples/s) rendered
-# autonomously in C, so Ruby only changes tone parameters or
-# schedules events. See doc/pwm-audio.md for the design.
+# CHANNELS mixer channels, each playing an oscillator (sine, square,
+# triangle, sawtooth) or a QOA/WAV sample (mono or stereo), held in
+# memory or streamed from a file on flash (PWMAudio::Stream). The
+# output is a wrap-paced DMA stream (50,000 samples/s) rendered
+# autonomously in C, so Ruby only changes parameters or schedules
+# events. See doc/pwm-audio.md for the design.
 #
 # Usage:
 #   audio = Board::PWMAudio.new
 #   audio.tone(0, 440, waveform: Board::PWMAudio::SINE)
 #   audio.stop(0)
-#   at = audio.sample_clock + Board::PWMAudio::SAMPLE_RATE   # 1s ahead
-#   audio.tone_at(at, 0, 880)
-#   audio.stop_at(at + 4410, 0)
+#
+#   kick = PWMAudio::Sample.new(File.open("/data/kick.qoa", "r") { |f| f.read })
+#   ch = audio.channel(3)
+#   ch.source = kick
+#   ch.play
+#   ch.play_at(audio.sample_clock + Board::PWMAudio::SAMPLE_RATE / 2)
 #   audio.deinit
 
 module Board
@@ -21,6 +25,7 @@ module Board
 
   class PWMAudio
     SAMPLE_RATE = ::PWMAudio::SAMPLE_RATE
+    CHANNELS    = ::PWMAudio::CHANNELS
 
     SINE     = ::PWMAudio::SINE
     SQUARE   = ::PWMAudio::SQUARE
@@ -40,7 +45,13 @@ module Board
       ::PWMAudio.init(l_pin, r_pin)
     end
 
-    # Play a tone on a channel (0-2).
+    # Channel object (PWMAudio::Channel) from the shared pool; holds
+    # a Sample or Tone source and plays it (see doc/pwm-audio.md).
+    def channel(index)
+      ::PWMAudio.channel(index)
+    end
+
+    # Play a tone on a channel (0...CHANNELS).
     def tone(channel, frequency, waveform: SQUARE, volume: 15)
       ::PWMAudio.tone(channel, frequency, waveform, volume)
     end
@@ -63,12 +74,6 @@ module Board
     # Stop all channels.
     def stop_all
       ::PWMAudio.stop_all
-    end
-
-    # Kept for compatibility: the engine renders its own buffer in C,
-    # so this is a no-op.
-    def update
-      ::PWMAudio.update
     end
 
     # Current playback position in samples (monotonic, SAMPLE_RATE/s).

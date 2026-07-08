@@ -152,6 +152,5 @@ loop do
   # Status display
   DVI::Text.put_string(0, 8, "Octave: #{octave}  Waveform: #{WAVEFORM_NAMES[waveform_idx]}       ", LABEL_ATTR)
 
-  audio.update
   DVI::Text.commit
 end

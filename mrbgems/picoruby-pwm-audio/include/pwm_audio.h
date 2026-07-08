@@ -19,7 +19,12 @@ extern "C" {
 #define PWM_AUDIO_SAMPLE_RATE  50000
 #define PWM_AUDIO_CARRIER_HZ   250000
 #define PWM_AUDIO_PWM_WRAP     999
-#define PWM_AUDIO_NUM_CHANNELS 3
+
+/* Mixer channels. Each channel plays one source at a time: an
+ * oscillator (set_tone) or a QOA or WAV sample (set_sample + play).
+ * stop/pan/mute and the scheduled variants work on any channel
+ * regardless of its source. */
+#define PWM_AUDIO_NUM_CHANNELS 8
 
 typedef enum {
   PWM_AUDIO_WAVE_SINE = 0,
@@ -27,15 +32,6 @@ typedef enum {
   PWM_AUDIO_WAVE_TRIANGLE,
   PWM_AUDIO_WAVE_SAWTOOTH,
 } pwm_audio_waveform_t;
-
-typedef struct {
-  uint32_t phase;
-  uint32_t phase_increment;
-  uint8_t waveform; /* pwm_audio_waveform_t */
-  uint8_t volume;   /* 0-15 */
-  uint8_t pan;      /* 0-15: 0=L, 8=center, 15=R */
-  bool muted;
-} pwm_audio_channel_t;
 
 /* Sample buffer: one ring played end to end by a single endless DMA
  * channel (read ring wrap), so the transfer cadence has no seams.
@@ -60,21 +56,64 @@ void pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r);
 void pwm_audio_render_block(uint64_t start_sample, uint32_t *dst, uint32_t count);
 
 /* Channel control (immediate; applied to samples rendered after the
- * call) */
+ * call). set_tone switches the channel's source to the oscillator and
+ * starts it; stop/pan/mute work on either source. Starts, stops, and
+ * mute changes fade over a few milliseconds (a source's instantaneous
+ * value is generally nonzero when cut, so an instant level change
+ * would click); a stop releases its source once the fade reaches
+ * silence. */
 void pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_t volume);
 void pwm_audio_set_pan(uint8_t channel, uint8_t pan);
 void pwm_audio_set_mute(uint8_t channel, bool mute);
 void pwm_audio_stop_channel(uint8_t channel);
 void pwm_audio_stop_all(void);
 
+/* Switch the channel's source to a QOA or 16-bit PCM WAV sample, mono
+ * or stereo (see doc/pwm-audio.md). The format is detected from the
+ * header. Data is pulled on demand during rendering (QOA in slices of
+ * 20 samples, WAV frame by frame), so only the file bytes are held in
+ * memory. The data pointer must stay valid while attached; the mruby
+ * binding pins the backing String. Stops the channel but does not
+ * start playback. Returns false when the data is not a supported QOA
+ * or WAV stream. */
+bool pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length);
+
+/* One-shot playback of the channel's sample from the beginning (a
+ * retrigger restarts it). No-op when the channel has no sample. */
+void pwm_audio_play(uint8_t channel, uint8_t volume);
+
+/* Parse a QOA or WAV header without touching any channel; used to
+ * validate sample data up front. frames counts per channel. */
+bool pwm_audio_sample_info(const uint8_t *data, uint32_t length, uint32_t *samplerate,
+                           uint32_t *frames, uint32_t *channels);
+
+/* Like set_sample, but the bytes come from a list of memory extents
+ * instead of one buffer: packed little-endian (u32 address, u32
+ * length) pairs covering the file in order, e.g. the flash blocks of
+ * a LittleFS file mapped into XIP (FlashFile.extents). Playback reads
+ * the extents directly, so a track larger than RAM streams with no
+ * buffer and no task; the file must not be rewritten while attached.
+ * The extent list must stay valid while attached; the mruby binding
+ * pins the backing String. */
+bool pwm_audio_set_stream(uint8_t channel, const uint8_t *extent_pairs, uint32_t extent_count,
+                          uint32_t total_length);
+
+/* sample_info over an extent list. */
+bool pwm_audio_stream_info(const uint8_t *extent_pairs, uint32_t extent_count,
+                           uint32_t total_length, uint32_t *samplerate, uint32_t *frames,
+                           uint32_t *channels);
+
 /* Sample-accurate scheduling. when is an absolute position on the
- * playback timeline (compare with pwm_audio_sample_clock()). frequency
- * 0 schedules a channel stop. Returns false when the queue is full. */
+ * playback timeline (compare with pwm_audio_sample_clock()).
+ * pwm_audio_schedule starts a tone (frequency 0 schedules a stop);
+ * pwm_audio_play_schedule triggers the channel's sample. Both return
+ * false when the queue is full. */
 bool pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
                         uint8_t waveform, uint8_t volume);
+bool pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume);
 
-/* Drop scheduled events for one channel (a retrigger must not be cut
- * by a stale scheduled stop). */
+/* Drop all scheduled events for one channel (a retrigger must not be
+ * cut by a stale scheduled stop). */
 void pwm_audio_cancel_scheduled(uint8_t channel);
 
 /* Platform-specific: current playback position in samples (monotonic,
@@ -90,6 +129,12 @@ uint64_t pwm_audio_sample_clock(void);
  * toward negative without recovery. */
 void pwm_audio_stats(int32_t *min_lead, uint32_t *max_gap_us, int32_t *drift_now,
                      int32_t *drift_min);
+
+/* The output idles at mid-scale and signals mix around it, so channel
+ * starts and stops never move the DC level. This ramps the bias
+ * itself up (init) or down (deinit, before teardown); the fade takes
+ * about 10 ms of rendered output. */
+void pwm_audio_bias_fade(bool enable);
 
 /* Platform-specific: short critical section guarding the event queue
  * and channel state against the render IRQ. */

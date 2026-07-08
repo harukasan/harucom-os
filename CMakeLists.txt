@@ -137,6 +137,8 @@ target_compile_options(picoruby-dvi PRIVATE -O2)
 # --- PWM Audio library ---
 add_library(picoruby-pwm-audio
     mrbgems/picoruby-pwm-audio/src/pwm_audio.c
+    mrbgems/picoruby-pwm-audio/src/qoa_decoder.c
+    mrbgems/picoruby-pwm-audio/src/byte_source.c
     mrbgems/picoruby-pwm-audio/ports/rp2350/pwm_audio_port.c
 )
 add_dependencies(picoruby-pwm-audio build_picoruby)
@@ -176,6 +178,7 @@ add_executable(harucom_os
     ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
     mrbgems/harucom-os-dict/ports/rp2350/dict_region.c
+    mrbgems/picoruby-flash-file/ports/rp2350/flash_file.c
 )
 
 add_dependencies(harucom_os build_picoruby ruby_scripts_gen)
@@ -231,6 +234,7 @@ target_include_directories(harucom_os PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/harucom-os-dict/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-pwm-audio/include
+    ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-flash-file/include
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems/picoruby-dvi/include
 )
 
