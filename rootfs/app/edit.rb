@@ -530,6 +530,7 @@ while running
   old_dirty = buffer.dirty
   old_scroll_top = scroll_top
   old_scroll_left = scroll_left
+  split_line = -1 # line index of a newly inserted line (Enter), for the shift redraw
   buffer.clear_dirty
 
   # Process through input method if active
@@ -656,6 +657,7 @@ while running
         end
       end
     end
+    split_line = buffer.cursor_y
   when Keyboard::BSPACE
     redo_stack.clear
     if buffer.cursor_x > 0
@@ -717,14 +719,16 @@ while running
   # idle frame: this frame draws the cursor line with the previous map and the
   # idle frame recolors whatever changed, keeping expensive recolors (e.g. a
   # typed quote that restyles the rest of the screen) off the keystroke frame.
-  # stale_syntax keeps the bundle the screen was drawn with, so the deferred
-  # diff stays consistent across several edits.
+  # A single-line split (Enter) is also deferred: its shift redraw below only
+  # touches two lines, so it does not need fresh offsets either. stale_syntax
+  # keeps the bundle the screen was drawn with, so the deferred diff stays
+  # consistent across several edits.
   window_rebuilt = false
   sync_base = nil
   if highlight_enabled
     vis_bottom = scroll_top + EDIT_ROWS
     vis_bottom = buffer.lines.length if vis_bottom > buffer.lines.length
-    if structure_changed || scroll_top < window_start || vis_bottom > window_end
+    if (structure_changed && split_line < 0) || scroll_top < window_start || vis_bottom > window_end
       sync_base = highlight_stale ? stale_syntax : syntax
       _result, syntax, window_start, window_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
       window_rebuilt = true
@@ -735,7 +739,24 @@ while running
     end
   end
 
-  if dirty == :structure || vdelta.abs >= EDIT_ROWS || (hscrolled && vdelta != 0)
+  if split_line >= 0 && !window_rebuilt && !hscrolled && vdelta >= 0 && vdelta <= 1
+    # Single-line split (Enter): shift the rows below the split on screen
+    # instead of redrawing them; their text and colors move unchanged. Only
+    # the truncated line and the new line are drawn, using the previous map,
+    # and the deferred idle re-parse corrects the colors.
+    split_row = split_line - scroll_top
+    if vdelta == 1
+      DVI::Text.scroll_up(1, EDIT_ATTR)
+    else
+      row = EDIT_ROWS - 1
+      while row > split_row
+        DVI::Text.write_line(EDIT_TOP + row, DVI::Text.read_line(EDIT_TOP + row - 1))
+        row -= 1
+      end
+    end
+    draw_line(console, buffer, split_row - 1, scroll_top, scroll_left, syntax) if split_row > 0
+    draw_line(console, buffer, split_row, scroll_top, scroll_left, syntax)
+  elsif dirty == :structure || vdelta.abs >= EDIT_ROWS || (hscrolled && vdelta != 0)
     draw_all_lines(console, buffer, scroll_top, scroll_left, syntax)
   elsif hscrolled
     # A rebuild here only happens for content edits, and draw_hscroll already
