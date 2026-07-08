@@ -9,6 +9,7 @@
  */
 
 #include "../include/pwm_audio.h"
+#include "qoa_decoder.h"
 #include <string.h>
 
 #if defined(PICORB_VM_MRUBY)
@@ -49,8 +50,25 @@ static const uint16_t pan_tab_l[16] = {4095, 4095, 4069, 3992, 3865, 3689, 3467,
 static const uint16_t pan_tab_r[16] = {0,    0,    458,  911,  1352, 1777, 2179, 2553,
                                        2896, 3202, 3467, 3689, 3865, 3992, 4069, 4095};
 
-/* Channel state. Mutated under pwm_audio_lock() so the render IRQ
- * never sees a half-applied update. */
+/* Channel state: the oscillator plus the properties shared by both
+ * source kinds (volume, pan, mute). The sample stream state lives in
+ * sample_streams[] below. Mutated under pwm_audio_lock() so the
+ * render IRQ never sees a half-applied update. */
+typedef enum {
+  PWM_AUDIO_SOURCE_OSC = 0,
+  PWM_AUDIO_SOURCE_SAMPLE,
+} pwm_audio_source_t;
+
+typedef struct {
+  uint32_t phase;
+  uint32_t phase_increment;
+  uint8_t waveform; /* pwm_audio_waveform_t */
+  uint8_t volume;   /* 0-15 */
+  uint8_t pan;      /* 0-15: 0=L, 8=center, 15=R */
+  uint8_t source;   /* pwm_audio_source_t */
+  bool muted;
+} pwm_audio_channel_t;
+
 static pwm_audio_channel_t channels[PWM_AUDIO_NUM_CHANNELS];
 
 /* Soft clip by tanh approximation (from picoruby-psg) */
@@ -86,6 +104,95 @@ generate_waveform(pwm_audio_channel_t *ch)
   }
 }
 
+/* --- QOA sample playback ---
+ *
+ * A channel whose source is a sample streams one mono QOA file. The
+ * format decoding lives in qoa_decoder.c; this layer adds the linear
+ * resampler to the output rate and the one-shot playback state.
+ * Slices are decoded on demand while mixing, so only the compressed
+ * bytes are held in memory and the PSRAM read rate stays tiny. A
+ * retrigger restarts the stream from the file start. */
+
+typedef struct {
+  /* loaded sample (compressed bytes, owned by the caller) */
+  const uint8_t *data;
+  uint32_t length;
+  uint32_t total_samples;
+  uint32_t phase_increment; /* 16.16 source samples per output sample */
+  qoa_decoder_t decoder;
+  /* linear resampler to the output rate */
+  uint32_t phase; /* 16.16 position between prev and next */
+  int16_t prev;
+  int16_t next;
+  bool playing;
+} pwm_audio_sample_stream_t;
+
+static pwm_audio_sample_stream_t sample_streams[PWM_AUDIO_NUM_CHANNELS];
+
+/* Advance the resampler window by one source sample. */
+static bool
+stream_pull(pwm_audio_sample_stream_t *stream)
+{
+  int16_t sample;
+  if (!qoa_decoder_next(&stream->decoder, &sample)) return false;
+  stream->prev = stream->next;
+  stream->next = sample;
+  return true;
+}
+
+bool
+pwm_audio_sample_info(const uint8_t *data, uint32_t length, uint32_t *samplerate,
+                      uint32_t *frames)
+{
+  return qoa_decoder_parse_header(data, length, samplerate, frames);
+}
+
+bool
+pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
+  uint32_t samplerate, frames;
+  if (!qoa_decoder_parse_header(data, length, &samplerate, &frames)) return false;
+  uint32_t state = pwm_audio_lock();
+  pwm_audio_sample_stream_t *stream = &sample_streams[channel];
+  stream->playing = false;
+  stream->data = data;
+  stream->length = length;
+  stream->total_samples = frames;
+  stream->phase_increment = (uint32_t)(((uint64_t)samplerate << 16) / PWM_AUDIO_SAMPLE_RATE);
+  channels[channel].source = PWM_AUDIO_SOURCE_SAMPLE;
+  channels[channel].phase_increment = 0; /* silence the oscillator */
+  pwm_audio_unlock(state);
+  return true;
+}
+
+/* Restart the stream from the file start. Runs under the lock; also
+ * called by the event queue inside the render IRQ. */
+static void
+play_locked(uint8_t channel, uint8_t volume)
+{
+  pwm_audio_sample_stream_t *stream = &sample_streams[channel];
+  if (channels[channel].source != PWM_AUDIO_SOURCE_SAMPLE || stream->data == NULL) return;
+  qoa_decoder_reset(&stream->decoder, stream->data, stream->length, stream->total_samples);
+  stream->phase = 0;
+  stream->prev = 0;
+  stream->next = 0;
+  channels[channel].volume = volume & 0x0F;
+  channels[channel].muted = false;
+  /* Prime the resampler: the first outputs interpolate from silence
+   * into the first source sample. */
+  stream->playing = stream_pull(stream);
+}
+
+void
+pwm_audio_play(uint8_t channel, uint8_t volume)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
+  play_locked(channel, volume);
+  pwm_audio_unlock(state);
+}
+
 void
 pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
 {
@@ -93,12 +200,34 @@ pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r)
 
   for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
     pwm_audio_channel_t *ch = &channels[i];
+    uint32_t amp;
 
-    if (ch->muted || !ch->phase_increment) continue;
+    if (ch->muted) continue;
 
-    ch->phase += ch->phase_increment;
+    if (ch->source == PWM_AUDIO_SOURCE_SAMPLE) {
+      pwm_audio_sample_stream_t *stream = &sample_streams[i];
+      if (!stream->playing) continue;
 
-    uint32_t amp = generate_waveform(ch);
+      int32_t sample =
+          stream->prev +
+          (int32_t)(((int64_t)(stream->next - stream->prev) * (int32_t)stream->phase) >> 16);
+      /* Map signed 16-bit to the unipolar 12-bit mix domain (same
+       * convention as the tone waveforms). */
+      amp = (uint32_t)(sample + 32768) >> 4;
+
+      stream->phase += stream->phase_increment;
+      while (stream->phase >= 0x10000) {
+        stream->phase -= 0x10000;
+        if (!stream_pull(stream)) {
+          stream->playing = false;
+          break;
+        }
+      }
+    } else {
+      if (!ch->phase_increment) continue;
+      ch->phase += ch->phase_increment;
+      amp = generate_waveform(ch);
+    }
 
     uint32_t gain = vol_tab[ch->volume & 0x0F];
     amp = (amp * gain) >> 12;
@@ -121,6 +250,8 @@ pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_
   uint32_t increment =
       frequency ? (uint32_t)(((uint64_t)frequency << 32) / PWM_AUDIO_SAMPLE_RATE) : 0;
   uint32_t state = pwm_audio_lock();
+  ch->source = PWM_AUDIO_SOURCE_OSC;
+  sample_streams[channel].playing = false;
   ch->phase_increment = increment;
   ch->waveform = waveform;
   ch->volume = volume & 0x0F;
@@ -154,6 +285,7 @@ pwm_audio_stop_channel(uint8_t channel)
   channels[channel].phase_increment = 0;
   channels[channel].phase = 0;
   channels[channel].muted = true;
+  sample_streams[channel].playing = false;
   pwm_audio_unlock(state);
 }
 
@@ -161,7 +293,7 @@ void
 pwm_audio_stop_all(void)
 {
   /* One critical section so no rendered block sees a partial stop.
-   * The nested lock in pwm_audio_stop_channel is save/restore safe. */
+   * The nested locks in the per-channel stops are save/restore safe. */
   uint32_t state = pwm_audio_lock();
   for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
     pwm_audio_stop_channel(i);
@@ -177,15 +309,22 @@ uint32_t pwm_audio_buf[PWM_AUDIO_BUF_SIZE]
 bool pwm_audio_l_is_pwm_a = true;
 
 /* Scheduled events, applied at exact sample positions during block
- * rendering. frequency 0 means a channel stop. The queue is mutated
- * with pwm_audio_lock() held; the renderer runs in an IRQ, so a
- * locked writer cannot be interrupted by it. */
+ * rendering. Tone events with frequency 0 mean a channel stop; play
+ * events trigger the channel's sample. The queue is mutated with
+ * pwm_audio_lock() held; the renderer runs in an IRQ, so a locked
+ * writer cannot be interrupted by it. */
 #define PWM_AUDIO_EVENT_MAX 32
+
+enum {
+  PWM_AUDIO_EVENT_TONE = 0,
+  PWM_AUDIO_EVENT_PLAY,
+};
 
 typedef struct {
   uint64_t when;
   uint32_t sequence; /* schedule order, tie-break for equal when */
   uint32_t frequency;
+  uint8_t kind;
   uint8_t channel;
   uint8_t waveform;
   uint8_t volume;
@@ -195,17 +334,17 @@ typedef struct {
 static pwm_audio_event_t events[PWM_AUDIO_EVENT_MAX];
 static uint32_t event_sequence;
 
-bool
-pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
-                   uint8_t waveform, uint8_t volume)
+static bool
+schedule_event(uint64_t when, uint8_t kind, uint8_t channel, uint32_t frequency,
+               uint8_t waveform, uint8_t volume)
 {
-  if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
   uint32_t state = pwm_audio_lock();
   for (int i = 0; i < PWM_AUDIO_EVENT_MAX; i++) {
     if (events[i].used) continue;
     events[i].when = when;
     events[i].sequence = event_sequence++;
     events[i].frequency = frequency;
+    events[i].kind = kind;
     events[i].channel = channel;
     events[i].waveform = waveform;
     events[i].volume = volume;
@@ -215,6 +354,21 @@ pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
   }
   pwm_audio_unlock(state);
   return false;
+}
+
+bool
+pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
+                   uint8_t waveform, uint8_t volume)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
+  return schedule_event(when, PWM_AUDIO_EVENT_TONE, channel, frequency, waveform, volume);
+}
+
+bool
+pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume)
+{
+  if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
+  return schedule_event(when, PWM_AUDIO_EVENT_PLAY, channel, 0, 0, volume);
 }
 
 void
@@ -242,7 +396,9 @@ event_is_before(const pwm_audio_event_t *a, const pwm_audio_event_t *b)
 static void
 apply_event(const pwm_audio_event_t *event)
 {
-  if (event->frequency) {
+  if (event->kind == PWM_AUDIO_EVENT_PLAY) {
+    play_locked(event->channel, event->volume);
+  } else if (event->frequency) {
     pwm_audio_set_tone(event->channel, event->frequency, event->waveform, event->volume);
   } else {
     pwm_audio_stop_channel(event->channel);

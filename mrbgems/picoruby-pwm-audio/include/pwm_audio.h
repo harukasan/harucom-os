@@ -19,7 +19,12 @@ extern "C" {
 #define PWM_AUDIO_SAMPLE_RATE  50000
 #define PWM_AUDIO_CARRIER_HZ   250000
 #define PWM_AUDIO_PWM_WRAP     999
-#define PWM_AUDIO_NUM_CHANNELS 3
+
+/* Mixer channels. Each channel plays one source at a time: an
+ * oscillator (set_tone) or a mono QOA sample (set_sample + play).
+ * stop/pan/mute and the scheduled variants work on any channel
+ * regardless of its source. */
+#define PWM_AUDIO_NUM_CHANNELS 8
 
 typedef enum {
   PWM_AUDIO_WAVE_SINE = 0,
@@ -27,15 +32,6 @@ typedef enum {
   PWM_AUDIO_WAVE_TRIANGLE,
   PWM_AUDIO_WAVE_SAWTOOTH,
 } pwm_audio_waveform_t;
-
-typedef struct {
-  uint32_t phase;
-  uint32_t phase_increment;
-  uint8_t waveform; /* pwm_audio_waveform_t */
-  uint8_t volume;   /* 0-15 */
-  uint8_t pan;      /* 0-15: 0=L, 8=center, 15=R */
-  bool muted;
-} pwm_audio_channel_t;
 
 /* Sample buffer: one ring played end to end by a single endless DMA
  * channel (read ring wrap), so the transfer cadence has no seams.
@@ -60,21 +56,42 @@ void pwm_audio_calc_sample(uint16_t *out_l, uint16_t *out_r);
 void pwm_audio_render_block(uint64_t start_sample, uint32_t *dst, uint32_t count);
 
 /* Channel control (immediate; applied to samples rendered after the
- * call) */
+ * call). set_tone switches the channel's source to the oscillator and
+ * starts it; stop/pan/mute work on either source. */
 void pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_t volume);
 void pwm_audio_set_pan(uint8_t channel, uint8_t pan);
 void pwm_audio_set_mute(uint8_t channel, bool mute);
 void pwm_audio_stop_channel(uint8_t channel);
 void pwm_audio_stop_all(void);
 
+/* Switch the channel's source to a mono QOA sample (see
+ * doc/pwm-audio.md). Slices of 20 samples are decoded on demand
+ * during rendering, so only the compressed bytes are held in memory.
+ * The data pointer must stay valid while attached; the mruby binding
+ * pins the backing String. Stops the channel but does not start
+ * playback. Returns false when the data is not a mono QOA stream. */
+bool pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length);
+
+/* One-shot playback of the channel's sample from the beginning (a
+ * retrigger restarts it). No-op when the channel has no sample. */
+void pwm_audio_play(uint8_t channel, uint8_t volume);
+
+/* Parse a QOA header without touching any channel; used to validate
+ * sample data up front. */
+bool pwm_audio_sample_info(const uint8_t *data, uint32_t length, uint32_t *samplerate,
+                           uint32_t *frames);
+
 /* Sample-accurate scheduling. when is an absolute position on the
- * playback timeline (compare with pwm_audio_sample_clock()). frequency
- * 0 schedules a channel stop. Returns false when the queue is full. */
+ * playback timeline (compare with pwm_audio_sample_clock()).
+ * pwm_audio_schedule starts a tone (frequency 0 schedules a stop);
+ * pwm_audio_play_schedule triggers the channel's sample. Both return
+ * false when the queue is full. */
 bool pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
                         uint8_t waveform, uint8_t volume);
+bool pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume);
 
-/* Drop scheduled events for one channel (a retrigger must not be cut
- * by a stale scheduled stop). */
+/* Drop all scheduled events for one channel (a retrigger must not be
+ * cut by a stale scheduled stop). */
 void pwm_audio_cancel_scheduled(uint8_t channel);
 
 /* Platform-specific: current playback position in samples (monotonic,

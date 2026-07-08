@@ -137,6 +137,7 @@ target_compile_options(picoruby-dvi PRIVATE -O2)
 # --- PWM Audio library ---
 add_library(picoruby-pwm-audio
     mrbgems/picoruby-pwm-audio/src/pwm_audio.c
+    mrbgems/picoruby-pwm-audio/src/qoa_decoder.c
     mrbgems/picoruby-pwm-audio/ports/rp2350/pwm_audio_port.c
 )
 add_dependencies(picoruby-pwm-audio build_picoruby)

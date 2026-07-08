@@ -7,8 +7,29 @@
 #include <mruby.h>
 #include <mruby/array.h>
 #include <mruby/presym.h>
+#include <mruby/string.h>
+#include <mruby/variable.h>
 
 #include "../../include/pwm_audio.h"
+
+/* Pin the QOA String attached to a channel in an instance variable on
+ * the PWMAudio module so the C engine's data pointer stays valid:
+ * mruby's GC does not move objects, but it would collect an
+ * unreferenced String. The Channel objects in mrblib also keep their
+ * Sample; this is the safety net for direct set_sample callers. */
+static void
+pwm_audio_pin_sample(mrb_state *mrb, mrb_int channel, mrb_value data)
+{
+  struct RClass *mod = mrb_module_get_id(mrb, MRB_SYM(PWMAudio));
+  mrb_value obj = mrb_obj_value(mod);
+  mrb_sym iv = mrb_intern_lit(mrb, "@sample_data");
+  mrb_value samples = mrb_iv_get(mrb, obj, iv);
+  if (!mrb_array_p(samples)) {
+    samples = mrb_ary_new_capa(mrb, PWM_AUDIO_NUM_CHANNELS);
+    mrb_iv_set(mrb, obj, iv, samples);
+  }
+  mrb_ary_set(mrb, samples, channel, data);
+}
 
 /* PWMAudio.init(l_pin, r_pin) */
 static mrb_value
@@ -70,15 +91,6 @@ mrb_pwm_audio_stop_all(mrb_state *mrb, mrb_value self)
   return mrb_nil_value();
 }
 
-/* PWMAudio.update: kept for compatibility. The engine renders
- * autonomously in C, so there is nothing to fill from Ruby. */
-static mrb_value
-mrb_pwm_audio_update(mrb_state *mrb, mrb_value self)
-{
-  (void)mrb;
-  return mrb_nil_value();
-}
-
 /* PWMAudio.sample_clock: playback position in samples (monotonic) */
 static mrb_value
 mrb_pwm_audio_sample_clock(mrb_state *mrb, mrb_value self)
@@ -126,6 +138,64 @@ mrb_pwm_audio_stats(mrb_state *mrb, mrb_value self)
   return ary;
 }
 
+/* PWMAudio.set_sample(channel, data): switch the channel's source to
+ * a mono QOA sample */
+static mrb_value
+mrb_pwm_audio_set_sample(mrb_state *mrb, mrb_value self)
+{
+  mrb_int channel;
+  mrb_value data;
+  mrb_get_args(mrb, "iS", &channel, &data);
+  if (channel < 0 || channel >= PWM_AUDIO_NUM_CHANNELS) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid channel");
+  }
+  if (!pwm_audio_set_sample((uint8_t)channel, (const uint8_t *)RSTRING_PTR(data),
+                            (uint32_t)RSTRING_LEN(data))) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a mono QOA sample");
+  }
+  pwm_audio_pin_sample(mrb, channel, data);
+  return mrb_true_value();
+}
+
+/* PWMAudio.play(channel, volume): play the channel's sample from the
+ * start */
+static mrb_value
+mrb_pwm_audio_play(mrb_state *mrb, mrb_value self)
+{
+  mrb_int channel, volume;
+  mrb_get_args(mrb, "ii", &channel, &volume);
+  pwm_audio_play((uint8_t)channel, (uint8_t)volume);
+  return mrb_nil_value();
+}
+
+/* PWMAudio.play_at(sample, channel, volume): schedule a sample trigger */
+static mrb_value
+mrb_pwm_audio_play_at(mrb_state *mrb, mrb_value self)
+{
+  mrb_int sample, channel, volume;
+  mrb_get_args(mrb, "iii", &sample, &channel, &volume);
+  bool ok = pwm_audio_play_schedule((uint64_t)sample, (uint8_t)channel, (uint8_t)volume);
+  return mrb_bool_value(ok);
+}
+
+/* PWMAudio.sample_info(data): [samplerate, frames] of a QOA blob,
+ * raising when it is not a mono QOA stream */
+static mrb_value
+mrb_pwm_audio_sample_info(mrb_state *mrb, mrb_value self)
+{
+  mrb_value data;
+  mrb_get_args(mrb, "S", &data);
+  uint32_t samplerate, frames;
+  if (!pwm_audio_sample_info((const uint8_t *)RSTRING_PTR(data), (uint32_t)RSTRING_LEN(data),
+                             &samplerate, &frames)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a mono QOA sample");
+  }
+  mrb_value ary = mrb_ary_new_capa(mrb, 2);
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)samplerate));
+  mrb_ary_push(mrb, ary, mrb_int_value(mrb, (mrb_int)frames));
+  return ary;
+}
+
 /* PWMAudio.cancel_scheduled(channel): drop pending events for a channel */
 static mrb_value
 mrb_pwm_audio_cancel_scheduled(mrb_state *mrb, mrb_value self)
@@ -151,6 +221,7 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
   struct RClass *mod = mrb_define_module_id(mrb, MRB_SYM(PWMAudio));
 
   mrb_define_const_id(mrb, mod, MRB_SYM(SAMPLE_RATE), mrb_fixnum_value(PWM_AUDIO_SAMPLE_RATE));
+  mrb_define_const_id(mrb, mod, MRB_SYM(CHANNELS), mrb_fixnum_value(PWM_AUDIO_NUM_CHANNELS));
   mrb_define_const_id(mrb, mod, MRB_SYM(SINE), mrb_fixnum_value(PWM_AUDIO_WAVE_SINE));
   mrb_define_const_id(mrb, mod, MRB_SYM(SQUARE), mrb_fixnum_value(PWM_AUDIO_WAVE_SQUARE));
   mrb_define_const_id(mrb, mod, MRB_SYM(TRIANGLE), mrb_fixnum_value(PWM_AUDIO_WAVE_TRIANGLE));
@@ -163,7 +234,6 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
   mrb_define_module_function_id(mrb, mod, MRB_SYM(stop), mrb_pwm_audio_stop, MRB_ARGS_REQ(1));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(stop_all), mrb_pwm_audio_stop_all,
                                 MRB_ARGS_NONE());
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(update), mrb_pwm_audio_update, MRB_ARGS_NONE());
   mrb_define_module_function_id(mrb, mod, MRB_SYM(sample_clock), mrb_pwm_audio_sample_clock,
                                 MRB_ARGS_NONE());
   mrb_define_module_function_id(mrb, mod, MRB_SYM(tone_at), mrb_pwm_audio_tone_at,
@@ -172,6 +242,13 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
                                 MRB_ARGS_REQ(2));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(cancel_scheduled),
                                 mrb_pwm_audio_cancel_scheduled, MRB_ARGS_REQ(1));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(set_sample), mrb_pwm_audio_set_sample,
+                                MRB_ARGS_REQ(2));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(play), mrb_pwm_audio_play, MRB_ARGS_REQ(2));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(play_at), mrb_pwm_audio_play_at,
+                                MRB_ARGS_REQ(3));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(sample_info), mrb_pwm_audio_sample_info,
+                                MRB_ARGS_REQ(1));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(stats), mrb_pwm_audio_stats, MRB_ARGS_NONE());
   mrb_define_module_function_id(mrb, mod, MRB_SYM(deinit), mrb_pwm_audio_deinit, MRB_ARGS_NONE());
 }
