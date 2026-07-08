@@ -49,7 +49,8 @@ static const uint16_t pan_tab_l[16] = {4095, 4095, 4069, 3992, 3865, 3689, 3467,
 static const uint16_t pan_tab_r[16] = {0,    0,    458,  911,  1352, 1777, 2179, 2553,
                                        2896, 3202, 3467, 3689, 3865, 3992, 4069, 4095};
 
-/* Channel state */
+/* Channel state. Mutated under pwm_audio_lock() so the render IRQ
+ * never sees a half-applied update. */
 static pwm_audio_channel_t channels[PWM_AUDIO_NUM_CHANNELS];
 
 /* Soft clip by tanh approximation (from picoruby-psg) */
@@ -117,42 +118,55 @@ pwm_audio_set_tone(uint8_t channel, uint32_t frequency, uint8_t waveform, uint8_
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
   pwm_audio_channel_t *ch = &channels[channel];
-  ch->phase_increment =
+  uint32_t increment =
       frequency ? (uint32_t)(((uint64_t)frequency << 32) / PWM_AUDIO_SAMPLE_RATE) : 0;
+  uint32_t state = pwm_audio_lock();
+  ch->phase_increment = increment;
   ch->waveform = waveform;
   ch->volume = volume & 0x0F;
   ch->muted = false;
+  pwm_audio_unlock(state);
 }
 
 void
 pwm_audio_set_pan(uint8_t channel, uint8_t pan)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
   channels[channel].pan = pan & 0x0F;
+  pwm_audio_unlock(state);
 }
 
 void
 pwm_audio_set_mute(uint8_t channel, bool mute)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
   channels[channel].muted = mute;
+  pwm_audio_unlock(state);
 }
 
 void
 pwm_audio_stop_channel(uint8_t channel)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
+  uint32_t state = pwm_audio_lock();
   channels[channel].phase_increment = 0;
   channels[channel].phase = 0;
   channels[channel].muted = true;
+  pwm_audio_unlock(state);
 }
 
 void
 pwm_audio_stop_all(void)
 {
+  /* One critical section so no rendered block sees a partial stop.
+   * The nested lock in pwm_audio_stop_channel is save/restore safe. */
+  uint32_t state = pwm_audio_lock();
   for (int i = 0; i < PWM_AUDIO_NUM_CHANNELS; i++) {
     pwm_audio_stop_channel(i);
   }
+  pwm_audio_unlock(state);
 }
 
 /* --- Sample buffer and block renderer --- */

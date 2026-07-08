@@ -92,7 +92,7 @@ void pwm_audio_stats(int32_t *min_lead, uint32_t *max_gap_us, int32_t *drift_now
                      int32_t *drift_min);
 
 /* Platform-specific: short critical section guarding the event queue
- * against the render IRQ. */
+ * and channel state against the render IRQ. */
 uint32_t pwm_audio_lock(void);
 void pwm_audio_unlock(uint32_t state);
 

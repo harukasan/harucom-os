@@ -137,6 +137,8 @@ Set up (tear down) the PWM slices, DMA channel, and render pump.
 ### pwm_audio_set_tone / pwm_audio_set_pan / pwm_audio_set_mute / pwm_audio_stop_channel / pwm_audio_stop_all
 
 Immediate channel control, applied to samples rendered after the call.
+Updates run inside `pwm_audio_lock()`, so the renderer never sees a
+half-applied change.
 
 ### pwm_audio_render_block
 
@@ -177,8 +179,8 @@ uint32_t pwm_audio_lock(void);
 void pwm_audio_unlock(uint32_t state);
 ```
 
-Short critical section guarding the event queue against the render
-IRQ (implemented as interrupt disable on RP2350).
+Short critical section guarding the event queue and channel state
+against the render IRQ (implemented as interrupt disable on RP2350).
 
 ## Hardware Configuration
 
