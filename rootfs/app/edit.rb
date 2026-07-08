@@ -41,12 +41,12 @@ message = nil
 #
 # RubySyntax.analyze rejects sources larger than 8192 bytes, so the whole file
 # cannot be parsed at once. Instead a window of lines around the viewport is
-# parsed and cached. The window is rebuilt on content edits and whenever the
-# viewport scrolls outside it. SYNTAX_MARGIN lines of headroom above and below
-# absorb normal scrolling so a rebuild fires roughly once per that many
-# scrolled lines, and the rebuild is normally prefetched on an idle frame
-# when the viewport nears the window edge, keeping the parse cost off the
-# scroll frames themselves.
+# parsed and cached. The window is rebuilt when lines are inserted or deleted
+# and whenever the viewport leaves it; content edits within a line defer the
+# re-parse and recolor to an idle frame. SYNTAX_MARGIN lines of headroom above
+# and below absorb normal scrolling, and the rebuild is normally prefetched on
+# an idle frame when the viewport nears the window edge, keeping parse costs
+# off the key-handling frames.
 highlight_enabled = filepath && filepath.end_with?(".rb")
 SYNTAX_MARGIN      = 40 # extra lines parsed above/below the viewport
 SYNTAX_ANCHOR_SCAN = 60 # max lines scanned upward to find a parse anchor
@@ -56,6 +56,8 @@ syntax = nil       # [highlight_map, window_offsets, window_start] or nil
 window_start = 0   # first line index covered by the parsed window
 window_end = 0     # one past the last line index covered (exclusive)
 prefetched_scroll_top = -1 # scroll_top the idle prefetch last ran for
+highlight_stale = false # content edited since the last parse; recolor deferred to idle
+stale_syntax = nil # the bundle the screen was drawn with while stale
 
 # Undo stack
 # Each entry: [:insert, y, x, text] | [:delete, y, x, text]
@@ -492,23 +494,26 @@ console.commit
 while running
   c = keyboard.read_char
   unless c
-    # Idle frame: rebuild the syntax window before scrolling reaches its
-    # edge, so the parse cost lands between key repeats instead of on the
-    # scroll frame that crosses the edge. Runs once per scroll position
-    # because a byte-budget-trimmed window can stay near the edge even
-    # after a rebuild. Skipped while an IME preedit overlay is shown, as
-    # redrawing its line would erase the overlay.
-    if highlight_enabled && scroll_top != prefetched_scroll_top &&
-       (!$ime || $ime.preedit.bytesize == 0)
+    # Idle frame: catch up on deferred syntax work while no key is pending.
+    # A stale window (content edit) is re-parsed and the changed lines are
+    # recolored, and the window is also rebuilt ahead of time when the
+    # viewport nears its edge, so the parse cost lands between key repeats
+    # instead of on the frame that handles a key. The prefetch runs once per
+    # scroll position because a byte-budget-trimmed window can stay near the
+    # edge even after a rebuild. Skipped while an IME preedit overlay is
+    # shown, as redrawing its line would erase the overlay.
+    if highlight_enabled && (!$ime || $ime.preedit.bytesize == 0)
       vis_bottom = scroll_top + EDIT_ROWS
       vis_bottom = buffer.lines.length if vis_bottom > buffer.lines.length
-      if (window_start > 0 && scroll_top - window_start < SYNTAX_PREFETCH_MARGIN) ||
-         (window_end < buffer.lines.length && window_end - vis_bottom < SYNTAX_PREFETCH_MARGIN)
+      near_edge = (window_start > 0 && scroll_top - window_start < SYNTAX_PREFETCH_MARGIN) ||
+                  (window_end < buffer.lines.length && window_end - vis_bottom < SYNTAX_PREFETCH_MARGIN)
+      if highlight_stale || (near_edge && scroll_top != prefetched_scroll_top)
         prefetched_scroll_top = scroll_top
-        old_syntax = syntax
+        sync_base = highlight_stale ? stale_syntax : syntax
         _result, syntax, window_start, window_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
+        highlight_stale = false
         console.hide_cursor
-        redrawn = sync_highlight_changes(console, buffer, scroll_top, scroll_left, 0, EDIT_ROWS, -1, old_syntax, syntax)
+        redrawn = sync_highlight_changes(console, buffer, scroll_top, scroll_left, 0, EDIT_ROWS, -1, sync_base, syntax)
         console.show_cursor
         if redrawn
           console.commit
@@ -696,27 +701,37 @@ while running
   scroll_top = adjust_vertical_scroll(buffer, scroll_top)
   scroll_left = adjust_horizontal_scroll(buffer, scroll_left)
 
-  # Redraw based on dirty level and viewport movement. content_changed is
+  # Redraw based on dirty level and viewport movement. The dirty state is
   # taken before the old_dirty carry-over: a carried value was already
-  # analyzed last frame and the buffer has not changed since, so the carry
-  # only affects the redraw choice below, not the re-analysis.
+  # handled last frame, so the carry only affects the redraw choice below.
   dirty = buffer.dirty
-  content_changed = dirty == :content || dirty == :structure
+  structure_changed = dirty == :structure
+  content_changed = structure_changed || dirty == :content
   dirty = old_dirty if dirty == :none && old_dirty != :none
   vdelta = scroll_top - old_scroll_top
   hscrolled = scroll_left != old_scroll_left
 
-  # Rebuild the parsed window on content changes, or when the viewport scrolls
-  # out of the cached window. Within the window the highlight map stays valid, so
-  # pure scrolling reuses it and only newly exposed lines are redrawn.
+  # Structure changes shift line offsets, so the window must be rebuilt before
+  # this frame's redraw; the same holds when the viewport left the window.
+  # Content edits keep line offsets valid, so their re-parse is deferred to an
+  # idle frame: this frame draws the cursor line with the previous map and the
+  # idle frame recolors whatever changed, keeping expensive recolors (e.g. a
+  # typed quote that restyles the rest of the screen) off the keystroke frame.
+  # stale_syntax keeps the bundle the screen was drawn with, so the deferred
+  # diff stays consistent across several edits.
   window_rebuilt = false
+  sync_base = nil
   if highlight_enabled
     vis_bottom = scroll_top + EDIT_ROWS
     vis_bottom = buffer.lines.length if vis_bottom > buffer.lines.length
-    if content_changed || scroll_top < window_start || vis_bottom > window_end
-      old_syntax = syntax
+    if structure_changed || scroll_top < window_start || vis_bottom > window_end
+      sync_base = highlight_stale ? stale_syntax : syntax
       _result, syntax, window_start, window_end = analyze_window(buffer, scroll_top, scroll_top + EDIT_ROWS - 1)
       window_rebuilt = true
+      highlight_stale = false
+    elsif content_changed
+      stale_syntax = syntax unless highlight_stale
+      highlight_stale = true
     end
   end
 
@@ -736,7 +751,7 @@ while running
     if window_rebuilt
       first_row = vdelta < 0 ? -vdelta : 0
       last_row = vdelta > 0 ? EDIT_ROWS - vdelta : EDIT_ROWS
-      sync_highlight_changes(console, buffer, scroll_top, scroll_left, first_row, last_row, cursor_row, old_syntax, syntax)
+      sync_highlight_changes(console, buffer, scroll_top, scroll_left, first_row, last_row, cursor_row, sync_base, syntax)
     end
     if cursor_row >= 0
       draw_line(console, buffer, cursor_row, scroll_top, scroll_left, syntax)
