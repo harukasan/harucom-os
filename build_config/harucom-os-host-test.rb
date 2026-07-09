@@ -33,6 +33,9 @@ MRuby::Build.new('harucom-host-test') do |conf|
   conf.gem core: 'picoruby-picotest'
   conf.gem File.expand_path('../../mrbgems/picoruby-synth-native', __FILE__)
   conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-rational', __FILE__)
+  # ObjectSpace.count_objects for host-side heap growth diagnostics
+  # (not on the board).
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-objectspace', __FILE__)
 
   # A named build resolves no 'host' fallback, so it must carry its own
   # bytecode compiler (mruby-bin-mrbc2 emits bin/picorbc).
