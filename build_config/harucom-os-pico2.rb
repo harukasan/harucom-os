@@ -54,6 +54,9 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
 
   conf.gem File.expand_path('../../mrbgems/picoruby-pwm-audio', __FILE__)
   conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-rational', __FILE__)
+  # ObjectSpace.count_objects for on-board GC diagnostics (johakyu_demo
+  # g key). Remove once the GC pause investigation settles.
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-objectspace', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-dmx', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-dvi', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-usb-host', __FILE__)

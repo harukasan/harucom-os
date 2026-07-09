@@ -95,7 +95,7 @@ def johakyu_demo
 
   DVI::Text.clear(attr_clear)
   DVI::Text.put_string(0, 0, "=== Johakyu demo  sound + light on one clock ===", attr_title)
-  DVI::Text.put_string(0, 2, "1-5: preset (swaps at next cycle)   -/=: tempo   [/]: latency trim   Esc/q: quit", attr_normal)
+  DVI::Text.put_string(0, 2, "1-5: preset (swaps at next cycle)   -/=: tempo   [/]: latency   g: GC probe   Esc/q: quit", attr_normal)
 
   scheduler = session.scheduler
   running = true
@@ -166,6 +166,26 @@ def johakyu_demo
         when "]"
           trim = session.audio_latency_ms + 5
           session.audio_latency_ms = trim > 150 ? 150 : trim
+        when "g"
+          # GC probe: full GC pause on the PSRAM heap plus the object
+          # count it reclaimed. Compare presses over runtime: a growing
+          # pause means the GC walk cost itself grows; a large
+          # before/after object gap means junk had accumulated.
+          if Object.const_defined?(:ObjectSpace)
+            counts = ObjectSpace.count_objects
+            objs_before = counts[:TOTAL] - counts[:FREE]
+            gc_t0 = Machine.board_millis
+            GC.start
+            gc_ms = Machine.board_millis - gc_t0
+            counts = ObjectSpace.count_objects
+            objs_after = counts[:TOTAL] - counts[:FREE]
+            DVI::Text.put_string(0, 12, "GC.start: #{gc_ms} ms   objs: #{objs_before} -> #{objs_after} (slots #{counts[:TOTAL]})      ", attr_active)
+          else
+            gc_t0 = Machine.board_millis
+            GC.start
+            gc_ms = Machine.board_millis - gc_t0
+            DVI::Text.put_string(0, 12, "GC.start: #{gc_ms} ms (no ObjectSpace in this build)      ", attr_active)
+          end
         when "q", "Q"
           running = false
         end
