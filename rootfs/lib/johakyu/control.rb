@@ -22,9 +22,11 @@ module Johakyu
   LIGHT_CONTROLS = [:pan, :tilt, :dimmer, :strobe, :color, :gobo, :focus, :prism, :speed]
 
   # A bare Signal used as a structure source is discretized to this
-  # many steps per cycle (research 08; first rung of the optimization
-  # ladder lowers it).
-  SEGMENT_DEFAULT = 32
+  # many steps per cycle. 16 steps (125 ms at 120 bpm) is the first
+  # rung of the optimization ladder: it halves the staging query cost
+  # of signal-driven tracks and the fixtures smooth the coarser moves.
+  # Use an explicit segment(n) where finer resolution matters.
+  SEGMENT_DEFAULT = 16
 
   # Build a structure source from mini notation, a Pattern, a Signal
   # (auto-segmented), or a plain value, with values wrapped into

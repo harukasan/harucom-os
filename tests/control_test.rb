@@ -32,8 +32,9 @@ class ControlTest < Picotest::Test
     assert_equal false, pattern.continuous?
     haps = onsets(pattern)
     assert_equal Johakyu::SEGMENT_DEFAULT, haps.length
-    # segment samples at step midpoints: the first step reads saw at 1/64
-    assert_equal({ pan: 0.015625 }, haps[0].value)
+    # segment samples at step midpoints: the first of 16 steps reads
+    # saw at 1/32
+    assert_equal({ pan: 0.03125 }, haps[0].value)
   end
 
   def test_on_resolves_target_at_build_time

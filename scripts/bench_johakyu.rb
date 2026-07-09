@@ -43,16 +43,15 @@ STATEMENTS = {
   colors: Johakyu.dimmer("1 0 1 0").color("<red blue>").on(:all),
 }
 
-# Per-statement staging chunk cost: query one quarter cycle, the
-# scheduler's chunk size.
-puts "chunk query cost (1/4 cycle, 40 rounds):"
+# Per-statement staging chunk cost: query one scheduler chunk.
+chunk = Johakyu::Scheduler::STAGE_CHUNK
+puts "chunk query cost (#{chunk.num}/#{chunk.den} cycle, 40 rounds):"
 STATEMENTS.each do |name, pattern|
   rounds = 40
   started = Machine.board_millis
   i = 0
   while i < rounds
-    span = Johakyu::TimeSpan.new(
-      Johakyu::Fraction.new(i, 4), Johakyu::Fraction.new(i + 1, 4))
+    span = Johakyu::TimeSpan.new(chunk * i, chunk * (i + 1))
     pattern.query(span)
     i += 1
   end

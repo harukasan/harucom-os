@@ -25,11 +25,13 @@ module Johakyu
     # a time. The minimum must cover several loop iterations so all
     # tracks get their staging turn before events fall due. The
     # threshold compares as Float so an idle tick allocates nothing.
-    # Quarter-cycle chunks keep the worst single staging tick short, so
+    # Eighth-cycle chunks keep the worst single staging tick short, so
     # pending events never wait long behind a heavy query; the mini
     # notation per-cycle memo keeps repeated queries of a cycle cheap.
+    # The stall a staging tick can cause is roughly one chunk's query
+    # cost, so the chunk size bounds how late a due event can fire.
     STAGE_AHEAD_MIN = 0.25
-    STAGE_CHUNK = Fraction.new(1, 4)
+    STAGE_CHUNK = Fraction.new(1, 8)
 
     # Staging yields to imminent events: when a pending event fires
     # within this many ms, the tick skips staging so a long query does

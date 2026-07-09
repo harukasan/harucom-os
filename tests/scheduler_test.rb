@@ -113,17 +113,21 @@ class SchedulerTest < Picotest::Test
     clock = Johakyu::Clock.new(bpm: 120, beats_per_cycle: 4)
     scheduler = Johakyu::Scheduler.new(clock)
     scheduler.bind(:x, steps([1, 1, 1, 1, 1, 1, 1, 1])) { |v, at| }
-    # the fresh bind stages the first quarter cycle: onsets at 0, 250
-    assert_equal 2, scheduler.pending_count
+    # the fresh bind stages the first eighth cycle: one onset at 0
+    assert_equal 1, scheduler.pending_count
+    scheduler.pump
+    scheduler.tick
+    # nothing due after the pump, so the tick stages the next chunk
+    # (onset at 250)
+    assert_equal 1, scheduler.pending_count
     Machine.millis = 240
     scheduler.tick
-    # an event is due within STAGE_DEFER_EVENT_MS and the track has
-    # runway, so the tick must not stage ahead of firing it
-    assert_equal 2, scheduler.pending_count
-    scheduler.pump
+    # the 250 event is due within STAGE_DEFER_EVENT_MS and the track
+    # has runway, so the tick must not stage ahead of firing it
     assert_equal 1, scheduler.pending_count
     Machine.millis = 260
     scheduler.pump
+    assert_equal 0, scheduler.pending_count
     Machine.millis = 300
     scheduler.tick
     # nothing due now, staging resumes
@@ -205,8 +209,8 @@ class SchedulerTest < Picotest::Test
                            Johakyu.dmx_builder(:s2).pan(Johakyu.sine.range(0.2, 0.8).slow(8)))
     run_until(session, 500, 20)
     pans = DMX.writes.select { |w| w[1] == 14 }
-    # segment(32) yields a write every 62.5 ms
-    assert_equal true, pans.length >= 7
+    # the default segment(16) yields a write every 125 ms
+    assert_equal true, pans.length >= 4
     assert_equal true, pans.all? { |w| w[2] >= 51 && w[2] <= 204 }
   end
 

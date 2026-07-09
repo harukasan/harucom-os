@@ -88,7 +88,8 @@ class LiveTest < Picotest::Test
     @live.apply
     run_until(500, 20)
     pans = DMX.writes.select { |w| w[1] == 14 }
-    assert_equal true, pans.length >= 7
+    # the default segment(16) yields a write every 125 ms
+    assert_equal true, pans.length >= 4
   end
 
   def test_tempo_records_and_applies
