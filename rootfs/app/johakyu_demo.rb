@@ -180,6 +180,30 @@ def johakyu_demo
             counts = ObjectSpace.count_objects
             objs_after = counts[:TOTAL] - counts[:FREE]
             DVI::Text.put_string(0, 12, "GC.start: #{gc_ms} ms   objs: #{objs_before} -> #{objs_after} (slots #{counts[:TOTAL]})      ", attr_active)
+            # Top surviving object types: the type of whatever
+            # accumulates points at the leaking layer.
+            keys = counts.keys
+            line = ""
+            picked = 0
+            while picked < 4
+              best = nil
+              best_count = 0
+              i = 0
+              while i < keys.length
+                key = keys[i]
+                i += 1
+                next if key == :TOTAL || key == :FREE
+                if counts[key] > best_count
+                  best_count = counts[key]
+                  best = key
+                end
+              end
+              break unless best
+              line = line + "#{best} #{best_count}  "
+              counts[best] = -1
+              picked += 1
+            end
+            DVI::Text.put_string(0, 14, "top: #{line}          ", attr_active)
           else
             gc_t0 = Machine.board_millis
             GC.start
