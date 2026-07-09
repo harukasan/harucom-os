@@ -84,14 +84,18 @@ def note_frequency(semitone, octave)
   freq
 end
 
-# Load the kit from /data/drums; a missing file falls back to
-# rendering the same definition on the board.
+# Load the kit from /data/drums; a missing or unreadable file falls
+# back to rendering the same definition on the board. Note that
+# File.open of a missing file returns nil instead of raising.
 drum_samples = {}
 DRUM_KEYCODES.each_value do |name|
   data = nil
   begin
     data = File.open("/data/drums/#{name}.wav", "r") { |f| f.read }
   rescue
+    data = nil
+  end
+  if data.nil? || data.bytesize < 44
     data = Synth::DrumKit.render(name)
   end
   drum_samples[name] = PWMAudio::Sample.new(data)
