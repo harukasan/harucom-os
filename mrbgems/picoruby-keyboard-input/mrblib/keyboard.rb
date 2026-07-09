@@ -263,6 +263,9 @@ class Keyboard
   RIGHT    = key(:right)
   PAGEUP   = key(:pageup)
   PAGEDOWN = key(:pagedown)
+  F1       = key(:f1)
+  F2       = key(:f2)
+  F3       = key(:f3)
   F5       = key(:f5)
 
   def initialize

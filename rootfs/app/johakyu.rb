@@ -51,11 +51,19 @@ class JohakyuApp
   STARTER = [
     "tempo 120",
     "",
-    "sound(\"bd ~ [sn sn] ~, hh*8\")",
+    "track(:drums) { sound(\"bd ~ [sd sd] ~, hh*8\").color(\"<red blue>\").on(:s1) }",
     "",
-    "dmx(:s1).dimmer(\"1 0 0.5 0\").color(\"<red blue>\")",
-    "dmx(:s2).dimmer(sine.slow(2)).pan(sine.range(0.3, 0.7).slow(8))",
+    "track(:wash) { dmx(:s2).dimmer(sine.slow(2)).pan(sine.range(0.3, 0.7).slow(8)) }",
+    "",
+    "# F1/F2/F3 load the jo/ha/kyu scenes; F5 applies the buffer.",
   ]
+
+  SCENES = {
+    1 => ["/data/johakyu/jo.rb", "jo"],
+    2 => ["/data/johakyu/ha.rb", "ha"],
+    3 => ["/data/johakyu/kyu.rb", "kyu"],
+  }
+  CATALOG_PATH = "/data/johakyu/catalog.rb"
 
   def initialize(filepath)
     @console = $console
@@ -87,6 +95,7 @@ class JohakyuApp
 
     @view = Johakyu::UniverseView.new(@session, top: VIEW_TOP)
     @sandbox = new_eval_sandbox
+    load_catalog
 
     @console.clear
     @view.reset
@@ -159,6 +168,60 @@ class JohakyuApp
     sandbox.wait(timeout: nil)
     sandbox.suspend
     sandbox
+  end
+
+  # Evaluate the jo/ha/kyu catalog once at startup. Its top-level
+  # definitions are global, so every later buffer eval sees them; the
+  # resident sandbox does not need a reload.
+  def load_catalog
+    source = nil
+    begin
+      source = File.open(CATALOG_PATH, "r") { |f| f.read }
+    rescue
+      source = nil
+    end
+    if source.nil? || source.bytesize == 0
+      @message = "catalog missing: #{CATALOG_PATH}"
+      return
+    end
+    if @sandbox.compile(source)
+      @sandbox.execute
+      @sandbox.wait(timeout: 3000)
+      @sandbox.suspend
+      error = @sandbox.result
+      if error.is_a?(Exception)
+        @message = "catalog: #{error.message}"
+      end
+    else
+      @message = "catalog failed to compile"
+    end
+  end
+
+  # Load a jo/ha/kyu scene file into the buffer (F1-F3). Nothing is
+  # applied until F5, like any other edit.
+  def load_scene(number)
+    entry = SCENES[number]
+    return unless entry
+    source = nil
+    begin
+      source = File.open(entry[0], "r") { |f| f.read }
+    rescue
+      source = nil
+    end
+    if source.nil? || source.bytesize == 0
+      @message = "scene missing: #{entry[0]}"
+      return
+    end
+    @buffer.lines.clear
+    source.split("\n").each { |l| @buffer.lines.push(l) }
+    @buffer.lines.push("") if @buffer.lines.empty?
+    @buffer.move_to(0, 0)
+    @scroll_top = 0
+    @scroll_left = 0
+    @undo_stack.clear
+    @redo_stack.clear
+    @buffer.mark_dirty(:structure)
+    @message = "Scene #{entry[1]} loaded - F5 to apply"
   end
 
   def start_eval
@@ -432,7 +495,7 @@ class JohakyuApp
     mode = $ime ? $ime.mode_label : nil
     if @command_bar_text.nil? || mode != @command_bar_mode
       @command_bar_mode = mode
-      bar = " F5:Eval  Ctrl-S:Save+Eval  Ctrl-Q:Quit  Ctrl-Z:Undo  Ctrl-Y:Redo"
+      bar = " F1-F3:Scene  F5:Eval  Ctrl-S:Save+Eval  Ctrl-Q:Quit  Ctrl-Z:Undo"
       if mode
         padding = Console::COLS - Editor.display_width(bar) - Editor.display_width(mode)
         bar += " " * padding if padding > 0
@@ -635,6 +698,12 @@ class JohakyuApp
         start_eval
       when Keyboard::F5
         start_eval
+      when Keyboard::F1
+        load_scene(1)
+      when Keyboard::F2
+        load_scene(2)
+      when Keyboard::F3
+        load_scene(3)
       when Keyboard::CTRL_Z
         @message = "Undo" if perform_undo
       when Keyboard::CTRL_Y

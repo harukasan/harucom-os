@@ -1,28 +1,30 @@
-# johakyu_demo: DSL stage A to C verification, sound and light from
+# johakyu_demo: all-pattern DSL verification, sound and light from
 # one clock.
 #
 # Run from IRB:  run app/johakyu_demo.rb
 #
-# Drives the SHEHDS rig (s1/s2, 13ch, base 1/14) and the PWM tone
-# voices from one scheduler. The M4 acceptance line is preset 1: the
-# dimmer must rise exactly on each kick. Preset changes rebind the
-# same track names, so they demonstrate the quantized swap (edits
-# land at the next cycle boundary, never mid-step).
+# Drives the SHEHDS rig (s1/s2, 13ch, base 1/14) and the drum kit
+# sampler from one scheduler. Every preset binds the same track names,
+# so switching demonstrates the quantized swap (edits land at the next
+# cycle boundary, never mid-step). Preset 4 is the all-pattern
+# acceptance line: light controls attached to the sound events ride
+# the beat from a single statement.
 #
 # Presets:
 #   1  Kick pulse    four on the floor, both lights flash on the kick
 #   2  Backbeat      kick + snare, s1/s2 alternate per beat
 #   3  Hats + color  eighth hats, color steps, dimmer accents
-#   4  Mini notation sound() and dmx() driven by mini notation (M7)
-#   5  Transforms    every/fast/euclid + sine/saw signals (M8)
+#   4  Sound+light   color and dimmer attached to the drum events
+#   5  Transforms    every/fast/euclid + segmented signals
 # Keys:
-#   1-5 preset   -/= tempo down/up   [/] audio latency   Esc/q quit
+#   1-5 preset   -/= tempo down/up   [/] audio latency trim   Esc/q quit
 #
 # The status block shows the R15 measurements: scheduler tick average
-# and maximum (ms), pending events, and fired event count.
+# and maximum (ms), pending events, and fired event count. Use them as
+# the B4 gate numbers on the board.
 
 require "board/pwm_audio"
-require "johakyu/dsl"
+require "johakyu/live"
 
 def johakyu_demo
   keyboard = $keyboard
@@ -40,10 +42,9 @@ def johakyu_demo
 
   audio = Board::PWMAudio.new
   session = Johakyu::Session.new(audio: audio, bpm: 120)
+  session.load_kit
   bpm = 120
 
-  # Every preset binds the same track names so a preset switch swaps
-  # each track at the next cycle boundary and leaves no stale tracks.
   preset_name = ""
   apply_preset = lambda do |n|
     # Stats restart per preset so tick/late/stage read as steady-state
@@ -52,79 +53,60 @@ def johakyu_demo
     case n
     when 1
       preset_name = "1 Kick pulse"
-      session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])
-      session.seq(:sn, [])
-      session.seq(:hh, [])
-      session.sound(Johakyu::Pattern.silence)
-      session.dmx_seq(:s1, :dimmer, [1.0, 0, 0, 0, 1.0, 0, 0, 0])
-      session.dmx_seq(:s2, :dimmer, [1.0, 0, 0, 0, 1.0, 0, 0, 0])
-      session.dmx_seq(:s1, :color, [:white])
-      session.dmx_seq(:s2, :color, [:white])
-      session.dmx_seq(:s2, :pan, [0.5])
+      session.bind_statement(:drums, Johakyu.sound("bd ~ ~ ~ bd ~ ~ ~"))
+      session.bind_statement(:light1,
+                             Johakyu.dimmer("1 0 0 0 1 0 0 0").color("white").on(:all))
+      session.bind_statement(:light2, Johakyu.pan(0.5).on(:s2))
     when 2
       preset_name = "2 Backbeat"
-      session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])
-      session.seq(:sn, [0, 0, 1, 0, 0, 0, 1, 0])
-      session.seq(:hh, [])
-      session.sound(Johakyu::Pattern.silence)
-      session.dmx_seq(:s1, :dimmer, [1.0, 0, 0, 0, 1.0, 0, 0, 0])
-      session.dmx_seq(:s2, :dimmer, [0, 0, 1.0, 0, 0, 0, 1.0, 0])
-      session.dmx_seq(:s1, :color, [:white])
-      session.dmx_seq(:s2, :color, [:blue])
-      session.dmx_seq(:s2, :pan, [0.5])
+      session.bind_statement(:drums, Johakyu.sound("bd ~ sd ~ bd ~ sd ~"))
+      session.bind_statement(:light1,
+                             Johakyu.dmx_builder(:s1).dimmer("1 0 0 0 1 0 0 0").color("white"))
+      session.bind_statement(:light2,
+                             Johakyu.dmx_builder(:s2).dimmer("0 0 1 0 0 0 1 0").color("blue"))
     when 3
       preset_name = "3 Hats + color"
-      session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])
-      session.seq(:sn, [0, 0, 1, 0, 0, 0, 1, 0])
-      session.seq(:hh, [0.6, 0.3, 0.6, 0.3, 0.6, 0.3, 0.6, 0.3])
-      session.sound(Johakyu::Pattern.silence)
-      session.dmx_seq(:s1, :dimmer, [1.0, 0.2, 0.5, 0.2, 1.0, 0.2, 0.5, 0.2])
-      session.dmx_seq(:s2, :dimmer, [1.0, 0.2, 0.5, 0.2, 1.0, 0.2, 0.5, 0.2])
-      session.dmx_seq(:s1, :color, [:red, :blue, :yellow, :green])
-      session.dmx_seq(:s2, :color, [:blue, :red, :green, :yellow])
-      session.dmx_seq(:s2, :pan, [0.5])
+      session.bind_statement(:drums, Johakyu.sound("bd ~ sd ~, hh*8"))
+      session.bind_statement(:light1,
+                             Johakyu.dmx_builder(:s1).dimmer("1 0.2 0.5 0.2")
+                                    .color("<red blue yellow green>"))
+      session.bind_statement(:light2,
+                             Johakyu.dmx_builder(:s2).dimmer("1 0.2 0.5 0.2")
+                                    .color("<blue red green yellow>"))
     when 4
-      preset_name = "4 Mini notation"
-      session.seq(:bd, [])
-      session.seq(:sn, [])
-      session.seq(:hh, [])
-      session.sound("bd ~ [sn sn] ~, hh*8")
-      session.dmx(:s1).dimmer("1 0 0.5 0").color("<red blue yellow>")
-      session.dmx(:s2).dimmer("0 0.5 1 0").color("<blue yellow red>").pan("0.5")
+      preset_name = "4 Sound+light (all-pattern)"
+      # One statement: the lights ride the drum events themselves.
+      session.bind_statement(:drums,
+                             Johakyu.sound("bd ~ [sd sd] ~, hh*8")
+                                    .dimmer(1.0).color("<red blue yellow>").on(:all))
+      session.bind_statement(:light1, Johakyu::Pattern.silence)
+      session.bind_statement(:light2, Johakyu.pan("0.5").on(:s2))
     when 5
-      preset_name = "5 Transforms (M8)"
-      session.seq(:bd, [])
-      session.seq(:sn, [])
-      session.seq(:hh, [])
-      # every 4th cycle doubles the tempo of the whole layer; the
-      # snare follows a euclid(3, 8) structure.
-      session.sound(Johakyu::Pattern.stack(
-        "bd ~ bd ~",
-        Johakyu.mini("sn").euclid(3, 8),
-        "hh*8"
-      )).every(4) { |p| p.fast(2) }
-      # s1 steps a sawtooth ramp over two cycles; s2 breathes on a
-      # continuous sine and sweeps pan across eight cycles.
-      session.dmx(:s1).dimmer(Johakyu.saw.segment(8).slow(2))
-        .color("<red blue yellow>")
-      session.dmx(:s2).dimmer(Johakyu.sine.slow(2))
-        .color("<blue yellow red>")
-        .pan(Johakyu.sine.range(0.3, 0.7).slow(8))
+      preset_name = "5 Transforms"
+      session.bind_statement(:drums, Johakyu::Pattern.stack(
+        Johakyu.sound("bd ~ bd ~"),
+        Johakyu.sound("sd").euclid(3, 8),
+        Johakyu.sound("hh*8")
+      ).every(4) { |p| p.fast(2) })
+      session.bind_statement(:light1,
+                             Johakyu.dmx_builder(:s1).dimmer(Johakyu.saw.segment(8).slow(2))
+                                    .color("<red blue yellow>"))
+      session.bind_statement(:light2,
+                             Johakyu.dmx_builder(:s2).pan(Johakyu.sine.range(0.3, 0.7).slow(8)))
     end
   end
   apply_preset.call(1)
 
   DVI::Text.clear(attr_clear)
   DVI::Text.put_string(0, 0, "=== Johakyu demo  sound + light on one clock ===", attr_title)
-  DVI::Text.put_string(0, 2, "1-5: preset (swaps at next cycle)   -/=: tempo   [/]: audio latency   Esc/q: quit", attr_normal)
+  DVI::Text.put_string(0, 2, "1-5: preset (swaps at next cycle)   -/=: tempo   [/]: latency trim   Esc/q: quit", attr_normal)
 
   scheduler = session.scheduler
   running = true
   frame = 0
 
   # Prebuilt step cursor rows so the per-iteration redraw allocates
-  # nothing. The cursor updates every iteration (about 10 ms); the
-  # remaining lag is the display pipeline itself.
+  # nothing.
   step_rows = []
   s = 0
   while s < 8
@@ -134,7 +116,7 @@ def johakyu_demo
       bar = bar + (cell == s ? "#" : ".")
       cell += 1
     end
-    step_rows << "step: [#{bar}]  kick = 0/4, snare = 2/6"
+    step_rows << "step: [#{bar}]"
     s += 1
   end
 
@@ -152,7 +134,7 @@ def johakyu_demo
       position_frac = ((position - position_int) * 100).to_i
       frac_text = position_frac < 10 ? "0#{position_frac}" : "#{position_frac}"
       tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
-      DVI::Text.put_string(0, 4, "preset: #{preset_name}     bpm: #{bpm}     audio lat: #{session.audio_latency_ms} ms      ", attr_active)
+      DVI::Text.put_string(0, 4, "preset: #{preset_name}     bpm: #{bpm}     latency trim: #{session.audio_latency_ms} ms      ", attr_active)
       DVI::Text.put_string(0, 6, "cycle: #{position_int}.#{frac_text}    frames: #{DMX.frame_count}      ", attr_normal)
       DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   stage max: #{scheduler.stage_ms_max} ms      ", attr_normal)
       DVI::Text.put_string(0, 9, "fired: #{scheduler.fired_count}   pending: #{scheduler.pending_count}   late max: #{scheduler.fire_delay_ms_max} ms      ", attr_normal)
@@ -182,10 +164,11 @@ def johakyu_demo
           bpm = bpm < 300 ? bpm + 10 : bpm
           session.tempo(bpm)
         when "["
-          session.audio_latency_ms = session.audio_latency_ms - 5
+          trim = session.audio_latency_ms - 5
+          session.audio_latency_ms = trim < -50 ? -50 : trim
         when "]"
-          latency = session.audio_latency_ms + 5
-          session.audio_latency_ms = latency > 150 ? 150 : latency
+          trim = session.audio_latency_ms + 5
+          session.audio_latency_ms = trim > 150 ? 150 : trim
         when "q", "Q"
           running = false
         end
