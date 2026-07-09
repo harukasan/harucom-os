@@ -145,6 +145,19 @@ class SchedulerTest < Picotest::Test
     dimmer_on = DMX.writes.select { |w| w[1] == 6 && w[2] == 255 }.map { |w| w[0] }
     assert_equal [0, 1000, 2000, 3000, 4000], dimmer_on
     assert_equal dimmer_on.map { |ms| ms * 50 }, kick_samples
+    assert_equal 0, session.output_late_count
+  end
+
+  def test_output_overrun_past_lead_is_counted
+    session, _audio = new_session
+    session.bind_statement(:drums, Johakyu.sound("bd*4"))
+    assert_equal 0, session.output_late_count
+    # a long stall: the first update happens 700 ms in, so events fire
+    # past their targets by more than the lead can absorb
+    Machine.millis = 700
+    session.update
+    assert_equal true, session.output_late_count >= 1
+    assert_equal 700, session.output_late_ms_max
   end
 
   def test_sound_reserves_sample_accurate_despite_loop_jitter

@@ -54,7 +54,7 @@ def johakyu_demo
   apply_preset = lambda do |n|
     # Stats restart per preset so tick/late/stage read as steady-state
     # numbers for this preset (the swap transient is still included).
-    session.scheduler.reset_stats
+    session.reset_stats
     live.begin_recording
     case n
     when 1
@@ -134,6 +134,7 @@ def johakyu_demo
       DVI::Text.put_string(0, 6, "cycle: #{position_int}.#{frac_text}    frames: #{DMX.frame_count}      ", attr_normal)
       DVI::Text.put_string(0, 8, "tick avg: #{tick_avg_us} us   max: #{scheduler.tick_ms_max} ms   stage max: #{scheduler.stage_ms_max} ms      ", attr_normal)
       DVI::Text.put_string(0, 9, "fired: #{scheduler.fired_count}   pending: #{scheduler.pending_count}   late max: #{scheduler.fire_delay_ms_max} ms      ", attr_normal)
+      DVI::Text.put_string(0, 10, "out late: #{session.output_late_count} (max #{session.output_late_ms_max} ms, lead #{Johakyu::Session::RESERVE_LEAD_MS} ms)      ", attr_normal)
       DVI::Text.put_string(0, 11, "dimmer ch6: #{DMX.get(6)}   ch19: #{DMX.get(19)}      ", attr_normal)
     end
 

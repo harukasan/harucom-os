@@ -36,7 +36,9 @@ class LiveTest < Picotest::Test
     assert_equal 0, DMX.writes.length
     assert_equal true, @live.apply
     run_until(1900)
-    assert_equal [0, 1000], play_ms(@audio)
+    # the 2000 kick reserves early (RESERVE_LEAD_MS before its target);
+    # the 2000 light write waits in the due list until its target
+    assert_equal [0, 1000, 2000], play_ms(@audio)
     dimmers = DMX.writes.select { |w| w[1] == 6 && w[2] == 255 }.map { |w| w[0] }
     assert_equal [0, 1000], dimmers
   end
@@ -46,9 +48,10 @@ class LiveTest < Picotest::Test
     sound("bd*2")
     @live.apply
     assert_equal true, @session.scheduler.track_names.include?(:t1)
-    # one cycle is 2000 ms at bpm 120 (4 beats), so bd*2 hits every 1000
+    # one cycle is 2000 ms at bpm 120 (4 beats), so bd*2 hits every
+    # 1000; the 2000 hit reserves early (RESERVE_LEAD_MS)
     run_until(1900)
-    assert_equal [0, 1000], play_ms(@audio)
+    assert_equal [0, 1000, 2000], play_ms(@audio)
   end
 
   def test_bare_chain_updates_its_slot

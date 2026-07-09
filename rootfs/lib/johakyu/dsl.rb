@@ -47,11 +47,16 @@ module Johakyu
     }
     KIT_VOLUME = 14
 
-    # Sound sinks fire this many ms before their musical target so the
-    # C reservation is placed ahead of time. Small enough that a
-    # quantized track swap leaks at most this much of the old pattern
-    # into the new cycle.
-    RESERVE_LEAD_MS = 60
+    # Sinks fire this many ms before their musical target. Sound is
+    # reserved in C for the target sample and light writes wait in the
+    # due list until the target, so a fire delayed by up to this lead
+    # still lands on time. The lead therefore bounds the staging stall
+    # the output absorbs (board preset 5 stages up to ~80 ms); only a
+    # delay beyond the lead reaches the output, counted by
+    # output_late_count. The cost of a larger lead: a quantized track
+    # swap leaks at most this much of the old pattern into the new
+    # cycle.
+    RESERVE_LEAD_MS = 120
 
     # The audio engine renders at a fixed 50 kHz (PWMAudio::SAMPLE_RATE).
     SAMPLES_PER_MS = 50
@@ -63,6 +68,20 @@ module Johakyu
       @audio_latency_ms = audio_latency_ms
       @light_pending = []
       @default_target = nil
+      @output_late_count = 0
+      @output_late_ms_max = 0
+    end
+
+    # Events whose fire delay exceeded RESERVE_LEAD_MS, so the overrun
+    # reached the output (sound clamped to now, light written late).
+    # This is the musically honest late measure; the scheduler's
+    # fire_delay_ms_max includes delays the lead absorbed.
+    attr_reader :output_late_count, :output_late_ms_max
+
+    def reset_stats
+      @scheduler.reset_stats
+      @output_late_count = 0
+      @output_late_ms_max = 0
     end
 
     # Fine alignment trim between sound and light, in ms; positive
@@ -133,6 +152,11 @@ module Johakyu
     # Split one control map into the two sinks. Sound reserves now for
     # the target; light waits in the due list until the target.
     def dispatch_event(value, target_ms)
+      overrun = Machine.board_millis - target_ms
+      if overrun > 0
+        @output_late_count += 1
+        @output_late_ms_max = overrun if overrun > @output_late_ms_max
+      end
       map = value.is_a?(Hash) ? value : { s: value }
       play_sound(map[:s], target_ms) if map[:s]
 
