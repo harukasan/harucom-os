@@ -1,8 +1,9 @@
 # Johakyu pattern core, compatible with the basics of asonas/strudel-rb.
 #
 # A Pattern maps a query time span to an array of Haps (events). Time is
-# exact rational arithmetic: mruby has no Rational, so Fraction keeps an
-# integer numerator/denominator pair. Exactness matters because onset
+# exact rational arithmetic on mruby-rational (C-backed; the pure Ruby
+# Fraction class this replaced dominated the board tick cost through
+# per-operation allocation and GC). Exactness matters because onset
 # detection compares whole.begin_time == part.begin_time; floating point
 # would lose onsets at cycle boundaries.
 #
@@ -14,107 +15,29 @@
 # - hot query paths use while loops (mruby lacks flat_map/filter_map)
 
 module Johakyu
-  # Exact rational time. Denominator is always positive, values are
-  # always reduced, so == can compare numerator/denominator directly.
-  class Fraction
-    attr_reader :num, :den
-
-    FLOAT_DENOMINATOR = 3840  # covers halves/thirds/quarters/fifths/16ths
-
-    def self.of(value)
-      return value if value.is_a?(Fraction)
-      if value.is_a?(Float)
-        Fraction.new((value * FLOAT_DENOMINATOR).round, FLOAT_DENOMINATOR)
-      else
-        Fraction.new(value, 1)
-      end
+  # Cycle helpers on Rational itself, so pattern code calls them with
+  # no wrapper object. num/den keep the old Fraction reader names.
+  class ::Rational
+    def num
+      numerator
     end
 
-    def self.gcd(a, b)
-      a = -a if a < 0
-      b = -b if b < 0
-      while b != 0
-        t = a % b
-        a = b
-        b = t
-      end
-      a
+    def den
+      denominator
     end
 
-    def initialize(num, den = 1)
-      raise ArgumentError, "zero denominator" if den == 0
-      if den < 0
-        num = -num
-        den = -den
-      end
-      g = Fraction.gcd(num, den)
-      if g > 1
-        num = num / g
-        den = den / g
-      end
-      @num = num
-      @den = den
-    end
-
-    def +(other)
-      other = Fraction.of(other)
-      Fraction.new(@num * other.den + other.num * @den, @den * other.den)
-    end
-
-    def -(other)
-      other = Fraction.of(other)
-      Fraction.new(@num * other.den - other.num * @den, @den * other.den)
-    end
-
-    def *(other)
-      other = Fraction.of(other)
-      Fraction.new(@num * other.num, @den * other.den)
-    end
-
-    def /(other)
-      other = Fraction.of(other)
-      raise ZeroDivisionError, "divided by 0" if other.num == 0
-      Fraction.new(@num * other.den, @den * other.num)
-    end
-
-    def <=>(other)
-      other = Fraction.of(other)
-      (@num * other.den) <=> (other.num * @den)
-    end
-
-    def <(other)
-      (self <=> other) < 0
-    end
-
-    def <=(other)
-      (self <=> other) <= 0
-    end
-
-    def >(other)
-      (self <=> other) > 0
-    end
-
-    def >=(other)
-      (self <=> other) >= 0
-    end
-
-    def ==(other)
-      return false unless other.is_a?(Fraction)
-      @num == other.num && @den == other.den
-    end
-
-    # Integer floor (cycle number). Ruby integer division floors.
+    # Integer floor (cycle number). Integer#div floors.
     def floor_i
-      @num / @den
+      numerator.div(denominator)
     end
 
     # Cycle start time.
     def sam
-      Fraction.new(floor_i, 1)
+      Rational(floor_i, 1)
     end
 
     def next_sam
-      Fraction.new(floor_i + 1, 1)
+      Rational(floor_i + 1, 1)
     end
 
     # Position within the cycle.
@@ -123,19 +46,35 @@ module Johakyu
     end
 
     def whole_cycle
-      TimeSpan.new(sam, next_sam)
+      Johakyu::TimeSpan.new(sam, next_sam)
     end
 
-    def to_f
-      @num.to_f / @den
-    end
-
-    def to_i
+    def to_cycle_i
       floor_i
     end
+  end
 
-    def inspect
-      "Fraction(#{@num}/#{@den})"
+  # Exact rational time. The arithmetic runs in C (mruby-rational);
+  # this layer adds the cycle helpers the pattern core needs and keeps
+  # the Fraction factory API. Exactness matters because onset
+  # comparisons decide whether an event fires once or twice at chunk
+  # boundaries.
+  module Fraction
+    # Floats quantize onto this grid (covers halves/thirds/quarters/
+    # fifths/16ths), so clock positions land on exact grid points.
+    FLOAT_DENOMINATOR = 3840
+
+    def self.of(value)
+      return value if value.is_a?(Rational)
+      if value.is_a?(Float)
+        Rational((value * FLOAT_DENOMINATOR).round, FLOAT_DENOMINATOR)
+      else
+        Rational(value, 1)
+      end
+    end
+
+    def self.new(num, den = 1)
+      Rational(num, den)
     end
   end
 
