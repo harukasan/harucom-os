@@ -43,57 +43,53 @@ def johakyu_demo
   audio = Board::PWMAudio.new
   session = Johakyu::Session.new(audio: audio, bpm: 120)
   session.load_kit
+  live = Johakyu::Live.new(session)
+  $johakyu_live = live
   bpm = 120
 
+  # Presets record through the live layer, so they read exactly like
+  # an editor buffer (top-level DSL, no receiver) and stale tracks
+  # disappear through the replace semantics.
   preset_name = ""
   apply_preset = lambda do |n|
     # Stats restart per preset so tick/late/stage read as steady-state
     # numbers for this preset (the swap transient is still included).
     session.scheduler.reset_stats
+    live.begin_recording
     case n
     when 1
       preset_name = "1 Kick pulse"
-      session.bind_statement(:drums, Johakyu.sound("bd ~ ~ ~ bd ~ ~ ~"))
-      session.bind_statement(:light1,
-                             Johakyu.dimmer("1 0 0 0 1 0 0 0").color("white").on(:all))
-      session.bind_statement(:light2, Johakyu.pan(0.5).on(:s2))
+      track(:drums)  { sound("bd ~ ~ ~ bd ~ ~ ~") }
+      track(:light1) { dimmer("1 0 0 0 1 0 0 0").color("white").on(:all) }
+      track(:light2) { pan(0.5).on(:s2) }
     when 2
       preset_name = "2 Backbeat"
-      session.bind_statement(:drums, Johakyu.sound("bd ~ sd ~ bd ~ sd ~"))
-      session.bind_statement(:light1,
-                             Johakyu.dmx_builder(:s1).dimmer("1 0 0 0 1 0 0 0").color("white"))
-      session.bind_statement(:light2,
-                             Johakyu.dmx_builder(:s2).dimmer("0 0 1 0 0 0 1 0").color("blue"))
+      track(:drums)  { sound("bd ~ sd ~ bd ~ sd ~") }
+      track(:light1) { dmx(:s1).dimmer("1 0 0 0 1 0 0 0").color("white") }
+      track(:light2) { dmx(:s2).dimmer("0 0 1 0 0 0 1 0").color("blue") }
     when 3
       preset_name = "3 Hats + color"
-      session.bind_statement(:drums, Johakyu.sound("bd ~ sd ~, hh*8"))
-      session.bind_statement(:light1,
-                             Johakyu.dmx_builder(:s1).dimmer("1 0.2 0.5 0.2")
-                                    .color("<red blue yellow green>"))
-      session.bind_statement(:light2,
-                             Johakyu.dmx_builder(:s2).dimmer("1 0.2 0.5 0.2")
-                                    .color("<blue red green yellow>"))
+      track(:drums)  { sound("bd ~ sd ~, hh*8") }
+      track(:light1) { dmx(:s1).dimmer("1 0.2 0.5 0.2").color("<red blue yellow green>") }
+      track(:light2) { dmx(:s2).dimmer("1 0.2 0.5 0.2").color("<blue red green yellow>") }
     when 4
       preset_name = "4 Sound+light (all-pattern)"
       # One statement: the lights ride the drum events themselves.
-      session.bind_statement(:drums,
-                             Johakyu.sound("bd ~ [sd sd] ~, hh*8")
-                                    .dimmer(1.0).color("<red blue yellow>").on(:all))
-      session.bind_statement(:light1, Johakyu::Pattern.silence)
-      session.bind_statement(:light2, Johakyu.pan("0.5").on(:s2))
+      track(:drums)  { sound("bd ~ [sd sd] ~, hh*8").dimmer(1.0).color("<red blue yellow>").on(:all) }
+      track(:light2) { pan("0.5").on(:s2) }
     when 5
       preset_name = "5 Transforms"
-      session.bind_statement(:drums, Johakyu::Pattern.stack(
-        Johakyu.sound("bd ~ bd ~"),
-        Johakyu.sound("sd").euclid(3, 8),
-        Johakyu.sound("hh*8")
-      ).every(4) { |p| p.fast(2) })
-      session.bind_statement(:light1,
-                             Johakyu.dmx_builder(:s1).dimmer(Johakyu.saw.segment(8).slow(2))
-                                    .color("<red blue yellow>"))
-      session.bind_statement(:light2,
-                             Johakyu.dmx_builder(:s2).pan(Johakyu.sine.range(0.3, 0.7).slow(8)))
+      track(:drums) do
+        stack(
+          sound("bd ~ bd ~"),
+          sound("sd").euclid(3, 8),
+          sound("hh*8")
+        ).every(4) { |p| p.fast(2) }
+      end
+      track(:light1) { dmx(:s1).dimmer(saw.segment(8).slow(2)).color("<red blue yellow>") }
+      track(:light2) { dmx(:s2).pan(sine.range(0.3, 0.7).slow(8)) }
     end
+    live.apply
   end
   apply_preset.call(1)
 
