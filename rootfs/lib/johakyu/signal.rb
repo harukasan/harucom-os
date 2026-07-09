@@ -26,12 +26,14 @@ module Johakyu
   TWO_PI = 6.283185307179586
 
   class Signal < Pattern
-    # sample(t) = value_offset + value_scale * func(t * time_scale)
-    def initialize(func = nil, time_scale = 1.0, value_scale = 1.0, value_offset = 0.0, &block)
+    # sample(t) = value_offset + value_scale * func(t * time_scale + time_offset)
+    def initialize(func = nil, time_scale = 1.0, value_scale = 1.0, value_offset = 0.0,
+                   time_offset = 0.0, &block)
       @func = func || block
       @time_scale = time_scale
       @value_scale = value_scale
       @value_offset = value_offset
+      @time_offset = time_offset
     end
 
     # Signals answer queries by overriding this method instead of
@@ -46,17 +48,29 @@ module Johakyu
 
     # Float fast path: no Fraction or Hap allocation.
     def sample(position)
-      @value_offset + @value_scale * @func.call(position * @time_scale)
+      @value_offset + @value_scale * @func.call(position * @time_scale + @time_offset)
     end
 
     def fast(factor)
       f = factor.to_f
       raise ArgumentError, "fast factor must be positive" if f <= 0
-      Signal.new(@func, @time_scale * f, @value_scale, @value_offset)
+      Signal.new(@func, @time_scale * f, @value_scale, @value_offset, @time_offset)
     end
 
     def slow(factor)
       fast(1.0 / factor.to_f)
+    end
+
+    # Shift later by amount cycles, folded into the time coefficients:
+    # sampling at t must read the function at (t - amount).
+    def late(amount)
+      k = amount.to_f
+      Signal.new(@func, @time_scale, @value_scale, @value_offset,
+                 @time_offset - k * @time_scale)
+    end
+
+    def early(amount)
+      late(-amount.to_f)
     end
 
     # Rescale the sampled value to min..max. Folds into the linear
@@ -64,7 +78,7 @@ module Johakyu
     def range(min, max)
       span = (max - min).to_f
       Signal.new(@func, @time_scale,
-                 @value_scale * span, min + @value_offset * span)
+                 @value_scale * span, min + @value_offset * span, @time_offset)
     end
 
     def with_value(&block)

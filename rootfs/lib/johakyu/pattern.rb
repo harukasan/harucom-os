@@ -444,6 +444,18 @@ module Johakyu
       fast(Fraction.new(1) / Fraction.of(factor))
     end
 
+    # Shift the pattern later in time by amount cycles (early shifts
+    # it back). The basis of spread: copies of one pattern offset per
+    # fixture member.
+    def late(amount)
+      amount = Fraction.of(amount)
+      with_query_time { |t| t - amount }.with_hap_time { |t| t + amount }
+    end
+
+    def early(amount)
+      late(Fraction.new(0) - Fraction.of(amount))
+    end
+
     def split_queries
       source = self
       Pattern.new do |span|
@@ -527,6 +539,46 @@ module Johakyu
 
     def fmap(&block)
       with_value(&block)
+    end
+
+    # Attach a control to every event: sample `other` at each event's
+    # onset and merge it into the control map under `key` (structure
+    # from left, like Tidal's # operator). Values must already be
+    # control maps (Hash); the control layer wraps raw values before
+    # calling this. A Pattern samples through Pattern#sample (Signals
+    # take their Float fast path); anything else is a constant. When
+    # the sampled value is nil (silence in `other`), the event passes
+    # through unchanged.
+    def with_control(key, other)
+      unless other.is_a?(Pattern)
+        return with_value do |value|
+          merged = value.dup
+          merged[key] = other
+          merged
+        end
+      end
+      source = self
+      Pattern.new do |span|
+        haps = source.query(span)
+        result = []
+        i = 0
+        while i < haps.length
+          hap = haps[i]
+          at = (hap.whole ? hap.whole.begin_time : hap.part.begin_time).to_f
+          sampled = other.sample(at)
+          if sampled.nil?
+            result << hap
+          else
+            result << hap.with_value do |value|
+              merged = value.dup
+              merged[key] = sampled
+              merged
+            end
+          end
+          i += 1
+        end
+        result
+      end
     end
 
     def onsets_only

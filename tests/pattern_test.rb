@@ -144,4 +144,54 @@ class PatternTest < Picotest::Test
     assert_equal 2, P.fastcat(1, 2).sample(0.5)
     assert_equal true, P.silence.sample(0.25).nil?
   end
+
+  def test_late_shifts_onsets
+    assert_equal ["1/4..3/4|1/4..3/4|\"a\"", "3/4..5/4|3/4..5/4|\"b\""],
+                 hap_sigs(P.fastcat("a", "b").late(0.25).query_arc(0.25, 1.25))
+  end
+
+  def test_late_wraps_previous_cycle_tail
+    haps = P.fastcat("a", "b").late(0.25).query_arc(0, 0.25)
+    # the head of the cycle shows the previous cycle's "b" tail
+    # (whole shifted from cycle -1) without an onset
+    assert_equal ["-1/4..1/4|0/1..1/4|\"b\""], hap_sigs(haps)
+    assert_equal false, haps[0].has_onset?
+  end
+
+  def test_early_is_the_inverse_of_late
+    base = P.fastcat("a", "b")
+    assert_equal hap_sigs(base.query_arc(0, 1)),
+                 hap_sigs(base.late(0.25).early(0.25).query_arc(0, 1))
+  end
+
+  def test_signal_late_folds_into_coefficients
+    shifted = Johakyu.saw.late(0.25)
+    assert_equal true, shifted.is_a?(Johakyu::Signal)
+    assert_equal true, (shifted.sample(0.5) - 0.25).abs < 1e-9
+    # late then fast keeps the shift aligned to the original timeline
+    combo = Johakyu.saw.slow(2).late(0.5)
+    assert_equal true, (combo.sample(0.5) - Johakyu.saw.slow(2).sample(0.0)).abs < 1e-9
+  end
+
+  def test_with_control_samples_at_onsets
+    left = P.fastcat("bd", "sn").fmap { |v| { s: v } }
+    haps = left.with_control(:pan, Johakyu.saw).query_arc(0, 1)
+    assert_equal({ s: "bd", pan: 0.0 }, haps[0].value)
+    assert_equal({ s: "sn", pan: 0.5 }, haps[1].value)
+  end
+
+  def test_with_control_constant_and_pattern
+    left = P.pure("bd").fmap { |v| { s: v } }
+    assert_equal({ s: "bd", color: "red" },
+                 left.with_control(:color, "red").query_arc(0, 1)[0].value)
+    colors = P.slowcat("red", "blue")
+    assert_equal "blue",
+                 left.with_control(:color, colors).query_arc(1, 2)[0].value[:color]
+  end
+
+  def test_with_control_skips_silent_control
+    left = P.pure("bd").fmap { |v| { s: v } }
+    haps = left.with_control(:color, P.silence).query_arc(0, 1)
+    assert_equal({ s: "bd" }, haps[0].value)
+  end
 end
