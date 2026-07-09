@@ -82,12 +82,27 @@ class FakeAudio
   def update
   end
 
+  # Sample clock anchored to the stubbed millis at the engine rate, so
+  # reservation math in tests resolves to target_ms * 50 exactly.
+  def sample_clock
+    Machine.board_millis * 50
+  end
+
+  def play_at(sample, channel, volume = 15)
+    @events << [:play_at, sample, channel, volume]
+    true
+  end
+
   def tones
     @events.select { |e| e[0] == :tone }
   end
 
   def stops
     @events.select { |e| e[0] == :stop }
+  end
+
+  def plays
+    @events.select { |e| e[0] == :play_at }
   end
 end
 

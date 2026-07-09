@@ -1,28 +1,31 @@
 # Johakyu live coding layer: pure recording of an eval script, applied
-# to the running session afterwards (research 06).
+# to the running session afterwards (research 06/08).
 #
 # The johakyu app evaluates the editor buffer in a resident Sandbox
 # task. That task must not touch the running Session directly: the
 # scheduler arrays are mutated by the app task on every update, and a
 # preemptive task switch mid-mutation would corrupt them. Instead the
-# script talks to a Live recorder through top-level DSL methods
-# (tempo/sound/dmx), which only build Patterns and record intents,
-# both side-effect free. When the sandbox finishes cleanly the app
-# task calls Live#apply, which replays the recording onto the Session;
-# the scheduler's quantized swap makes the change land at the next
-# cycle boundary. If the script raised, the recording is discarded and
-# the show keeps playing the previous patterns.
+# script talks to a Live recorder through top-level DSL methods, which
+# only build Patterns and record intents, both side-effect free. When
+# the sandbox finishes cleanly the app task calls Live#apply, which
+# replays the recording onto the Session; the scheduler's quantized
+# swap makes the change land at the next cycle boundary. If the script
+# raised, the recording is discarded and the show keeps playing.
 #
-# Each eval describes the whole desired state, like a Strudel buffer:
+# Statements are tracks (the DAW model). track(:name) { pattern }
+# names one; a bare statement takes the next anonymous slot :t1, :t2
+# in order of appearance. _track(:name) mutes without deleting, the
+# strudel-rb idiom. Each eval describes the whole desired state:
 # tracks bound by a previous apply but absent from the new recording
-# are removed. An empty buffer therefore silences everything.
+# are removed, so an empty buffer silences everything.
 #
 #   tempo 130
-#   sound("bd*2 [~ sn] bd sn, hh*8").every(4) { |p| p.rev }
-#   dmx(:s1).dimmer("1 0 0.5 0").color("<red blue>")
-#   dmx(:s2).pan(sine.range(0.3, 0.7).slow(8))
+#   track(:drums) { sound("bd*2 [~ sd] bd sd, hh*8").color("<red blue>") }
+#   _track(:wash) { dimmer(sine.slow(4)).on(:all) }
+#   pan(sine.range(0.3, 0.7).slow(8)).on(:s2)      # anonymous :t1
 
 require "johakyu/dsl"
+require "johakyu/control"
 
 module Johakyu
   class Live
@@ -31,14 +34,15 @@ module Johakyu
     def initialize(session)
       @session = session
       @recording = nil
-      @applied_sound = false
-      @applied_dmx = {}
+      @applied = {}
+      @capturing = 0
     end
 
     # Start a fresh recording. Call from the app task right before
     # executing the eval script.
     def begin_recording
-      @recording = { tempo: nil, latency: nil, sound: nil, dmx: [] }
+      @recording = { tempo: nil, latency: nil, tracks: [] }
+      @capturing = 0
     end
 
     def recording?
@@ -61,29 +65,44 @@ module Johakyu
       @recording[:latency] = ms
     end
 
-    # Same shape as Session#sound: reify, remember, hand out the
-    # chainable handle. SoundHandle only calls transform_sound, so the
-    # recorder can stand in for the Session.
-    def sound(pattern)
-      @recording[:sound] = Pattern.reify(pattern)
-      Session::SoundHandle.new(self)
+    # Named track: the block builds and returns a Pattern. Sugar
+    # called inside the block returns plain Patterns (no recording),
+    # so composition stays functional.
+    def track(name, &block)
+      pattern = capture(&block)
+      record_track(name, pattern, false)
+      pattern
     end
 
-    def transform_sound(&block)
-      return unless @recording && @recording[:sound]
-      @recording[:sound] = block.call(@recording[:sound])
+    # Muted track: recorded under its name (so unmuting is deleting
+    # one underscore) but bound as silence.
+    def muted_track(name, &block)
+      pattern = capture(&block)
+      record_track(name, pattern, true)
+      pattern
     end
 
-    # DmxTarget only calls bind_dmx, so it chains over the recorder
-    # too. Resolving the target here surfaces unknown fixture names as
-    # a script error instead of a broken apply.
-    def dmx(target)
-      Johakyu.dmx(target)
-      Session::DmxTarget.new(self, target)
+    # True while a track block runs; bare sugar then stays pure.
+    def capturing?
+      @capturing > 0
     end
 
-    def bind_dmx(target, attribute, pattern)
-      @recording[:dmx] << [target, attribute, pattern]
+    # Record a bare statement into the next anonymous slot and return
+    # a proxy so a method chain keeps updating that slot.
+    def record_bare(pattern)
+      index = @recording[:tracks].length
+      anonymous = 0
+      i = 0
+      while i < index
+        anonymous += 1 if @recording[:tracks][i][0].nil?
+        i += 1
+      end
+      @recording[:tracks] << [nil, pattern, false, ("t" + (anonymous + 1).to_s).to_sym]
+      TrackProxy.new(self, index, pattern)
+    end
+
+    def replace_bare(index, pattern)
+      @recording[:tracks][index][1] = pattern
     end
 
     # -- Apply side: called from the app task after the sandbox
@@ -102,44 +121,228 @@ module Johakyu
         @session.audio_latency_ms = recording[:latency]
       end
 
-      if recording[:sound]
-        @session.sound(recording[:sound])
-        @applied_sound = true
-      elsif @applied_sound
-        @session.sound(Pattern.silence)
-        @applied_sound = false
-      end
-
-      binds = recording[:dmx]
-      new_tracks = {}
+      entries = recording[:tracks]
+      bound = {}
       i = 0
-      while i < binds.length
-        bind = binds[i]
+      while i < entries.length
+        entry = entries[i]
         i += 1
-        @session.bind_dmx(bind[0], bind[1], bind[2])
-        new_tracks[Session.dmx_track_name(bind[0], bind[1])] = true
+        name = entry[0] || entry[3]
+        pattern = entry[2] ? Pattern.silence : entry[1]
+        @session.bind_statement(name, pattern)
+        bound[name] = true
       end
 
       # Replace semantics: tracks from the previous apply that this
       # recording no longer binds are removed. Their last DMX values
       # stay on the wire; bind a zero pattern to switch a light off.
-      stale = @applied_dmx.keys
+      stale = @applied.keys
       i = 0
       while i < stale.length
-        track = stale[i]
+        name = stale[i]
         i += 1
-        @session.scheduler.remove(track) unless new_tracks[track]
+        @session.remove_statement(name) unless bound[name]
       end
-      @applied_dmx = new_tracks
+      @applied = bound
       true
+    end
+
+    private
+
+    def capture(&block)
+      @capturing += 1
+      begin
+        pattern = block.call
+      ensure
+        @capturing -= 1
+      end
+      unless pattern.is_a?(Pattern)
+        raise ArgumentError, "track block must return a Pattern"
+      end
+      pattern
+    end
+
+    def record_track(name, pattern, muted)
+      raise ArgumentError, "track name must be a Symbol" unless name.is_a?(Symbol)
+      @recording[:tracks] << [name, pattern, muted, nil]
+    end
+  end
+
+  # Chain handle for bare statements: every call replaces the slot's
+  # pattern with the transformed one, so the final link wins. Inside
+  # track blocks this proxy never appears (sugar returns Patterns).
+  class TrackProxy
+    def initialize(live, index, pattern)
+      @live = live
+      @index = index
+      @pattern = pattern
+    end
+
+    def fast(factor)
+      replace(@pattern.fast(factor))
+    end
+
+    def slow(factor)
+      replace(@pattern.slow(factor))
+    end
+
+    def rev
+      replace(@pattern.rev)
+    end
+
+    def every(n, &func)
+      replace(@pattern.every(n, &func))
+    end
+
+    def euclid(pulses, steps, rotation = 0)
+      replace(@pattern.euclid(pulses, steps, rotation))
+    end
+
+    def struct(bool_pattern)
+      replace(@pattern.struct(bool_pattern))
+    end
+
+    def mask(bool_pattern)
+      replace(@pattern.mask(bool_pattern))
+    end
+
+    def degrade_by(amount)
+      replace(@pattern.degrade_by(amount))
+    end
+
+    def degrade
+      replace(@pattern.degrade)
+    end
+
+    def late(amount)
+      replace(@pattern.late(amount))
+    end
+
+    def early(amount)
+      replace(@pattern.early(amount))
+    end
+
+    def segment(n)
+      replace(@pattern.segment(n))
+    end
+
+    def range(min, max)
+      replace(@pattern.range(min, max))
+    end
+
+    def on(target)
+      replace(@pattern.on(target))
+    end
+
+    def spread(amount, on: :all)
+      replace(@pattern.spread(amount, on: on))
+    end
+
+    def pan(source)
+      replace(@pattern.pan(source))
+    end
+
+    def tilt(source)
+      replace(@pattern.tilt(source))
+    end
+
+    def dimmer(source)
+      replace(@pattern.dimmer(source))
+    end
+
+    def strobe(source)
+      replace(@pattern.strobe(source))
+    end
+
+    def color(source)
+      replace(@pattern.color(source))
+    end
+
+    def gobo(source)
+      replace(@pattern.gobo(source))
+    end
+
+    def focus(source)
+      replace(@pattern.focus(source))
+    end
+
+    def prism(source)
+      replace(@pattern.prism(source))
+    end
+
+    def speed(source)
+      replace(@pattern.speed(source))
+    end
+
+    private
+
+    def replace(pattern)
+      @pattern = pattern
+      @live.replace_bare(@index, pattern)
+      self
+    end
+  end
+
+  # Builder for the dmx(:s1).dimmer(...) sugar at the live top level:
+  # the first attribute call builds the pattern and records it (bare)
+  # or returns it (inside a track block).
+  class LiveDmxBuilder
+    def initialize(live, target)
+      Johakyu.dmx(target) # unknown fixtures fail at record time
+      @live = live
+      @target = target
+    end
+
+    def pan(source)
+      build(:pan, source)
+    end
+
+    def tilt(source)
+      build(:tilt, source)
+    end
+
+    def dimmer(source)
+      build(:dimmer, source)
+    end
+
+    def strobe(source)
+      build(:strobe, source)
+    end
+
+    def color(source)
+      build(:color, source)
+    end
+
+    def gobo(source)
+      build(:gobo, source)
+    end
+
+    def focus(source)
+      build(:focus, source)
+    end
+
+    def prism(source)
+      build(:prism, source)
+    end
+
+    def speed(source)
+      build(:speed, source)
+    end
+
+    private
+
+    def build(key, source)
+      pattern = Johakyu.control_source(key, source).on(@target)
+      @live.capturing? ? pattern : @live.record_bare(pattern)
     end
   end
 end
 
 # Top-level DSL for eval scripts. The johakyu app assigns the Live
-# instance to $johakyu_live; scripts then read like the research 05
-# examples with no receiver. Signal and pattern helpers are pure, so
-# they delegate straight to the Johakyu module.
+# instance to $johakyu_live; scripts then read with no receiver.
+# Statement sugar records bare statements as anonymous tracks (:t1,
+# :t2, ...) unless it runs inside a track block, where it returns
+# plain Patterns. Signal and pattern helpers are pure.
 
 def tempo(bpm)
   $johakyu_live.tempo(bpm)
@@ -149,12 +352,66 @@ def audio_latency(ms)
   $johakyu_live.audio_latency(ms)
 end
 
-def sound(pattern)
-  $johakyu_live.sound(pattern)
+def track(name, &block)
+  $johakyu_live.track(name, &block)
+end
+
+def _track(name, &block)
+  $johakyu_live.muted_track(name, &block)
+end
+
+def sound(source)
+  pattern = Johakyu.sound(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def pan(source)
+  pattern = Johakyu.pan(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def tilt(source)
+  pattern = Johakyu.tilt(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def dimmer(source)
+  pattern = Johakyu.dimmer(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def strobe(source)
+  pattern = Johakyu.strobe(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def color(source)
+  pattern = Johakyu.color(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def gobo(source)
+  pattern = Johakyu.gobo(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def focus(source)
+  pattern = Johakyu.focus(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def prism(source)
+  pattern = Johakyu.prism(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def speed(source)
+  pattern = Johakyu.speed(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
 end
 
 def dmx(target)
-  $johakyu_live.dmx(target)
+  Johakyu::LiveDmxBuilder.new($johakyu_live, target)
 end
 
 def sine

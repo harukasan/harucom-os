@@ -1,8 +1,10 @@
 require "picotest"
 require "johakyu/live"
 
-# Live coding layer: eval scripts record through the top-level DSL,
-# apply replays onto the running session with replace semantics.
+# Live coding layer: eval scripts record tracks through the top-level
+# DSL, apply replays onto the running session with replace semantics.
+# track(:name) blocks are the primary form (strudel-rb compatible);
+# bare statements take anonymous slots :t1, :t2 in order.
 class LiveTest < Picotest::Test
   def setup
     Machine.millis = 0
@@ -23,26 +25,61 @@ class LiveTest < Picotest::Test
     end
   end
 
-  def test_recorded_script_drives_session
-    @live.begin_recording
-    sound("bd ~ sn ~")
-    dmx(:s1).dimmer("1 0")
-    assert_equal 0, @audio.tones.length
-    assert_equal 0, DMX.writes.length
-    assert_equal true, @live.apply
-    run_until(1990)
-    assert_equal [0, 1000], @audio.tones.map { |e| e[1] }
-    dimmers = DMX.writes.select { |w| w[1] == 6 }.map { |w| [w[0], w[2]] }
-    assert_equal [[0, 255], [1000, 0]], dimmers
+  def play_ms(audio)
+    audio.plays.map { |e| e[1] / 50 }
   end
 
-  def test_sound_chain_records_transforms
+  def test_named_track_drives_session
     @live.begin_recording
-    sound("bd sn").rev
+    track(:drums) { sound("bd ~ sd ~").dimmer(1.0).on(:s1) }
+    assert_equal 0, @audio.plays.length
+    assert_equal 0, DMX.writes.length
+    assert_equal true, @live.apply
+    run_until(1900)
+    assert_equal [0, 1000], play_ms(@audio)
+    dimmers = DMX.writes.select { |w| w[1] == 6 && w[2] == 255 }.map { |w| w[0] }
+    assert_equal [0, 1000], dimmers
+  end
+
+  def test_bare_statement_takes_anonymous_slot
+    @live.begin_recording
+    sound("bd*2")
+    @live.apply
+    assert_equal true, @session.scheduler.track_names.include?(:t1)
+    # one cycle is 2000 ms at bpm 120 (4 beats), so bd*2 hits every 1000
+    run_until(1900)
+    assert_equal [0, 1000], play_ms(@audio)
+  end
+
+  def test_bare_chain_updates_its_slot
+    @live.begin_recording
+    sound("bd sd").rev
     @live.apply
     run_until(1990)
-    assert_equal 1, @audio.tones[0][2]
-    assert_equal 0, @audio.tones[1][2]
+    plays = @audio.plays
+    # rev holds from the first cycle: snare (ch 4) first, kick second
+    assert_equal 4, plays[0][2]
+    assert_equal 3, plays[1][2]
+  end
+
+  def test_sugar_inside_track_block_stays_pure
+    @live.begin_recording
+    track(:one) { sound("bd") }
+    sound("sd")
+    @live.apply
+    names = @session.scheduler.track_names
+    assert_equal true, names.include?(:one)
+    assert_equal true, names.include?(:t1)
+    assert_equal 2, names.length
+  end
+
+  def test_muted_track_binds_silence_under_its_name
+    @live.begin_recording
+    _track(:drums) { sound("bd*4") }
+    @live.apply
+    assert_equal true, @session.scheduler.track_names.include?(:drums)
+    run_until(1990)
+    assert_equal 0, @audio.plays.length
   end
 
   def test_signals_work_in_scripts
@@ -51,55 +88,69 @@ class LiveTest < Picotest::Test
     @live.apply
     run_until(500, 20)
     pans = DMX.writes.select { |w| w[1] == 14 }
-    assert_equal true, pans.length >= 10
+    assert_equal true, pans.length >= 7
   end
 
   def test_tempo_records_and_applies
     @live.begin_recording
-    tempo 240
+    tempo(240)
+    track(:drums) { sound("bd") }
     @live.apply
     assert_equal 240, @session.clock.bpm
   end
 
   def test_replace_removes_stale_tracks
     @live.begin_recording
-    sound("bd*4")
-    dmx(:s1).dimmer("1 0")
+    track(:drums) { sound("bd*4") }
+    track(:wash) { dimmer("1").on(:s1) }
     @live.apply
     run_until(1000)
     @live.begin_recording
-    sound("bd*4")
+    track(:drums) { sound("bd*2") }
     @live.apply
-    assert_equal false, @session.scheduler.track_names.include?(:dmx_s1_dimmer)
-    assert_equal true, @session.scheduler.track_names.include?(:sound)
+    run_until(1100)
+    names = @session.scheduler.track_names
+    assert_equal true, names.include?(:drums)
+    assert_equal false, names.include?(:wash)
   end
 
   def test_empty_recording_silences_everything
     @live.begin_recording
-    sound("bd*4")
+    track(:drums) { sound("bd*4") }
     @live.apply
     run_until(1000)
-    tones_before = @audio.tones.length
+    count = @audio.plays.length
     @live.begin_recording
     @live.apply
-    # the silence swap lands at the cycle boundary (2000 ms)
-    run_until(4000)
-    after_boundary = @audio.tones.select { |e| e[1] >= 2000 }
-    assert_equal 0, after_boundary.length
-    assert_equal true, @audio.tones.length > tones_before
+    run_until(3000)
+    assert_equal count, @audio.plays.length
+    assert_equal 0, @session.scheduler.track_names.length
   end
 
   def test_discard_drops_recording
     @live.begin_recording
-    sound("bd*4")
+    track(:drums) { sound("bd*4") }
     @live.discard
     assert_equal false, @live.apply
     run_until(500)
-    assert_equal 0, @audio.tones.length
+    assert_equal 0, @audio.plays.length
   end
 
   def test_unknown_fixture_raises_at_record_time
     @live.begin_recording
-    assert_raise(ArgumentError) { dmx(:nope) }
+    raised = false
+    begin
+      track(:bad) { dimmer("1").on(:nope) }
+    rescue ArgumentError
+      raised = true
+    end
+    assert_equal true, raised
+  end
+
+  def test_track_block_must_return_a_pattern
+    @live.begin_recording
+    assert_raise(ArgumentError) do
+      track(:bad) { 42 }
+    end
   end
 end

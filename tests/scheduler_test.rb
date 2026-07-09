@@ -1,8 +1,10 @@
 require "picotest"
 require "johakyu/dsl"
 
-# Clock, Scheduler, and Session behavior with stubbed time (R16: sound
-# and light fire at identical target times from one clock).
+# Clock, Scheduler, and Session behavior with stubbed time. Sound
+# reservations and light writes come from one query per statement; the
+# FakeAudio sample clock is anchored so a reservation for target_ms
+# resolves to target_ms * 50 exactly.
 class SchedulerTest < Picotest::Test
   def setup
     Machine.millis = 0
@@ -24,8 +26,31 @@ class SchedulerTest < Picotest::Test
     end
   end
 
+  # Steps array to pattern, for raw scheduler tests (the DSL itself
+  # went all-pattern; the scheduler still just sees patterns).
   def steps(array)
-    Johakyu::Session.steps_to_pattern(array, true)
+    items = []
+    i = 0
+    while i < array.length
+      value = array[i]
+      if value.nil? || value == 0
+        items << Johakyu::Pattern.silence
+      else
+        items << Johakyu::Pattern.pure(value)
+      end
+      i += 1
+    end
+    Johakyu::Pattern.fastcat(*items)
+  end
+
+  def new_session(latency = 0)
+    audio = FakeAudio.new
+    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: latency)
+    [session, audio]
+  end
+
+  def play_times(audio)
+    audio.plays.map { |e| e[1] }
   end
 
   def test_sound_and_light_share_target_times
@@ -62,18 +87,6 @@ class SchedulerTest < Picotest::Test
     assert_equal [0, 2000, 4500, 6500], hits
   end
 
-  def test_continuous_sampling
-    clock = Johakyu::Clock.new(bpm: 120, beats_per_cycle: 4)
-    scheduler = Johakyu::Scheduler.new(clock)
-    samples = []
-    scheduler.bind_continuous(:pan, Johakyu.sine) { |v, _at| samples << v }
-    run_until(scheduler, 2000, 20)
-    # Sampling is capped at CONTINUOUS_INTERVAL_MS (25 ms), so 20 ms
-    # ticks sample every other tick.
-    assert_equal true, samples.length >= 45
-    assert_equal true, samples.all? { |v| v >= 0.0 && v <= 1.0 }
-  end
-
   def test_error_fallback_isolates_track
     clock = Johakyu::Clock.new(bpm: 120, beats_per_cycle: 4)
     scheduler = Johakyu::Scheduler.new(clock)
@@ -85,55 +98,6 @@ class SchedulerTest < Picotest::Test
     assert_equal 3, good
   end
 
-  def test_session_kick_and_dimmer_land_together
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])
-    session.dmx_seq(:s1, :dimmer, [1.0, 0, 0, 0, 1.0, 0, 0, 0])
-    run_until(session, 4000)
-    tone_times = audio.tones.map { |e| e[1] }
-    dimmer_on = DMX.writes.select { |w| w[1] == 6 && w[2] == 255 }.map { |w| w[0] }
-    assert_equal [0, 1000, 2000, 3000, 4000], tone_times
-    assert_equal tone_times, dimmer_on
-  end
-
-  def test_gate_runs_from_actual_start_when_late
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.seq(:bd, [1, 0, 0, 0])
-    run_until(session, 1990)
-    audio.events.clear
-    Machine.millis = 2150
-    session.update
-    run_until(session, 2400)
-    assert_equal 2150, audio.tones[0][1]
-    assert_equal true, audio.stops[0][1] >= 2240
-  end
-
-  def test_new_note_drops_stale_gate
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.seq(:bd, [1, 1, 0, 0])
-    session.update
-    Machine.millis = 600
-    session.update
-    early_stops = audio.stops.select { |e| e[1] <= 600 }
-    assert_equal 0, early_stops.length
-    run_until(session, 800)
-    assert_equal true, audio.stops[0][1] >= 690
-  end
-
-  def test_audio_latency_fires_sound_early
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 35)
-    session.seq(:bd, [1, 0, 0, 0])
-    session.dmx_seq(:s1, :dimmer, [1.0, 0, 0, 0])
-    run_until(session, 4100, 5)
-    assert_equal 1965, audio.tones[1][1]
-    dimmer_on = DMX.writes.select { |w| w[1] == 6 && w[2] == 255 }.map { |w| w[0] }
-    assert_equal 2000, dimmer_on[1]
-  end
-
   def test_tempo_change_is_continuous
     Machine.millis = 10_000
     clock = Johakyu::Clock.new(bpm: 120, beats_per_cycle: 4)
@@ -143,66 +107,6 @@ class SchedulerTest < Picotest::Test
     assert_equal true, (before - clock.position).abs < 1e-9
     Machine.millis = 13_000
     assert_equal true, (clock.position - 2.0).abs < 1e-9
-  end
-
-  def test_sound_mini_notation
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.sound("bd ~ sn ~")
-    run_until(session, 1990)
-    assert_equal [:tone, 0, 0, 110, 15], audio.tones[0]
-    assert_equal [:tone, 1000, 1, 240, 15], audio.tones[1]
-  end
-
-  def test_dmx_mini_notation
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.dmx(:s1).color("red blue").dimmer("1 0 0.5 0")
-    run_until(session, 1990)
-    colors = DMX.writes.select { |w| w[1] == 8 }.map { |w| [w[0], w[2]] }
-    assert_equal [[0, 12], [1000, 28]], colors
-    dimmers = DMX.writes.select { |w| w[1] == 6 }.map { |w| [w[0], w[2]] }
-    assert_equal [[0, 255], [500, 0], [1000, 128], [1500, 0]], dimmers
-  end
-
-  def test_signal_autobinds_continuous
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.dmx(:s2).pan(Johakyu.sine.range(0.2, 0.8).slow(8))
-    run_until(session, 500, 20)
-    pans = DMX.writes.select { |w| w[1] == 14 }
-    # A discrete bind would write at most once here; sampling writes
-    # every CONTINUOUS_INTERVAL_MS.
-    assert_equal true, pans.length >= 10
-    assert_equal true, pans.all? { |w| w[2] >= 51 && w[2] <= 204 }
-  end
-
-  def test_sound_chain_every_fast
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.sound("bd*2").every(2) { |p| p.fast(2) }
-    run_until(session, 3990)
-    times = audio.tones.map { |e| e[1] }
-    assert_equal [0, 1000, 2000, 2500, 3000, 3500], times
-  end
-
-  def test_sound_chain_applies_from_first_cycle
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.sound("bd sn").rev
-    run_until(session, 1990)
-    # rev must already hold at the first bind: snare first, kick second
-    assert_equal 1, audio.tones[0][2]
-    assert_equal 0, audio.tones[1][2]
-  end
-
-  def test_euclid_structures_dmx
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.dmx(:s1).dimmer(Johakyu.euclid(3, 8))
-    run_until(session, 1990)
-    ons = DMX.writes.select { |w| w[1] == 6 }.map { |w| [w[0], w[2]] }
-    assert_equal [[0, 255], [750, 255], [1500, 255]], ons
   end
 
   def test_staging_yields_to_due_events
@@ -226,16 +130,120 @@ class SchedulerTest < Picotest::Test
     assert_equal true, scheduler.pending_count >= 1
   end
 
-  def test_signal_swaps_to_discrete_at_boundary
-    audio = FakeAudio.new
-    session = Johakyu::Session.new(audio: audio, bpm: 120, audio_latency_ms: 0)
-    session.dmx(:s2).pan(Johakyu.sine.slow(8))
-    run_until(session, 900)
-    session.dmx(:s2).pan("0.25 0.75")
+  # ---- Session dispatcher (all-pattern) ----
+
+  def test_kick_and_dimmer_land_together
+    session, audio = new_session
+    session.bind_statement(:drums,
+                           Johakyu.sound("bd ~ ~ ~ bd ~ ~ ~").dimmer(1.0).on(:s1))
+    run_until(session, 4000)
+    kick_samples = play_times(audio)
+    dimmer_on = DMX.writes.select { |w| w[1] == 6 && w[2] == 255 }.map { |w| w[0] }
+    assert_equal [0, 1000, 2000, 3000, 4000], dimmer_on
+    assert_equal dimmer_on.map { |ms| ms * 50 }, kick_samples
+  end
+
+  def test_sound_reserves_sample_accurate_despite_loop_jitter
+    session, audio = new_session
+    session.bind_statement(:drums, Johakyu.sound("bd*4"))
+    # a coarse 17 ms loop cannot hit 500 ms multiples, reservations must
+    run_until(session, 2000, 17)
+    samples = play_times(audio)
+    assert_equal [0, 25_000, 50_000, 75_000, 100_000], samples[0, 5]
+  end
+
+  def test_audio_latency_trims_sound_earlier
+    session, audio = new_session(35)
+    session.bind_statement(:drums, Johakyu.sound("bd ~ ~ ~").dimmer(1.0).on(:s1))
+    run_until(session, 4100, 5)
+    assert_equal (2000 - 35) * 50, play_times(audio)[1]
+    dimmer_on = DMX.writes.select { |w| w[1] == 6 && w[2] == 255 }.map { |w| w[0] }
+    assert_equal 2000, dimmer_on[1]
+  end
+
+  def test_sound_mini_notation_maps_kit_channels
+    session, audio = new_session
+    session.bind_statement(:drums, Johakyu.sound("bd ~ sn ~"))
+    run_until(session, 1990)
+    plays = audio.plays
+    assert_equal [0, 3, 14], [plays[0][1], plays[0][2], plays[0][3]]
+    assert_equal [50_000, 4, 14], [plays[1][1], plays[1][2], plays[1][3]]
+  end
+
+  def test_unknown_voice_is_ignored
+    session, audio = new_session
+    session.bind_statement(:drums, Johakyu.sound("bd zz"))
+    run_until(session, 1990)
+    # both cycle kicks (the 2000 one reserves early); zz never plays
+    assert_equal 2, audio.plays.length
+  end
+
+  def test_dmx_mini_notation
+    session, _audio = new_session
+    session.bind_statement(:color, Johakyu.dmx_builder(:s1).color("red blue"))
+    session.bind_statement(:dim, Johakyu.dmx_builder(:s1).dimmer("1 0 0.5 0"))
+    run_until(session, 1990)
+    colors = DMX.writes.select { |w| w[1] == 8 }.map { |w| [w[0], w[2]] }
+    assert_equal [[0, 12], [1000, 28]], colors
+    dimmers = DMX.writes.select { |w| w[1] == 6 }.map { |w| [w[0], w[2]] }
+    assert_equal [[0, 255], [500, 0], [1000, 128], [1500, 0]], dimmers
+  end
+
+  def test_light_without_target_goes_to_all
+    session, _audio = new_session
+    session.bind_statement(:dim, Johakyu.dimmer("1"))
+    run_until(session, 100)
+    # both fixtures' dimmer channels (6 and 19) get the write
+    channels = DMX.writes.map { |w| w[1] }
+    assert_equal true, channels.include?(6)
+    assert_equal true, channels.include?(19)
+  end
+
+  def test_segmented_signal_drives_pan
+    session, _audio = new_session
+    session.bind_statement(:pan,
+                           Johakyu.dmx_builder(:s2).pan(Johakyu.sine.range(0.2, 0.8).slow(8)))
+    run_until(session, 500, 20)
+    pans = DMX.writes.select { |w| w[1] == 14 }
+    # segment(32) yields a write every 62.5 ms
+    assert_equal true, pans.length >= 7
+    assert_equal true, pans.all? { |w| w[2] >= 51 && w[2] <= 204 }
+  end
+
+  def test_euclid_structures_dmx
+    session, _audio = new_session
+    session.bind_statement(:dim, Johakyu.dmx_builder(:s1).dimmer(Johakyu.euclid(3, 8)))
+    run_until(session, 1990)
+    ons = DMX.writes.select { |w| w[1] == 6 }.map { |w| [w[0], w[2]] }
+    assert_equal [[0, 255], [750, 255], [1500, 255]], ons
+  end
+
+  def test_pattern_chain_before_bind
+    session, audio = new_session
+    session.bind_statement(:drums, Johakyu.sound("bd*2").every(2) { |p| p.fast(2) })
     run_until(session, 3990)
-    silent = DMX.writes.select { |w| w[1] == 14 && w[0] > 900 && w[0] < 2000 }
-    assert_equal 0, silent.length
-    steps = DMX.writes.select { |w| w[1] == 14 && w[0] >= 2000 }.map { |w| [w[0], w[2]] }
-    assert_equal [[2000, 64], [3000, 191]], steps
+    times = play_times(audio).map { |s| s / 50 }
+    # the 4000 event reserves early (RESERVE_LEAD_MS before its target)
+    assert_equal [0, 1000, 2000, 2500, 3000, 3500, 4000], times
+  end
+
+  def test_statement_swap_is_quantized
+    session, audio = new_session
+    session.bind_statement(:drums, Johakyu.sound("bd ~ ~ ~"))
+    run_until(session, 2500)
+    session.bind_statement(:drums, Johakyu.sound("~ bd ~ ~"))
+    run_until(session, 6500)
+    times = play_times(audio).map { |s| s / 50 }
+    assert_equal [0, 2000, 4500, 6500], times
+  end
+
+  def test_remove_statement_stops_future_events
+    session, audio = new_session
+    session.bind_statement(:drums, Johakyu.sound("bd*4"))
+    run_until(session, 1000)
+    session.remove_statement(:drums)
+    count = audio.plays.length
+    run_until(session, 3000)
+    assert_equal count, audio.plays.length
   end
 end

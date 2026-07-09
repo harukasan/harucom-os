@@ -1,16 +1,15 @@
-# Johakyu scheduler: chunked schedule-ahead staging with two sink kinds.
+# Johakyu scheduler: chunked schedule-ahead staging.
 #
-# Discrete tracks are staged in cycle-sized chunks: each track keeps a
+# Tracks are staged in cycle-sized chunks: each track keeps a
 # staged_until position, and tick() advances at most one track per call
 # (the most urgent one), converting every onset in the chunk into a
 # pending event stamped with its target board_millis. Querying per
 # chunk instead of per tick keeps the mruby query cost (Fraction/Hap
 # allocation, GC pressure) off the main loop; a typical tick does no
 # query work at all, so pump() fires events with loop-iteration jitter
-# only. pump() must be called every loop iteration.
-#
-# Continuous tracks (signals) are sampled once per tick and written
-# immediately, since DMX output is quantized to 40 Hz frames anyway.
+# only. pump() must be called every loop iteration. Continuous signals
+# do not reach the scheduler: the control layer discretizes them
+# (segment) or samples them at event times (structure from left).
 #
 # Live replacement is quantized: rebinding an existing track applies at
 # the next integer cycle boundary. Events already staged past that
@@ -40,11 +39,6 @@ module Johakyu
     STAGE_DEFER_EVENT_MS = 30
     STAGE_DEFER_MIN_AHEAD = 0.05
 
-    # Continuous tracks are sampled at most this often. DMX output is
-    # quantized to 40 Hz frames (25 ms), so sampling every loop
-    # iteration is wasted work.
-    CONTINUOUS_INTERVAL_MS = 25
-
     attr_reader :tick_count, :tick_ms_total, :tick_ms_max, :fired_count,
                 :fire_delay_ms_max, :stage_ms_max
 
@@ -62,18 +56,13 @@ module Johakyu
       @errors = {}
     end
 
-    # Bind a discrete pattern. The sink receives (value, at_ms) for each
-    # onset. Rebinding an existing name swaps at the next cycle boundary.
-    # latency_ms fires the sink early to compensate a slow output path
-    # (e.g. the PWM audio ring buffer), aligning it with faster sinks.
+    # Bind a pattern. The sink receives (value, at_ms) for each onset.
+    # Rebinding an existing name swaps at the next cycle boundary.
+    # latency_ms fires the sink early of the musical target, e.g. to
+    # leave room for a sample-accurate reservation on a slower output
+    # path.
     def bind(name, pattern, latency_ms: 0, &sink)
-      add_track(name, pattern, false, sink, latency_ms)
-    end
-
-    # Bind a continuous pattern. The sink receives the current value
-    # once per tick.
-    def bind_continuous(name, pattern, &sink)
-      add_track(name, pattern, true, sink, 0)
+      add_track(name, pattern, sink, latency_ms)
     end
 
     # Change the output latency compensation of a track. Call restage
@@ -130,13 +119,13 @@ module Johakyu
       while i < @order.length
         track = @tracks[@order[i]]
         i += 1
-        next if track.nil? || track[:continuous]
+        next if track.nil?
         track[:staged_until] = position
       end
     end
 
-    # Sample continuous tracks and advance the most urgent discrete
-    # track by one staging chunk when it runs low.
+    # Advance the most urgent track by one staging chunk when it runs
+    # low.
     def tick
       started_ms = Machine.board_millis
       now_position = @clock.position
@@ -147,17 +136,7 @@ module Johakyu
         track = @tracks[@order[i]]
         i += 1
         next unless track
-        if track[:continuous]
-          last = track[:sampled_at_ms]
-          if last.nil? || started_ms - last >= CONTINUOUS_INTERVAL_MS
-            track[:sampled_at_ms] = started_ms
-            begin
-              sample_continuous(track, now_position)
-            rescue => e
-              track_failed(track, e)
-            end
-          end
-        elsif urgent.nil? || track[:staged_until] < urgent[:staged_until]
+        if urgent.nil? || track[:staged_until] < urgent[:staged_until]
           urgent = track
         end
       end
@@ -209,25 +188,20 @@ module Johakyu
 
     private
 
-    def add_track(name, pattern, continuous, sink, latency_ms)
+    def add_track(name, pattern, sink, latency_ms)
       track = @tracks[name]
       if track
         # Quantize the swap to the next integer cycle boundary. Events
         # already staged past the boundary belong to the old pattern;
         # drop them so the new pattern fills that range instead.
         swap_at = Fraction.of(@clock.position).next_sam
-        if !track[:continuous] && track[:staged_until] > swap_at
+        if track[:staged_until] > swap_at
           drop_pending(name, @clock.position_to_ms(swap_at).to_i - track[:latency_ms])
-          track[:staged_until] = swap_at
-        elsif track[:continuous] && !continuous
-          # The track was continuous, so staged_until never advanced.
-          # Stage the incoming discrete pattern from the swap boundary.
           track[:staged_until] = swap_at
         end
         track[:next_pattern] = pattern
         track[:swap_at] = swap_at
         track[:sink] = sink
-        track[:continuous] = continuous
         track[:latency_ms] = latency_ms
       else
         track = {
@@ -236,22 +210,18 @@ module Johakyu
           last_good: pattern,
           next_pattern: nil,
           swap_at: nil,
-          continuous: continuous,
           sink: sink,
           latency_ms: latency_ms,
           staged_until: Fraction.of(@clock.position),
-          sampled_at_ms: nil,
         }
         @tracks[name] = track
         @order << name
         # Stage the first chunk right away so a fresh track plays its
         # first events on time instead of waiting for a staging turn.
-        unless continuous
-          begin
-            stage_chunk(track)
-          rescue => e
-            track_failed(track, e)
-          end
+        begin
+          stage_chunk(track)
+        rescue => e
+          track_failed(track, e)
         end
       end
     end
@@ -324,18 +294,5 @@ module Johakyu
       end
     end
 
-    # Sample a continuous track at the current position. Pattern#sample
-    # gives Signals their Float fast path (no Fraction allocation).
-    def sample_continuous(track, now_position)
-      swap_at = track[:swap_at]
-      if swap_at && swap_at <= now_position
-        track[:pattern] = track[:next_pattern]
-        track[:next_pattern] = nil
-        track[:swap_at] = nil
-      end
-      value = track[:pattern].sample(now_position)
-      track[:sink].call(value, nil) unless value.nil?
-      track[:last_good] = track[:pattern]
-    end
   end
 end

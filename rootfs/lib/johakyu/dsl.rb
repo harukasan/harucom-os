@@ -1,26 +1,30 @@
-# Johakyu DSL: sound and light patterns driven from one clock
-# (research 05, stages A to C).
+# Johakyu Session: the all-pattern dispatcher. Every statement is a
+# Pattern of control maps (see control.rb); one query drives both
+# sinks. Sound controls (:s) become sample-accurate reservations on
+# the C audio engine; light controls become fixture writes at their
+# target frame time.
 #
 #   session = Johakyu::Session.new(audio: Board::PWMAudio.new, bpm: 120)
-#   session.seq(:bd, [1, 0, 0, 0, 1, 0, 0, 0])            # stage A
-#   session.sound("bd*4, hh*8").every(4) { |p| p.fast(2) } # stages B/C
-#   session.dmx(:s1).dimmer("1 0 0.5 0").color("<red blue>")
-#   session.dmx(:s2).pan(Johakyu.sine.range(0.2, 0.8).slow(8))
+#   session.load_kit
+#   session.bind_statement(:drums, Johakyu.sound("bd*4").color("<red blue>"))
 #   loop do
 #     session.update
 #     DMX.keepalive
 #     sleep_ms 10
 #   end
 #
-# Steps become a fastcat Pattern (one cycle per array), so the same
-# tracks accept mini notation and pattern transforms in later stages
-# without changing the scheduler. Sound steps treat 0/nil as rests;
-# DMX steps treat nil as a rest but 0 as a real value (a dimmer step
-# of 0 turns the light off at that step).
+# Timing: the scheduler stages events and fires each statement's sink
+# RESERVE_LEAD_MS early. The dispatcher converts the musical target
+# time to a sample offset (board_millis and sample_clock read as an
+# anchor pair) and reserves the sound in C, so playback lands sample
+# accurate regardless of loop jitter. Light writes wait in a small due
+# list and land on their target time with loop granularity, well
+# inside one 25 ms DMX frame.
 
 require "johakyu/pattern"
 require "johakyu/signal"
 require "johakyu/mini"
+require "johakyu/control"
 require "johakyu/clock"
 require "johakyu/scheduler"
 require "johakyu/fixture"
@@ -29,48 +33,67 @@ module Johakyu
   class Session
     attr_reader :clock, :scheduler
 
-    # Voice table: name -> [channel, frequency, waveform, gate_ms].
-    # Tone-based stand-ins until WAV playback lands (M5). The kick sits
-    # at 110 Hz: small speakers barely reproduce anything lower, and an
-    # inaudible kick makes the light look off-beat.
-    VOICES = {
-      bd: [0, 110, :square, 90],
-      sn: [1, 240, :triangle, 60],
-      hh: [2, 2200, :square, 25],
+    # Drum kit channel map, matching audio_demo: tones would use 0-2,
+    # drums one-shot on 3-7. Pairs sharing a channel cut each other
+    # off (hh/oh is the hihat choke). :sn aliases :sd so mini patterns
+    # written either way play.
+    KIT_CHANNELS = {
+      bd: 3, sd: 4, sn: 4, hh: 5, oh: 5,
+      cp: 6, rim: 6, lt: 7, ht: 7,
     }
+    KIT_SOURCES = {
+      bd: "bd", sd: "sd", sn: "sd", hh: "hh", oh: "oh",
+      cp: "cp", rim: "rim", lt: "lt", ht: "ht",
+    }
+    KIT_VOLUME = 14
 
-    # audio_latency_ms compensates the PWM audio output path: tone()
-    # becomes audible only after the ring buffer (1024 samples, about
-    # 46 ms) drains, while a DMX write lands within one 25 ms frame.
-    # Sound events therefore fire early by this amount so beats and
-    # light land together. The default was calibrated by ear against
-    # the SHEHDS rig (the fixture dimmer adds its own lag, so the best
-    # value sits below the raw buffer delay). Tune per venue with
-    # audio_latency_ms=.
-    def initialize(audio: nil, bpm: 120, audio_latency_ms: 20)
+    # Sound sinks fire this many ms before their musical target so the
+    # C reservation is placed ahead of time. Small enough that a
+    # quantized track swap leaks at most this much of the old pattern
+    # into the new cycle.
+    RESERVE_LEAD_MS = 60
+
+    # The audio engine renders at a fixed 50 kHz (PWMAudio::SAMPLE_RATE).
+    SAMPLES_PER_MS = 50
+
+    def initialize(audio: nil, bpm: 120, audio_latency_ms: 0)
       @clock = Clock.new(bpm: bpm)
       @scheduler = Scheduler.new(@clock)
       @audio = audio
       @audio_latency_ms = audio_latency_ms
-      @sound_tracks = []
-      @gates = []
-      @sound_pattern = nil
-      @sound_dirty = false
+      @light_pending = []
+      @default_target = nil
     end
 
-    attr_reader :audio_latency_ms
+    # Fine alignment trim between sound and light, in ms; positive
+    # values move sound earlier. Reservations are sample accurate, so
+    # this only compensates the light path (DMX frame quantization and
+    # fixture response). Tune per venue.
+    attr_accessor :audio_latency_ms
 
-    # Adjust the sound output latency compensation at runtime and
-    # restage so upcoming events use the new offset.
-    def audio_latency_ms=(ms)
-      ms = 0 if ms < 0
-      @audio_latency_ms = ms
-      i = 0
-      while i < @sound_tracks.length
-        @scheduler.set_latency(@sound_tracks[i], ms)
-        i += 1
+    # Attach the drum samples to their channels on the real engine.
+    # Loads /data/drums WAVs; a missing or unreadable file falls back
+    # to rendering the same Synth definition on the board (File.open
+    # returns nil for missing files instead of raising).
+    def load_kit
+      return unless @audio
+      attached = {}
+      KIT_SOURCES.each do |name, source|
+        next if attached[source]
+        data = nil
+        begin
+          data = File.open("/data/drums/#{source}.wav", "r") { |f| f.read }
+        rescue
+          data = nil
+        end
+        if data.nil? || data.bytesize < 44
+          require "synth/drum_kit"
+          data = Synth::DrumKit.render(source)
+        end
+        channel = @audio.channel(KIT_CHANNELS[name])
+        channel.source = ::PWMAudio::Sample.new(data)
+        attached[source] = true
       end
-      @scheduler.restage
     end
 
     def tempo(bpm)
@@ -80,204 +103,53 @@ module Johakyu
       @scheduler.restage
     end
 
-    # Sound step track: seq(:bd, [1, 0, 0.5, 0]). Values scale volume.
-    def seq(name, steps)
-      pattern = Session.steps_to_pattern(steps, true)
-      voice = VOICES[name] || VOICES[:bd]
-      track = ("sound_" + name.to_s).to_sym
-      @sound_tracks << track unless @sound_tracks.include?(track)
-      @scheduler.bind(track, pattern, latency_ms: @audio_latency_ms) do |value, at_ms|
-        trigger_voice(voice, value, at_ms)
+    # Bind one statement (a Pattern of control maps) to a named track.
+    # Rebinding swaps at the next cycle boundary (scheduler rule).
+    def bind_statement(name, pattern)
+      lead = RESERVE_LEAD_MS
+      @scheduler.bind(name, pattern, latency_ms: lead) do |value, early_ms|
+        dispatch_event(value, early_ms + lead)
       end
     end
 
-    # Light step track: dmx_seq(:all, :dimmer, [1.0, 0, 0.5, 0]).
-    # Integer steps write raw 0-255, Floats are normalized 0.0-1.0,
-    # Symbols use the personality name tables.
-    def dmx_seq(target, attribute, steps)
-      bind_dmx(target, attribute, Session.steps_to_pattern(steps, false))
+    def remove_statement(name)
+      @scheduler.remove(name)
     end
 
-    # Continuous light track: dmx_signal(:all, :pan, Johakyu.sine.slow(4)).
-    # Kept as the stage A name; bind_dmx detects signals itself, so
-    # this is the same binding as dmx(target).pan(...).
-    def dmx_signal(target, attribute, pattern)
-      bind_dmx(target, attribute, pattern)
-    end
-
-    # Stage B/C: sound("bd ~ sn ~") plays named voices from mini
-    # notation (or any Pattern). Values are voice names; "bd:2" style
-    # sample numbers are accepted and the number is ignored until WAV
-    # lands. Returns a handle so pattern transforms chain after the
-    # call, Strudel style:
-    #
-    #   sound("bd*4").every(4) { |p| p.fast(2) }
-    #
-    # The bind is deferred to the next update so a transform chain
-    # replaces the track once, with the final pattern. Binding per
-    # link would play the untransformed pattern for the first cycle.
-    def sound(pattern)
-      @sound_pattern = Pattern.reify(pattern)
-      @sound_dirty = true
-      SoundHandle.new(self)
-    end
-
-    # Apply one transform to the pending sound pattern (SoundHandle
-    # chain links call this).
-    def transform_sound(&block)
-      return unless @sound_pattern
-      @sound_pattern = block.call(@sound_pattern)
-      @sound_dirty = true
-    end
-
-    # Stage B: dmx(:s1).color("red blue").dimmer("1 0 0.5 0") binds
-    # fixture attributes to mini notation (or any Pattern). Track names
-    # match dmx_seq, so both styles swap over each other.
-    def dmx(target)
-      DmxTarget.new(self, target)
-    end
-
-    # Scheduler track name for one fixture attribute. Shared with the
-    # live layer so replace semantics can find stale tracks.
-    def self.dmx_track_name(target, attribute)
-      ("dmx_" + target.to_s + "_" + attribute.to_s).to_sym
-    end
-
-    # Bind one fixture attribute track. Continuous patterns (signals)
-    # are sampled every tick, discrete patterns are staged as events,
-    # so dmx(:s1).pan(Johakyu.sine.slow(8)) and dmx(:s1).pan("0 0.5")
-    # go through the same call. Used by dmx_seq, dmx_signal, DmxTarget.
-    def bind_dmx(target, attribute, pattern)
-      fixture = Johakyu.dmx(target)
-      track = Session.dmx_track_name(target, attribute)
-      if pattern.continuous?
-        @scheduler.bind_continuous(track, pattern) do |value, _at_ms|
-          Session.write_dmx(fixture, attribute, value)
-        end
-      else
-        @scheduler.bind(track, pattern) do |value, _at_ms|
-          Session.write_dmx(fixture, attribute, value)
-        end
-      end
-    end
-
-    # Chainable per-target binder returned by Session#dmx.
-    class DmxTarget
-      def initialize(session, target)
-        @session = session
-        @target = target
-      end
-
-      def pan(pattern)
-        bind(:pan, pattern)
-      end
-
-      def tilt(pattern)
-        bind(:tilt, pattern)
-      end
-
-      def dimmer(pattern)
-        bind(:dimmer, pattern)
-      end
-
-      def strobe(pattern)
-        bind(:strobe, pattern)
-      end
-
-      def color(pattern)
-        bind(:color, pattern)
-      end
-
-      def gobo(pattern)
-        bind(:gobo, pattern)
-      end
-
-      def focus(pattern)
-        bind(:focus, pattern)
-      end
-
-      def prism(pattern)
-        bind(:prism, pattern)
-      end
-
-      def speed(pattern)
-        bind(:speed, pattern)
-      end
-
-      private
-
-      def bind(attribute, pattern)
-        @session.bind_dmx(@target, attribute, Pattern.reify(pattern))
-        self
-      end
-    end
-
-    # Chainable transform handle returned by Session#sound. Each link
-    # transforms the pending sound pattern; the next update binds the
-    # final result once.
-    class SoundHandle
-      def initialize(session)
-        @session = session
-      end
-
-      def fast(factor)
-        transform { |p| p.fast(factor) }
-      end
-
-      def slow(factor)
-        transform { |p| p.slow(factor) }
-      end
-
-      def rev
-        transform { |p| p.rev }
-      end
-
-      def every(n, &func)
-        transform { |p| p.every(n, &func) }
-      end
-
-      def euclid(pulses, steps, rotation = 0)
-        transform { |p| p.euclid(pulses, steps, rotation) }
-      end
-
-      def struct(bool_pattern)
-        transform { |p| p.struct(bool_pattern) }
-      end
-
-      def mask(bool_pattern)
-        transform { |p| p.mask(bool_pattern) }
-      end
-
-      def degrade_by(amount)
-        transform { |p| p.degrade_by(amount) }
-      end
-
-      def degrade
-        transform { |p| p.degrade }
-      end
-
-      private
-
-      def transform(&block)
-        @session.transform_sound(&block)
-        self
-      end
-    end
-
-    # Advance the scheduler, fire due events, and release finished
-    # notes. Call every loop iteration. The audio engine renders
-    # autonomously in C and needs no pumping from here.
+    # Advance the scheduler, fire due sinks, and land due light writes.
+    # Call every loop iteration. The audio engine renders autonomously
+    # in C and needs no pumping from here.
     def update
-      flush_sound if @sound_dirty
       @scheduler.tick
       @scheduler.pump
-      pump_gates
+      pump_lights
     end
 
     # Silence all voices (does not touch DMX).
     def stop_sounds
-      @gates = []
       @audio.stop_all if @audio
+    end
+
+    # Split one control map into the two sinks. Sound reserves now for
+    # the target; light waits in the due list until the target.
+    def dispatch_event(value, target_ms)
+      map = value.is_a?(Hash) ? value : { s: value }
+      play_sound(map[:s], target_ms) if map[:s]
+
+      writes = nil
+      i = 0
+      while i < LIGHT_CONTROLS.length
+        key = LIGHT_CONTROLS[i]
+        i += 1
+        v = map[key]
+        next if v.nil?
+        writes = [] if writes.nil?
+        writes << key
+        writes << v
+      end
+      return if writes.nil?
+      target = map[:target] || (@default_target ||= Johakyu.dmx(:all))
+      @light_pending << [target_ms, target, writes]
     end
 
     # Resolve one event value onto a fixture attribute. Integers are
@@ -318,85 +190,42 @@ module Johakyu
       digits
     end
 
-    def self.steps_to_pattern(steps, zero_is_rest)
-      items = []
-      i = 0
-      while i < steps.length
-        value = steps[i]
-        if value.nil? || (zero_is_rest && value == 0)
-          items << Pattern.silence
-        else
-          items << Pattern.pure(value)
-        end
-        i += 1
-      end
-      Pattern.fastcat(*items)
-    end
-
     private
 
-    # Bind the pending sound pattern to the :sound track. Rebinding an
-    # existing track swaps at the next cycle boundary (scheduler rule),
-    # so live edits land musically.
-    def flush_sound
-      @sound_dirty = false
-      pattern = @sound_pattern
-      @sound_tracks << :sound unless @sound_tracks.include?(:sound)
-      @scheduler.bind(:sound, pattern, latency_ms: @audio_latency_ms) do |value, at_ms|
-        name = value.is_a?(Hash) ? value[:s] : value
-        name = name.to_sym if name.is_a?(String)
-        voice = VOICES[name]
-        trigger_voice(voice, 1.0, at_ms) if voice
-      end
-    end
-
-    def trigger_voice(voice, value, at_ms)
+    # Reserve one drum hit in the C engine at the target time,
+    # converted through a board_millis/sample_clock anchor pair read
+    # together. Unknown names are ignored, Tidal style.
+    def play_sound(name, target_ms)
       return unless @audio
-      level = value == true ? 1.0 : value.to_f
-      level = 0.0 if level < 0.0
-      level = 1.0 if level > 1.0
-      volume = (level * 15.0 + 0.5).to_i
-      return if volume == 0
-      channel = voice[0]
-      # Drop any pending gate for this channel so a stale note-off
-      # cannot silence the note we are about to start.
+      name = name.to_s
+      colon = name.index(":")
+      name = name[0, colon] if colon
+      channel = KIT_CHANNELS[name.to_sym]
+      return unless channel
+      target = target_ms - @audio_latency_ms
+      now_ms = Machine.board_millis
+      at_sample = @audio.sample_clock + (target - now_ms) * SAMPLES_PER_MS
+      at_sample = @audio.sample_clock if at_sample < @audio.sample_clock
+      @audio.play_at(at_sample, channel, KIT_VOLUME)
+    end
+
+    def pump_lights
+      now = Machine.board_millis
       i = 0
-      while i < @gates.length
-        if @gates[i][1] == channel
-          @gates.delete_at(i)
+      while i < @light_pending.length
+        event = @light_pending[i]
+        if event[0] <= now
+          @light_pending.delete_at(i)
+          fixture = event[1]
+          writes = event[2]
+          j = 0
+          while j < writes.length
+            Session.write_dmx(fixture, writes[j], writes[j + 1])
+            j += 2
+          end
         else
           i += 1
         end
-      end
-      @audio.tone(channel, voice[1], waveform: waveform(voice[2]), volume: volume)
-      # Gate from the actual start time, not the scheduled target. When
-      # the event fires late (GC or a slow loop iteration), a gate based
-      # on at_ms would already be due and stop the note immediately.
-      now = Machine.board_millis
-      start = at_ms > now ? at_ms : now
-      @gates << [start + voice[3], channel]
-    end
-
-    def pump_gates
-      now = Machine.board_millis
-      i = 0
-      while i < @gates.length
-        gate = @gates[i]
-        if gate[0] <= now
-          @gates.delete_at(i)
-          @audio.stop(gate[1])
-        else
-          i += 1
-        end
-      end
-    end
-
-    def waveform(name)
-      case name
-      when :sine then ::PWMAudio::SINE
-      when :triangle then ::PWMAudio::TRIANGLE
-      when :sawtooth then ::PWMAudio::SAWTOOTH
-      else ::PWMAudio::SQUARE
       end
     end
   end
