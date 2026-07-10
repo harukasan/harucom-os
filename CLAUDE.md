@@ -67,6 +67,7 @@ Design documents and implementation notes are in `doc/`:
 - [doc/editor-rendering.md](doc/editor-rendering.md) — Editor rendering (differential redraw dispatch, windowed syntax analysis, idle-frame parsing)
 - [doc/filesystem.md](doc/filesystem.md) — LittleFS filesystem on flash (littlefs, VFS, flash write safety)
 - [doc/pwm-audio.md](doc/pwm-audio.md) — PWM audio output (wrap-paced DMA, 3-channel synthesizer, sample-accurate scheduling)
+- [doc/dmx.md](doc/dmx.md) — DMX output (background 40 Hz UART/DMA engine, frame collision guard, dead-man switch)
 - [doc/editor-buffer-improvements.md](doc/editor-buffer-improvements.md) — Editor::Buffer improvement plan (desired column, tab width)
 
 ## Documentation style
