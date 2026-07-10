@@ -92,6 +92,12 @@ module Board
       ::PWMAudio.stop_at(sample, channel)
     end
 
+    # Schedule a one-shot sample trigger at an absolute sample
+    # position. Returns false when the event queue is full.
+    def play_at(sample, channel, volume = 15)
+      ::PWMAudio.play_at(sample, channel, volume)
+    end
+
     # Drop scheduled events for a channel (call before retriggering so
     # a stale scheduled stop cannot cut the new note).
     def cancel_scheduled(channel)
