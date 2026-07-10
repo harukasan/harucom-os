@@ -1,10 +1,11 @@
 # audio_demo: Board::PWMAudio synthesizer and drum kit demo
 #
-# Hold keyboard keys to play notes. Up to 3 keys for chords; sound
-# stops when keys are released. The bottom row triggers drum
-# one-shots on channels 3-7 (open and closed hihat share a channel,
+# The screen mirrors the physical keyboard: the top rows are the piano
+# keys (black keys on the number-adjacent row, white keys on the home
+# row) and the bottom row is the drum pads. Held keys light up. Hold up
+# to 3 note keys for chords; sound stops when keys are released. Drums
+# are one-shots on channels 3-7 (open and closed hihat share a channel,
 # so they choke each other like a real hihat).
-# Press Ctrl-C or Escape to quit.
 
 require "board/pad"
 require "board/pwm_audio"
@@ -14,21 +15,11 @@ keyboard = $keyboard
 audio = Board::PWMAudio.new
 left_pad = Board::Pad.new(Board::PAD0_PIN)
 
-DVI.set_mode(DVI::TEXT_MODE)
-DVI::Text.clear(0xF0)
-DVI::Text.put_string(0, 0, "Board::PWMAudio Demo", 0x1F)
-DVI::Text.put_string(0, 2, "Hold keys to play (up to 3 notes):", 0xF0)
-DVI::Text.put_string(0, 3, "  A S D F G H J = C D E F G A B", 0xF0)
-DVI::Text.put_string(0, 4, "  W E   T Y U   = C# D#  F# G# A#", 0xF0)
-DVI::Text.put_string(0, 5, "1:Sine 2:Square 3:Triangle 4:Sawtooth", 0xF0)
-DVI::Text.put_string(0, 6, "Drums: Z X C V B N M , = bd sd hh oh cp lt ht rim", 0xF0)
-DVI::Text.put_string(0, 7, "Pad UP/DOWN: octave  Esc: quit", 0xF0)
-
-LABEL_ATTR = 0xF0
-NOTE_ATTR  = 0xF4
+TEXT_ATTR    = 0xF0
+BAR_ATTR     = 0x0F
+PLAYING_ATTR = 0xF4
 
 # HID keycode -> semitone (0-11)
-# HID keycodes: a=0x04, b=0x05, ..., z=0x1D
 NOTE_KEYCODES = {
   0x04 => 0,   # A -> C
   0x1A => 1,   # W -> C#
@@ -43,11 +34,6 @@ NOTE_KEYCODES = {
   0x18 => 10,  # U -> A#
   0x0D => 11,  # J -> B
 }
-
-# HID keycodes for waveform selection (1-4 keys)
-KC_1 = 0x1E; KC_2 = 0x1F; KC_3 = 0x20; KC_4 = 0x21
-# HID keycodes for quit
-KC_ESCAPE = 0x29
 
 # HID keycode -> drum name (bottom row)
 DRUM_KEYCODES = {
@@ -71,6 +57,50 @@ DRUM_VOLUME = 14
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 WAVEFORM_NAMES = ["Sine", "Square", "Triangle", "Sawtooth"]
+
+# Screen layout, staggered like the physical key rows: white keys on
+# the home row, black keys in the gaps above them, drums half a key to
+# the right below. One cell per key: "[A]" plus a label underneath.
+WHITE_KEYS = [["A", 0x04], ["S", 0x16], ["D", 0x07], ["F", 0x09],
+              ["G", 0x0A], ["H", 0x0B], ["J", 0x0D]]
+BLACK_KEYS = [["W", 0x1A, 0], ["E", 0x08, 1], ["T", 0x17, 3],
+              ["Y", 0x1C, 4], ["U", 0x18, 5]]
+DRUM_KEYS = [["Z", 0x1D], ["X", 0x1B], ["C", 0x06], ["V", 0x19],
+             ["B", 0x05], ["N", 0x11], ["M", 0x10], [",", 0x36]]
+
+KEY_WIDTH = 6
+BLACK_CAP_ROW = 2
+BLACK_LABEL_ROW = 3
+WHITE_CAP_ROW = 5
+WHITE_LABEL_ROW = 6
+DRUM_CAP_ROW = 8
+DRUM_LABEL_ROW = 9
+PLAYING_ROW = 11
+
+cols = DVI::Text.cols
+rows = DVI::Text.rows
+command_row = rows - 1
+left = (cols - (DRUM_KEYS.length * KEY_WIDTH + 2)) / 2
+left = 1 if left < 1
+
+# keycode -> [column, row] of its cap on screen
+key_cells = {}
+i = 0
+while i < WHITE_KEYS.length
+  key_cells[WHITE_KEYS[i][1]] = [left + i * KEY_WIDTH, WHITE_CAP_ROW]
+  i += 1
+end
+i = 0
+while i < BLACK_KEYS.length
+  gap = BLACK_KEYS[i][2]
+  key_cells[BLACK_KEYS[i][1]] = [left + gap * KEY_WIDTH + 3, BLACK_CAP_ROW]
+  i += 1
+end
+i = 0
+while i < DRUM_KEYS.length
+  key_cells[DRUM_KEYS[i][1]] = [left + 2 + i * KEY_WIDTH, DRUM_CAP_ROW]
+  i += 1
+end
 
 def note_frequency(semitone, octave)
   base = [262, 277, 294, 311, 330, 349, 370, 392, 415, 440, 466, 494]
@@ -106,18 +136,70 @@ end
 octave = 4
 waveform = Board::PWMAudio::SQUARE
 waveform_idx = 1
+
+draw_title = lambda do
+  title = " audio demo  octave #{octave}  #{WAVEFORM_NAMES[waveform_idx].downcase}"
+  DVI::Text.put_string(0, 0, title.ljust(cols)[0, cols], BAR_ATTR)
+end
+
+draw_cap = lambda do |keycode, held|
+  cell = key_cells[keycode]
+  cap = nil
+  WHITE_KEYS.each { |k| cap = k[0] if k[1] == keycode }
+  BLACK_KEYS.each { |k| cap = k[0] if k[1] == keycode } unless cap
+  DRUM_KEYS.each { |k| cap = k[0] if k[1] == keycode } unless cap
+  DVI::Text.put_string(cell[0], cell[1], "[#{cap}]", held ? BAR_ATTR : TEXT_ATTR)
+end
+
+draw_keyboard = lambda do
+  i2 = 0
+  while i2 < BLACK_KEYS.length
+    keycode = BLACK_KEYS[i2][1]
+    x = key_cells[keycode][0]
+    draw_cap.call(keycode, false)
+    DVI::Text.put_string(x, BLACK_LABEL_ROW, NOTE_NAMES[NOTE_KEYCODES[keycode]].rjust(2), TEXT_ATTR)
+    i2 += 1
+  end
+  i2 = 0
+  while i2 < WHITE_KEYS.length
+    keycode = WHITE_KEYS[i2][1]
+    x = key_cells[keycode][0]
+    draw_cap.call(keycode, false)
+    DVI::Text.put_string(x + 1, WHITE_LABEL_ROW, NOTE_NAMES[NOTE_KEYCODES[keycode]], TEXT_ATTR)
+    i2 += 1
+  end
+  i2 = 0
+  while i2 < DRUM_KEYS.length
+    keycode = DRUM_KEYS[i2][1]
+    x = key_cells[keycode][0]
+    draw_cap.call(keycode, false)
+    DVI::Text.put_string(x, DRUM_LABEL_ROW, DRUM_KEYCODES[keycode].rjust(3), TEXT_ATTR)
+    i2 += 1
+  end
+end
+
+DVI.set_mode(DVI::TEXT_MODE)
+DVI::Text.clear(TEXT_ATTR)
+draw_title.call
+draw_keyboard.call
+help = " 1-4 waveform   pad up/down octave   Esc quit"
+DVI::Text.put_string(0, command_row, help.ljust(cols)[0, cols], BAR_ATTR)
+DVI::Text.commit
+
 prev_octave_up = false
 prev_octave_down = false
 prev_note_keycodes = []
 prev_keycodes = []
-prev_status = nil
+prev_title = nil
 
 loop do
+  dirty = false
+
   # Consume key events for Ctrl-C detection
   key = keyboard.read_char
   if key == Keyboard::CTRL_C || key == Keyboard::ESCAPE
     audio.deinit
-    DVI::Text.clear(0xF0)
+    DVI::Text.clear(TEXT_ATTR)
     DVI::Text.commit
     return
   end
@@ -154,17 +236,29 @@ loop do
     end
   end
 
-  # Trigger drums on newly pressed keys (edge detection on the raw
-  # report, so holding a key does not machine-gun the drum)
-  keycodes.each do |kc|
-    next if prev_keycodes.include?(kc)
-    name = DRUM_KEYCODES[kc]
-    next unless name
-    channel = audio.channel(DRUM_CHANNELS[name])
-    channel.source = drum_samples[name]
-    channel.play(volume: DRUM_VOLUME)
+  if keycodes != prev_keycodes
+    # Trigger drums on newly pressed keys (edge detection on the raw
+    # report, so holding a key does not machine-gun the drum)
+    keycodes.each do |kc|
+      next if prev_keycodes.include?(kc)
+      name = DRUM_KEYCODES[kc]
+      next unless name
+      channel = audio.channel(DRUM_CHANNELS[name])
+      channel.source = drum_samples[name]
+      channel.play(volume: DRUM_VOLUME)
+    end
+
+    # Light the caps of keys whose held state changed.
+    (keycodes + prev_keycodes).each do |kc|
+      next unless key_cells[kc]
+      held = keycodes.include?(kc)
+      if held != prev_keycodes.include?(kc)
+        draw_cap.call(kc, held)
+        dirty = true
+      end
+    end
+    prev_keycodes = keycodes
   end
-  prev_keycodes = keycodes
 
   # Collect currently held note keycodes (up to 3)
   note_keycodes = []
@@ -175,7 +269,6 @@ loop do
   end
 
   # Update channels only when held notes change
-  dirty = false
   if note_keycodes != prev_note_keycodes
     # Scale volume by number of simultaneous notes to avoid clipping
     count = note_keycodes.length
@@ -196,23 +289,22 @@ loop do
       end
     end
 
-    # Display
     if note_keycodes.length > 0
       names = note_keycodes.map { |kc| "#{NOTE_NAMES[NOTE_KEYCODES[kc]]}#{octave}" }
-      DVI::Text.put_string(0, 10, "Playing: #{names.join(" + ")}                    ", NOTE_ATTR)
+      DVI::Text.put_string(0, PLAYING_ROW, " playing: #{names.join(" + ")}".ljust(cols)[0, cols], PLAYING_ATTR)
     else
-      DVI::Text.put_string(0, 10, "                                        ", LABEL_ATTR)
+      DVI::Text.clear_line(PLAYING_ROW, TEXT_ATTR)
     end
 
     prev_note_keycodes = note_keycodes
     dirty = true
   end
 
-  # Status display
-  status = "Octave: #{octave}  Waveform: #{WAVEFORM_NAMES[waveform_idx]}       "
-  if status != prev_status
-    DVI::Text.put_string(0, 8, status, LABEL_ATTR)
-    prev_status = status
+  # The title bar carries the octave and waveform state.
+  title_state = "#{octave}/#{waveform_idx}"
+  if title_state != prev_title
+    draw_title.call
+    prev_title = title_state
     dirty = true
   end
 
