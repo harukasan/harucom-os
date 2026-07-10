@@ -12,8 +12,9 @@
 # coefficient math, and the drum definitions (synth/drum_kit.rb), so
 # sounds are edited in one place for every platform. The per-sample
 # loops run through a small fixed kernel set with two interchangeable
-# backends: Synth::Native (the picoruby-synth gem, single-precision C,
-# tens of milliseconds per drum on the board) and Synth::Kernels (pure
+# backends: Synth::Native (the picoruby-synth-native gem,
+# single-precision C, tens of milliseconds per drum on the board) and
+# Synth::Kernels (pure
 # Ruby, used on host CRuby). The kernels carry no musical meaning and
 # do not change when sounds do.
 #

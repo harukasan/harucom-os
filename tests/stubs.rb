@@ -12,14 +12,6 @@ module Machine
   end
 end
 
-# Waveform constants from the audio engine, used by the Synth library.
-module PWMAudio
-  SINE = 0
-  SQUARE = 1
-  TRIANGLE = 2
-  SAWTOOTH = 3
-end
-
 # DVI text mode stub for Console. Models the runtime grid dimensions
 # (set_resolution switches 106x37 and 53x18 like the driver) and stores
 # per-cell attributes for cursor rendering. Cell text is not modeled.
