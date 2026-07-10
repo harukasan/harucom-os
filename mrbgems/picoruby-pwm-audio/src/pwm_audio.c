@@ -115,6 +115,37 @@ pwm_audio_bias_fade(bool enable)
   bias_enabled = enable;
 }
 
+/* PolyBLEP (2-point polynomial band-limited step) residual at a discontinuity.
+ * t and dt are the normalized phase (0..1) and per-sample phase step. A naive
+ * square/sawtooth places each edge on the output sample grid, so the edge jitters
+ * by up to half a sample; that jitter folds the waveform's high harmonics back
+ * into the audio band as inharmonic aliasing (audible roughness, worse at higher
+ * notes). Adding this residual moves the step to its true fractional position and
+ * band-limits it, cutting the in-band aliasing by ~20 dB. Returns 0 away from an
+ * edge (the common case), so the divide only runs in the two narrow edge regions. */
+static inline float
+poly_blep(float t, float dt)
+{
+  if (t < dt) {
+    float x = t / dt;
+    return x + x - x * x - 1.0f;
+  }
+  if (t > 1.0f - dt) {
+    float x = (t - 1.0f) / dt;
+    return x * x + x + x + 1.0f;
+  }
+  return 0.0f;
+}
+
+/* Map a band-limited bipolar sample (~ -1..+1, may overshoot at edges) to the
+ * unsigned 0..4095 waveform range, clamping the PolyBLEP overshoot to the rails. */
+static inline uint32_t
+bipolar_to_amp(float v)
+{
+  int s = (int)(v * 2047.5f + 2047.5f + 0.5f);
+  return (uint32_t)(s < 0 ? 0 : (s > 4095 ? 4095 : s));
+}
+
 static inline uint32_t
 generate_waveform(pwm_audio_channel_t *ch)
 {
@@ -129,11 +160,26 @@ generate_waveform(pwm_audio_channel_t *ch)
     return tri >> 1;
   }
 
-  case PWM_AUDIO_WAVE_SAWTOOTH:
-    return ch->phase >> 20;
+  case PWM_AUDIO_WAVE_SAWTOOTH: {
+    /* Rising ramp with a band-limited reset (subtract the BLEP at the wrap). */
+    float t = (float)ch->phase * (1.0f / 4294967296.0f);
+    float dt = (float)ch->phase_increment * (1.0f / 4294967296.0f);
+    float v = (2.0f * t - 1.0f) - poly_blep(t, dt);
+    return bipolar_to_amp(v);
+  }
 
-  default: /* PWM_AUDIO_WAVE_SQUARE */
-    return (ch->phase >> 31) ? 4095 : 0;
+  default: { /* PWM_AUDIO_WAVE_SQUARE */
+    /* 50% duty, low then high (matches the old phase>>31 polarity), with a
+     * band-limited step at each edge (rising at t=0.5, falling at the wrap). */
+    float t = (float)ch->phase * (1.0f / 4294967296.0f);
+    float dt = (float)ch->phase_increment * (1.0f / 4294967296.0f);
+    float v = (t < 0.5f) ? -1.0f : 1.0f;
+    float t2 = t - 0.5f;
+    if (t2 < 0.0f) t2 += 1.0f;
+    v += poly_blep(t2, dt); /* rising edge at t=0.5 */
+    v -= poly_blep(t, dt);  /* falling edge at t=0 (wrap) */
+    return bipolar_to_amp(v);
+  }
   }
 }
 
