@@ -150,11 +150,12 @@ DRUM_KEYCODES.each_value do |name|
 end
 
 octave = 4
+transpose = 0
 waveform = Board::PWMAudio::SQUARE
 waveform_idx = 1
 
 draw_title = lambda do
-  title = " audio demo  octave #{octave}  #{WAVEFORM_NAMES[waveform_idx].downcase}"
+  title = " audio demo  octave #{octave}  transpose #{sprintf("%+d", transpose)}  #{WAVEFORM_NAMES[waveform_idx].downcase}"
   DVI::Text.put_string(0, 0, title.ljust(cols)[0, cols], BAR_ATTR)
 end
 
@@ -198,7 +199,7 @@ DVI.set_mode(DVI::TEXT_MODE)
 DVI::Text.clear(TEXT_ATTR)
 draw_title.call
 draw_keyboard.call
-help = " 1-4 waveform   arrows/pad octave   Esc quit"
+help = " 1-4 wave   ^v octave   <> transpose   Esc quit"
 DVI::Text.put_string(0, command_row, help.ljust(cols)[0, cols], BAR_ATTR)
 DVI::Text.commit
 
@@ -217,9 +218,10 @@ loop do
   key = keyboard.read_char
   break if key == Keyboard::CTRL_C || key == Keyboard::ESCAPE
 
-  previous_setting = [octave, waveform]
+  previous_setting = [octave, transpose, waveform]
 
-  # Octave shift via pad (edge detection) or cursor keys
+  # Octave shift via pad (edge detection) or cursor keys; left/right
+  # transposes in semitones.
   left_pad.read
   if left_pad.up? && !prev_octave_up
     octave = octave + 1 if octave < 7
@@ -234,6 +236,10 @@ loop do
       octave = octave + 1 if octave < 7
     elsif key.match?(:down)
       octave = octave - 1 if octave > 1
+    elsif key.match?(:left)
+      transpose = transpose - 1 if transpose > -11
+    elsif key.match?(:right)
+      transpose = transpose + 1 if transpose < 11
     end
   end
 
@@ -258,8 +264,8 @@ loop do
     end
   end
 
-  # Retune held notes right away when the octave or waveform changes.
-  prev_note_keycodes = nil if [octave, waveform] != previous_setting
+  # Retune held notes right away when the setting changes.
+  prev_note_keycodes = nil if [octave, transpose, waveform] != previous_setting
 
   if keycodes != prev_keycodes
     # Trigger drums on newly pressed keys (edge detection on the raw
@@ -306,7 +312,7 @@ loop do
     3.times do |ch|
       kc = note_keycodes[ch]
       if kc
-        semitone = NOTE_KEYCODES[kc]
+        semitone = NOTE_KEYCODES[kc] + transpose
         freq = note_frequency(semitone, octave)
         audio.tone(ch, freq, waveform: waveform, volume: volume)
       else
@@ -315,7 +321,7 @@ loop do
     end
 
     if note_keycodes.length > 0
-      names = note_keycodes.map { |kc| note_name(NOTE_KEYCODES[kc], octave) }
+      names = note_keycodes.map { |kc| note_name(NOTE_KEYCODES[kc] + transpose, octave) }
       DVI::Text.put_string(0, PLAYING_ROW, " playing: #{names.join(" + ")}".ljust(cols)[0, cols], PLAYING_ATTR)
     else
       DVI::Text.clear_line(PLAYING_ROW, TEXT_ATTR)
@@ -325,8 +331,8 @@ loop do
     dirty = true
   end
 
-  # The title bar carries the octave and waveform state.
-  title_state = "#{octave}/#{waveform_idx}"
+  # The title bar carries the octave, transpose and waveform state.
+  title_state = "#{octave}/#{transpose}/#{waveform_idx}"
   if title_state != prev_title
     draw_title.call
     prev_title = title_state
