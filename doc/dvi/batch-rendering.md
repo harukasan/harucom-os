@@ -13,6 +13,11 @@ providing ~24,500 cycles of headroom.
 remain single (45 IRQs: 10 VFP + 2 VSYNC + 33 VBP).  Total: 165 IRQs
 per frame.
 
+In 2x scaled text mode a batch covers 2 source lines instead of 4: each
+rendered line buffer is referenced by two consecutive DVI scanline
+descriptors, consuming 2 line buffers per batch.  See
+[text-mode-rendering.md](text-mode-rendering.md).
+
 ## Design
 
 ### Line buffers: 2N = 8

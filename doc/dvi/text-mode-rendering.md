@@ -1,8 +1,11 @@
 # Text Mode Rendering
 
-Text mode renders a 106x37 character grid at native 640x480 resolution.
-Each scanline is rendered by the DMA IRQ handler on Core 1, converting
-text VRAM cells into 640 RGB332 pixels via inline ARM Thumb-2 assembly.
+Text mode renders a character grid at two runtime-selectable source
+resolutions: 106x37 at native 640x480, or 53x18 at 320x240 scaled 2x to
+the DVI output (see [Scaled text mode](#scaled-text-mode-2x)). Each
+scanline is rendered by the DMA IRQ handler on Core 1, converting text
+VRAM cells into RGB332 pixels via inline ARM Thumb-2 assembly (native)
+or plain C (scaled).
 
 ## Text VRAM
 
@@ -20,6 +23,12 @@ For narrow characters, `ch` holds the ASCII code (0-255), with bit 8 set
 for bold (mapping into the 256-511 bold region of the narrow cache).
 For wide characters, `ch` holds the linear JIS index directly (used by
 `write_line` for glyph re-rendering from scrollback).
+
+Physical rows always use the fixed `TEXT_VRAM_STRIDE` (106 cells), so
+cell addressing is independent of the active column count. The active
+grid (`text_cols` x `text_rows`) bounds writes, string wrapping, and the
+scroll ring modulus; in scaled mode only the first 53 cells of each of
+the first 18 physical rows are active.
 
 16-color palette maps 4-bit indices to RGB332 values (VGA-compatible
 defaults).
@@ -110,3 +119,42 @@ Key render-loop optimizations:
 
 The render function and IRQ handler are placed in SCRATCH_X to avoid
 flash instruction fetch during rendering.
+
+## Scaled Text Mode (2x)
+
+`dvi_set_text_scale(2)` (Ruby: `DVI::Text.set_resolution(320, 240)`)
+switches text mode to a 320x240 source resolution scaled 2x to the
+640x480 DVI output. The grid becomes 53x18: 53 cells cover 318 pixels
+with 2 black padding pixels on the right, and 18 rows cover 234 source
+lines with the remaining 6 source lines (12 DVI lines) black at the
+bottom.
+
+The scale change is requested from Core 0 and applied by the DMA IRQ in
+the same VSync window as the HSTX reconfiguration, mirroring the
+graphics scale mechanism. On application, both ring scroll offsets are
+clamped below the new row count (the render side by the IRQ, the write
+side by the blocked Core 0 caller) so the single-subtraction ring wrap
+stays in bounds when the grid shrinks from 37 to 18 rows.
+
+Scaling reuses the 320x240 graphics mode mechanics:
+
+- **Horizontal**: pixel groups transfer 320 bytes with `DMA_SIZE_8` and
+  the HSTX expander is configured with `ENC_N_SHIFTS = 2`, so each byte
+  is TMDS-encoded twice (byte-lane replication).
+- **Vertical**: a batch of 4 DVI lines covers 2 source lines; each
+  rendered line buffer is referenced by two consecutive DVI scanline
+  descriptors.
+
+`render_text_scanline_12wide_scaled()` renders one 320 pixel source
+line. It is plain C in main SRAM (`.time_critical`), not SCRATCH_X asm:
+at half the width and half the line rate it has roughly 4x the cycle
+budget of the native renderer. It handles narrow and wide cells in a
+single loop (no narrow-only pair path, so the odd column count needs no
+special casing) and reads the same narrow row cache, per-position glyph
+bitmap, and font-byte-mask LUT as the native renderer.
+
+`prepare_batch_dma_text_scaled()` builds the batch descriptors. It is
+also RAM-resident because it runs during flash-write blanking, where
+every source switches to `blank_line_buf` with the scale 2 transfer
+count (the native blanking branch would feed the wrong count for the
+scale 2 HSTX configuration).

@@ -38,7 +38,7 @@ typedef struct {
 
 typedef enum {
   DVI_MODE_GRAPHICS, // RGB332 framebuffer (resolution set by DVI_GRAPHICS_SCALE)
-  DVI_MODE_TEXT,     // text VRAM, native 640x480
+  DVI_MODE_TEXT,     // text VRAM, 640x480 native or 320x240 (2x scaled)
 } dvi_mode_t;
 
 // Font data structure (defined in dvi_font.h)
@@ -76,6 +76,10 @@ void dvi_graphics_commit(void);
 dvi_text_cell_t *dvi_get_text_vram(void);
 int dvi_text_get_cols(void);
 int dvi_text_get_rows(void);
+// Runtime text resolution. Scale 1 = 640x480 native (106x37 grid with the
+// 12px font), scale 2 = 320x240 scaled 2x to the DVI output (53x18 grid).
+// Blocks until the VSync IRQ applies the change.
+void dvi_set_text_scale(int scale);
 void dvi_text_set_font(const dvi_font_t *font);
 void dvi_text_set_wide_font(const dvi_font_t *font);
 void dvi_text_set_bold_font(const dvi_font_t *font);
