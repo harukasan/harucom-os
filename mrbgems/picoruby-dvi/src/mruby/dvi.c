@@ -605,6 +605,10 @@ mrb_dvi_text_read_line(mrb_state *mrb, mrb_value klass)
   if (row < 0 || row >= dvi_text_get_rows()) mrb_raise(mrb, E_ARGUMENT_ERROR, "row out of range");
   struct dvi_text_line *line =
       (struct dvi_text_line *)mrb_malloc(mrb, sizeof(struct dvi_text_line));
+  // read_line fills only the active columns. Zero the rest so a Line
+  // written back after a resolution switch carries blanks, not heap
+  // garbage.
+  memset(line, 0, sizeof(struct dvi_text_line));
   dvi_text_read_line(row, line->cells);
   return mrb_obj_value(mrb_data_object_alloc(mrb, class_Line, line, &dvi_text_line_type));
 }
