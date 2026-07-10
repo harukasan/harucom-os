@@ -15,6 +15,7 @@ $LOAD_PATH.unshift picotest_lib   # require "picotest" during discovery
 $LOAD_PATH.unshift rootfs_lib     # test files require rootfs libs during discovery
 
 require "picotest"
+require "tmpdir"
 
 ENV["RUBY"] ||= File.join(project_dir, "lib/picoruby/build/harucom-host-test/bin/microruby")
 unless File.executable?(ENV["RUBY"])
@@ -24,7 +25,7 @@ end
 runner = Picotest::Runner.new(
   File.join(project_dir, "tests"),
   filter: ARGV[0],
-  tmpdir: "/tmp",
+  tmpdir: Dir.tmpdir,
   load_files: [File.join(project_dir, "tests", "stubs.rb")],
   load_path: rootfs_lib
 )
