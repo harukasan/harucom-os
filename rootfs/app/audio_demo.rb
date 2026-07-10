@@ -96,7 +96,9 @@ DRUM_KEYCODES.each_value do |name|
     data = nil
   end
   if data.nil? || data.bytesize < 44
+    started = Machine.uptime_us
     data = Synth::DrumKit.render(name)
+    puts "audio_demo: rendered #{name} on board in #{(Machine.uptime_us - started) / 1000} ms"
   end
   drum_samples[name] = PWMAudio::Sample.new(data)
 end

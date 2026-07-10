@@ -135,10 +135,16 @@ module Synth
           i += 1
         end
       else
+        # Integer phase in 1/2^32 turns, like the xorshift noise:
+        # exact and identical in every backend. A float phase
+        # accumulator drifts between float widths (boxed VM floats
+        # truncate mantissa bits) and a drifted square flips whole
+        # samples at its edges.
+        acc = 0
+        scale = 4294967296.0 / rate
         while i < freqs.length
-          phase += freqs[i] / rate
-          phase -= 1.0 if phase >= 1.0
-          out[i] = phase < 0.5 ? 1.0 : -1.0
+          acc = (acc + (freqs[i] * scale + 0.5).to_i) & 0xFFFFFFFF
+          out[i] = acc < 0x80000000 ? 1.0 : -1.0
           i += 1
         end
       end

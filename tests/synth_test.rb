@@ -104,23 +104,27 @@ class SynthTest < Picotest::Test
 
   # The C kernels must produce the same sound as the Ruby kernels:
   # identical length, PCM within a small tolerance (float vs double).
+  # cp covers the noise and filter kernels, hh covers the square
+  # oscillator whose edge decisions must match between backends.
   def test_native_backend_matches_pure_ruby
     assert_equal true, Synth::NATIVE_AVAILABLE
-    Synth.use_native = false
-    pure = Synth::DrumKit.render("cp", rate: 8000)
-    Synth.use_native = true
-    native = Synth::DrumKit.render("cp", rate: 8000)
-    assert_equal pure.bytesize, native.bytesize
-    a = pcm_of(pure)
-    b = pcm_of(native)
-    worst = 0
-    i = 0
-    while i < a.length
-      d = a[i] - b[i]
-      d = -d if d < 0
-      worst = d if d > worst
-      i += 1
+    ["cp", "hh"].each do |name|
+      Synth.use_native = false
+      pure = Synth::DrumKit.render(name, rate: 8000)
+      Synth.use_native = true
+      native = Synth::DrumKit.render(name, rate: 8000)
+      assert_equal pure.bytesize, native.bytesize
+      a = pcm_of(pure)
+      b = pcm_of(native)
+      worst = 0
+      i = 0
+      while i < a.length
+        d = a[i] - b[i]
+        d = -d if d < 0
+        worst = d if d > worst
+        i += 1
+      end
+      assert_equal true, worst <= 64
     end
-    assert_equal true, worst <= 64
   end
 end

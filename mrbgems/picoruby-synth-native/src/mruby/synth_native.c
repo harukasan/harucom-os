@@ -27,6 +27,31 @@ typedef struct {
   float data[];
 } synth_native_t;
 
+/* Exponential decays run as a multiply recurrence (one expf for the
+ * per-sample ratio) instead of calling expf per sample. Rounding error
+ * grows with the sample count, so the exact value is recomputed every
+ * RESYNC samples, keeping the drift below a few 16-bit LSB while the
+ * expf cost stays at 0.1% of the samples. */
+#define SYNTH_EXP_RESYNC 1024
+
+/* sinf costs hundreds of cycles on the M33; a 256-entry quarter-step
+ * table with linear interpolation is accurate to about 2e-5, well
+ * under one 16-bit LSB. Filled on first use to keep this file free of
+ * generated data. */
+#define SINE_TABLE_SIZE 256
+static float sine_table[SINE_TABLE_SIZE + 1];
+static int sine_table_ready = 0;
+
+static void
+sine_table_init(void)
+{
+  if (sine_table_ready) return;
+  for (int i = 0; i <= SINE_TABLE_SIZE; i++) {
+    sine_table[i] = sinf(2.0f * (float)M_PI * (float)i / (float)SINE_TABLE_SIZE);
+  }
+  sine_table_ready = 1;
+}
+
 static void
 synth_native_free(mrb_state *mrb, void *ptr)
 {
@@ -83,9 +108,15 @@ mrb_native_exp_curve(mrb_state *mrb, mrb_value self)
   mrb_get_args(mrb, "iifff", &length, &rate, &base, &amount, &curve);
   synth_native_t *out = native_alloc(mrb, (uint32_t)length);
   float rate_f = (float)rate;
+  float base_f = (float)base, amount_f = (float)amount, curve_f = (float)curve;
+  float ratio = expf(-curve_f / rate_f);
+  float e = 1.0f;
   for (mrb_int i = 0; i < length; i++) {
-    float t = (float)i / rate_f;
-    out->data[i] = (float)base + (float)amount * expf(-t * (float)curve);
+    if ((i & (SYNTH_EXP_RESYNC - 1)) == 0) {
+      e = expf(-((float)i / rate_f) * curve_f);
+    }
+    out->data[i] = base_f + amount_f * e;
+    e *= ratio;
   }
   return native_wrap(mrb, out);
 }
@@ -109,9 +140,16 @@ mrb_native_envelope(mrb_state *mrb, mrb_value self)
     if (start + cut_samples < stop) stop = start + cut_samples;
   }
   float rate_f = (float)rate;
+  float decay_f = (float)decay, level_f = (float)level;
+  float ratio = expf(-decay_f / rate_f);
+  float e = level_f;
   for (int64_t i = start; i >= 0 && i <= stop; i++) {
-    float t = (float)(i - start) / rate_f;
-    out->data[i] = expf(-t * (float)decay) * (float)level;
+    int64_t k = i - start;
+    if ((k & (SYNTH_EXP_RESYNC - 1)) == 0) {
+      e = expf(-((float)k / rate_f) * decay_f) * level_f;
+    }
+    out->data[i] = e;
+    e *= ratio;
   }
   return native_wrap(mrb, out);
 }
@@ -150,17 +188,31 @@ mrb_native_oscillate(mrb_state *mrb, mrb_value self)
   synth_native_t *out = native_alloc(mrb, freqs->length);
   float rate_f = (float)rate;
   if (shape == 0) {
-    float phase = 0.0f;
-    for (uint32_t i = 0; i < freqs->length; i++) {
-      phase += 2.0f * (float)M_PI * freqs->data[i] / rate_f;
-      out->data[i] = sinf(phase);
-    }
-  } else {
+    /* Phase runs in turns and wraps every sample, which also keeps
+     * float precision constant where the old unbounded radian
+     * accumulator degraded over long buffers. */
+    sine_table_init();
     float phase = 0.0f;
     for (uint32_t i = 0; i < freqs->length; i++) {
       phase += freqs->data[i] / rate_f;
-      if (phase >= 1.0f) phase -= 1.0f;
-      out->data[i] = phase < 0.5f ? 1.0f : -1.0f;
+      phase -= (float)(int32_t)phase;
+      if (phase < 0.0f) phase += 1.0f;
+      float pos = phase * (float)SINE_TABLE_SIZE;
+      int32_t idx = (int32_t)pos;
+      float frac = pos - (float)idx;
+      out->data[i] = sine_table[idx] + (sine_table[idx + 1] - sine_table[idx]) * frac;
+    }
+  } else {
+    /* Integer phase in 1/2^32 turns, like the xorshift noise: exact
+     * and identical in every backend. A float phase accumulator
+     * drifts between float widths (boxed VM floats truncate mantissa
+     * bits) and a drifted square flips whole samples at its edges. */
+    uint32_t acc = 0;
+    double scale = 4294967296.0 / (double)rate;
+    for (uint32_t i = 0; i < freqs->length; i++) {
+      uint32_t step = (uint32_t)(int64_t)((double)freqs->data[i] * scale + 0.5);
+      acc += step;
+      out->data[i] = acc < 0x80000000u ? 1.0f : -1.0f;
     }
   }
   return native_wrap(mrb, out);
