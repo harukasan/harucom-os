@@ -40,7 +40,7 @@ The PicoRuby build cache is separate and only cleared by `distclean`.
 Host tests for `rootfs/` scripts live in `tests/` and are never flashed
 to the board. `rake test` runs them through picoruby's Picotest: a CRuby
 orchestrator (`tests/runner.rb`) discovers `tests/*_test.rb` files and
-executes each test class on a host microruby VM built from
+executes each test class on a host picoruby VM built from
 [build_config/harucom-os-host-test.rb](build_config/harucom-os-host-test.rb),
 which uses the same VM class and defines (`MRB_INT64` etc.) as the
 firmware, so mruby incompatibilities surface in tests instead of on the

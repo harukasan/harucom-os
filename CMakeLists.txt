@@ -204,7 +204,9 @@ target_compile_definitions(harucom_os PRIVATE
     HARUCOM_BUILD_DATE="${HARUCOM_BUILD_DATE}"
     PICO_RP2350=1
     PICORB_VM_MRUBY=1
+    PICORB_PLATFORM_RP2=1
     MRB_INT64=1
+    MRB_NO_BOXING=1
     MRB_32BIT=1
     PICORB_ALLOC_ESTALLOC=1
     PICORB_ALLOC_ALIGN=8
@@ -228,8 +230,8 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-mruby/include
-    ${PICORUBY_ROOT}/mrbgems/mruby-compiler2/include
-    ${PICORUBY_ROOT}/mrbgems/mruby-compiler2/lib/prism/include
+    ${PICORUBY_ROOT}/mrbgems/mruby-compiler/include
+    ${PICORUBY_ROOT}/mrbgems/mruby-compiler/lib/prism/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-task/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-machine/include
@@ -264,6 +266,7 @@ target_link_libraries(harucom_os
     hardware_gpio
     hardware_uart
     hardware_flash
+    pico_rand
     hardware_sync
     hardware_watchdog
     tinyusb_host
