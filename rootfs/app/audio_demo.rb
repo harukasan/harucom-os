@@ -174,7 +174,8 @@ draw_keyboard = lambda do
     keycode = BLACK_KEYS[i2][1]
     x = key_cells[keycode][0]
     draw_cap.call(keycode, false)
-    DVI::Text.put_string(x, BLACK_LABEL_ROW, NOTE_NAMES[NOTE_KEYCODES[keycode] % 12].rjust(2), TEXT_ATTR)
+    DVI::Text.put_string(x, BLACK_LABEL_ROW,
+                         NOTE_NAMES[(NOTE_KEYCODES[keycode] + transpose) % 12].rjust(2), TEXT_ATTR)
     i2 += 1
   end
   i2 = 0
@@ -182,7 +183,8 @@ draw_keyboard = lambda do
     keycode = WHITE_KEYS[i2][1]
     x = key_cells[keycode][0]
     draw_cap.call(keycode, false)
-    DVI::Text.put_string(x + 1, WHITE_LABEL_ROW, NOTE_NAMES[NOTE_KEYCODES[keycode] % 12], TEXT_ATTR)
+    DVI::Text.put_string(x + 1, WHITE_LABEL_ROW,
+                         NOTE_NAMES[(NOTE_KEYCODES[keycode] + transpose) % 12].ljust(2), TEXT_ATTR)
     i2 += 1
   end
   i2 = 0
@@ -264,8 +266,16 @@ loop do
     end
   end
 
-  # Retune held notes right away when the setting changes.
-  prev_note_keycodes = nil if [octave, transpose, waveform] != previous_setting
+  # Retune held notes right away when the setting changes, and relabel
+  # the keys with the notes they now play when the transpose moves.
+  if [octave, transpose, waveform] != previous_setting
+    prev_note_keycodes = nil
+    if transpose != previous_setting[1]
+      draw_keyboard.call
+      keycodes.each { |kc| draw_cap.call(kc, true) if key_cells[kc] }
+      dirty = true
+    end
+  end
 
   if keycodes != prev_keycodes
     # Trigger drums on newly pressed keys (edge detection on the raw
