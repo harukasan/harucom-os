@@ -25,8 +25,12 @@
 module Synth
   DEFAULT_SEED = 0x4A4F4841
 
-  # The classic metallic hihat source: six detuned square partials.
-  HIHAT_PARTIALS = [2126.0, 3219.0, 3386.0, 3811.0, 4740.0, 6788.0]
+  # The classic metallic hihat source, TR-808 style: six square waves
+  # in the 200-800 Hz band. Their stacked overtones form dense
+  # inharmonic hash in the highs; the hat definitions then carve the
+  # 8-10 kHz region out of it, which removes the tonal fundamentals
+  # (kept low here so a bandpass can reject them completely).
+  HIHAT_PARTIALS = [204.0, 298.0, 366.0, 515.0, 540.0, 800.0]
 
   SINE_SHAPE = 0
   SQUARE_SHAPE = 1

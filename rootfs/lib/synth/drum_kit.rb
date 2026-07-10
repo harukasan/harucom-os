@@ -42,11 +42,13 @@ module Synth
     end
 
     define("hh") do
-      metallic(0.09, decay: 46.0).highpass(6800.0)
+      # 808 signal path: the square stack goes through a resonant
+      # bandpass and a highpass, so only the 8-10 kHz hash remains.
+      metallic(0.09, decay: 46.0).bandpass(10000.0, q: 1.2).highpass(8000.0)
     end
 
     define("oh") do
-      metallic(0.45, decay: 7.5).highpass(6800.0)
+      metallic(0.45, decay: 7.5).bandpass(10000.0, q: 1.2).highpass(8000.0)
     end
 
     define("cp") do
