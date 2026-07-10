@@ -128,7 +128,8 @@ DRUM_KEYCODES.each_value do |name|
   if data.nil? || data.bytesize < 44
     started = Machine.uptime_us
     data = Synth::DrumKit.render(name)
-    puts "audio_demo: rendered #{name} on board in #{(Machine.uptime_us - started) / 1000} ms"
+    # STDOUT is the debug UART; keep the render timing off the screen.
+    STDOUT.puts "audio_demo: rendered #{name} on board in #{(Machine.uptime_us - started) / 1000} ms"
   end
   drum_samples[name] = PWMAudio::Sample.new(data)
 end
@@ -195,14 +196,11 @@ prev_title = nil
 loop do
   dirty = false
 
-  # Consume key events for Ctrl-C detection
+  # Consume key events for Ctrl-C detection. Leave through break: a
+  # top-level return from a loaded script does not unwind reliably in
+  # the IRB sandbox, so the cleanup runs at the end of the file.
   key = keyboard.read_char
-  if key == Keyboard::CTRL_C || key == Keyboard::ESCAPE
-    audio.deinit
-    DVI::Text.clear(TEXT_ATTR)
-    DVI::Text.commit
-    return
-  end
+  break if key == Keyboard::CTRL_C || key == Keyboard::ESCAPE
 
   # Octave shift via pad (edge detection)
   left_pad.read
@@ -319,3 +317,7 @@ loop do
     sleep_ms 1
   end
 end
+
+audio.deinit
+DVI::Text.clear(TEXT_ATTR)
+DVI::Text.commit
