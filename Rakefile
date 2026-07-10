@@ -70,10 +70,19 @@ task :test_vm do
   sh({ "MRUBY_CONFIG" => HOST_TEST_CONFIG }, "rake all", chdir: PICORUBY_DIR)
 end
 
+# Rebuild when the VM is missing or the build config is newer. A config
+# change alters the gem set, which invalidates the cached picoruby build,
+# so clear it first. A picoruby submodule bump is not detected; run
+# rake test_vm after one.
+file HOST_TEST_VM => HOST_TEST_CONFIG do
+  rm_rf File.join(PICORUBY_DIR, "build", "harucom-host-test")
+  Rake::Task[:test_vm].invoke
+end
+
 desc "Run host tests for rootfs scripts (tests/, never flashed)"
-task :test do
-  Rake::Task[:test_vm].invoke unless File.executable?(HOST_TEST_VM)
-  sh "ruby #{File.join(PROJECT_DIR, "tests", "runner.rb")}"
+task :test, [:filter] => HOST_TEST_VM do |_t, args|
+  runner = File.join(PROJECT_DIR, "tests", "runner.rb")
+  sh({ "RUBY" => HOST_TEST_VM }, "ruby #{runner} #{args[:filter]}".strip)
 end
 
 desc "Clean build directory"

@@ -1,6 +1,6 @@
 # CRuby orchestrator for the rootfs host tests.
 #
-# Usage: rake test   (or: ruby tests/runner.rb [filter])
+# Usage: rake test / rake "test[filter]"   (or: ruby tests/runner.rb [filter])
 #
 # Picotest's Runner runs here on CRuby to discover *_test.rb files, and
 # executes each test class on the microruby host VM (ENV["RUBY"], built

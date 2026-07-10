@@ -46,8 +46,11 @@ which uses the same VM class and defines (`MRB_INT64` etc.) as the
 firmware, so mruby incompatibilities surface in tests instead of on the
 board. Hardware modules are replaced by stubs in
 [tests/stubs.rb](tests/stubs.rb); tests control time via
-`Machine.millis=`. `rake distclean` removes the test VM; `rake test`
-rebuilds it on demand.
+`Machine.millis=`. `rake "test[foo]"` runs only the test files whose
+name contains `foo`. `rake test` rebuilds the test VM when it is
+missing or older than the build config; a picoruby submodule update is
+not detected, so run `rake test_vm` after one. `rake distclean` also
+removes the test VM.
 
 ## Documentation
 
