@@ -119,6 +119,9 @@ class JohakyuApp
     DMX.active_slots = Johakyu.patch.max_channel
     @audio = Board::PWMAudio.new
     @session = Johakyu::Session.new(audio: @audio, bpm: 120)
+    # Attach the drum samples; without this the sound reservations
+    # land on sourceless channels and play silence.
+    @session.load_kit
     @live = Johakyu::Live.new(@session)
     $johakyu_live = @live
   end
