@@ -61,6 +61,30 @@ task flash: :full_uf2 do
   sh "picotool load -f -x #{FULL_UF2}"
 end
 
+PICORUBY_DIR = File.join(PROJECT_DIR, "lib", "picoruby")
+HOST_TEST_CONFIG = File.join(PROJECT_DIR, "build_config", "harucom-os-host-test.rb")
+HOST_TEST_VM = File.join(PICORUBY_DIR, "build", "harucom-host-test", "bin", "microruby")
+
+desc "Build the host test VM (microruby with board-parity defines)"
+task :test_vm do
+  sh({ "MRUBY_CONFIG" => HOST_TEST_CONFIG }, "rake all", chdir: PICORUBY_DIR)
+end
+
+# Rebuild when the VM is missing or the build config is newer. A config
+# change alters the gem set, which invalidates the cached picoruby build,
+# so clear it first. A picoruby submodule bump is not detected; run
+# rake test_vm after one.
+file HOST_TEST_VM => HOST_TEST_CONFIG do
+  rm_rf File.join(PICORUBY_DIR, "build", "harucom-host-test")
+  Rake::Task[:test_vm].invoke
+end
+
+desc "Run host tests for rootfs scripts (tests/, never flashed)"
+task :test, [:filter] => HOST_TEST_VM do |_t, args|
+  runner = File.join(PROJECT_DIR, "tests", "runner.rb")
+  sh({ "RUBY" => HOST_TEST_VM }, "ruby #{runner} #{args[:filter]}".strip)
+end
+
 desc "Clean build directory"
 task :clean do
   rm_rf BUILD_DIR
