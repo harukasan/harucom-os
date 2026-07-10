@@ -46,12 +46,22 @@ mrb_dmx_stop(mrb_state *mrb, mrb_value self)
   return mrb_nil_value();
 }
 
+/* Out-of-range channels are ignored, matching the C accessors. The
+ * check must happen on mrb_int before the uint16_t cast, or a huge
+ * channel would wrap back into range. */
+static mrb_bool
+dmx_channel_in_range(mrb_int channel)
+{
+  return 1 <= channel && channel <= DMX_SLOTS;
+}
+
 /* DMX.set(channel, value) */
 static mrb_value
 mrb_dmx_set(mrb_state *mrb, mrb_value self)
 {
   mrb_int channel, value;
   mrb_get_args(mrb, "ii", &channel, &value);
+  if (!dmx_channel_in_range(channel)) return mrb_nil_value();
   if (value < 0) value = 0;
   if (255 < value) value = 255;
   dmx_set((uint16_t)channel, (uint8_t)value);
@@ -66,6 +76,7 @@ mrb_dmx_set_range(mrb_state *mrb, mrb_value self)
   mrb_value values;
   uint8_t buffer[DMX_SLOTS];
   mrb_get_args(mrb, "iA", &channel, &values);
+  if (!dmx_channel_in_range(channel)) return mrb_nil_value();
   mrb_int count = RARRAY_LEN(values);
   if (DMX_SLOTS < count) count = DMX_SLOTS;
   for (mrb_int i = 0; i < count; i++) {
@@ -88,6 +99,7 @@ mrb_dmx_get(mrb_state *mrb, mrb_value self)
 {
   mrb_int channel;
   mrb_get_args(mrb, "i", &channel);
+  if (!dmx_channel_in_range(channel)) return mrb_fixnum_value(0);
   return mrb_fixnum_value(dmx_get((uint16_t)channel));
 }
 

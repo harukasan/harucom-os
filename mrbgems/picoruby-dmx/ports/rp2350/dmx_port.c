@@ -74,6 +74,11 @@ static repeating_timer_t frame_timer;
 /* 0 = waiting for frame start, 1 = in BREAK, 2 = in MAB */
 static volatile int frame_phase = 0;
 
+/* In-flight phase alarm, cancelled by dmx_stop. Rescheduling by
+ * returning a positive value keeps the same id, so one slot covers
+ * both the BREAK and MAB phases. */
+static volatile alarm_id_t phase_alarm_id = 0;
+
 static volatile uint32_t frame_counter = 0;
 static volatile uint32_t skipped_frames = 0;
 
@@ -131,11 +136,14 @@ frame_timer_callback(repeating_timer_t *timer)
 
   uart_set_break(dmx_uart, true);
   frame_phase = 1;
-  if (alarm_pool_add_alarm_in_us(dmx_alarm_pool, DMX_BREAK_US, frame_phase_alarm, NULL,
-                                 true) < 0) {
+  alarm_id_t id = alarm_pool_add_alarm_in_us(dmx_alarm_pool, DMX_BREAK_US,
+                                             frame_phase_alarm, NULL, true);
+  if (id < 0) {
     /* Pool full (should not happen): do not leave the line in BREAK. */
     uart_set_break(dmx_uart, false);
     frame_phase = 0;
+  } else {
+    phase_alarm_id = id;
   }
   return true;
 }
@@ -215,9 +223,19 @@ dmx_stop(void)
   if (!dmx_running) return;
   dmx_running = false;
   cancel_repeating_timer(&frame_timer);
-  /* A phase alarm still in flight sees dmx_running == false and
-   * releases the line. Fixtures hold their last values, so send a
-   * blackout and wait a few frames before stopping to go dark. */
+  /* Cancel an in-flight phase alarm; if it survived, an immediate
+   * restart would reset frame_phase and the stale alarm would kick
+   * DMA without a BREAK. The alarm is no longer there to release the
+   * line, so release it here. Cancelling an already-fired alarm is
+   * harmless (the pool does not reuse ids). */
+  if (phase_alarm_id > 0) {
+    alarm_pool_cancel_alarm(dmx_alarm_pool, phase_alarm_id);
+    phase_alarm_id = 0;
+  }
+  uart_set_break(dmx_uart, false);
+  frame_phase = 0;
+  /* Fixtures hold their last values, so send a blackout and wait a
+   * few frames before stopping to go dark. */
 }
 
 uint32_t
