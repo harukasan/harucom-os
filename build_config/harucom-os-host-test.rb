@@ -31,6 +31,7 @@ MRuby::Build.new('harucom-host-test') do |conf|
   conf.gembox "stdlib"
   conf.gem core: 'picoruby-bin-microruby'
   conf.gem core: 'picoruby-picotest'
+  conf.gem File.expand_path('../../mrbgems/picoruby-synth-native', __FILE__)
 
   # A named build resolves no 'host' fallback, so it must carry its own
   # bytecode compiler (mruby-bin-mrbc2 emits bin/picorbc).
