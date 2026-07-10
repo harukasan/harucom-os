@@ -50,6 +50,11 @@ unless Keyboard.use_layout(layout)
   Keyboard.use_layout("us")
 end
 
+# Apply the boot zoom factor selected via ENV["CONSOLE_ZOOM"] before the
+# console is created, so it initializes on the right grid. "2" selects
+# the 320x240 (2x scaled) text resolution; anything else keeps 640x480.
+DVI::Text.set_resolution(320, 240) if ENV["CONSOLE_ZOOM"] == "2"
+
 # Set up DVI as standard output (mirrored to UART internally)
 $console = Console.new
 $stdout = $console

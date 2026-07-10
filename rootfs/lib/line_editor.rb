@@ -59,6 +59,14 @@ class LineEditor
         end
       end
 
+      # Zoom toggle: Ctrl-Shift-'=' switches the console between 640x480
+      # and 320x240 (2x scaled) text resolution. Checked before the IME
+      # so the shortcut works while an input method is active.
+      if c.match?(zoom_key_name, ctrl: true, shift: true)
+        toggle_zoom
+        next
+      end
+
       # Process through input method if active
       if @ime
         ime_result = @ime.process(c)
@@ -114,9 +122,9 @@ class LineEditor
           end
         end
       when Keyboard::PAGEUP
-        @console.scroll_back(Console::ROWS - 1)
+        @console.scroll_back(Console.rows - 1)
       when Keyboard::PAGEDOWN
-        @console.scroll_forward(Console::ROWS - 1)
+        @console.scroll_forward(Console.rows - 1)
       when Keyboard::UP
         @buffer.put(c.to_buffer_input) if @buffer.cursor_y > 0
       when Keyboard::DOWN
@@ -156,7 +164,7 @@ class LineEditor
     reserved += 1 if @ime && @ime.candidates  # candidate list row
     reserved += 1 if ime_active               # mode indicator row
 
-    available_rows = Console::ROWS - @input_start_row
+    available_rows = Console.rows - @input_start_row
     if reserved > available_rows
       scroll_amount = reserved - available_rows
       @console.scroll_up(scroll_amount)
@@ -180,7 +188,7 @@ class LineEditor
     end
 
     # Render each line
-    max_line_width = Console::COLS - @prompt_width
+    max_line_width = Console.cols - @prompt_width
     i = 0
     while i < line_count
       row = @input_start_row + i
@@ -199,7 +207,7 @@ class LineEditor
     end
 
     # Clear up to (but not including) IME status row
-    clear_limit = ime_active ? Console::ROWS - 1 : Console::ROWS
+    clear_limit = ime_active ? Console.rows - 1 : Console.rows
 
     # Clear rows below input up to (but not including) IME status row
     clear_row = @input_start_row + line_count
@@ -211,9 +219,9 @@ class LineEditor
     # Draw IME mode indicator on last row
     if ime_active
       label = @ime.mode_label
-      ime_row = Console::ROWS - 1
+      ime_row = Console.rows - 1
       @console.clear_line(ime_row)
-      label_col = Console::COLS - Editor.display_width(label)
+      label_col = Console.cols - Editor.display_width(label)
       DVI::Text.put_string(label_col, ime_row, label, InputMethod::PREEDIT_ATTR)
     end
 
@@ -223,7 +231,7 @@ class LineEditor
       cursor_display_col = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x)
       preedit_col = @prompt_width + cursor_display_col
       preedit_row = @input_start_row + @buffer.cursor_y
-      max_preedit = Console::COLS - preedit_col
+      max_preedit = Console.cols - preedit_col
       if max_preedit > 0
         visible = Editor.display_slice(@ime.preedit, 0, max_preedit)
         if visible && visible.bytesize > 0
@@ -243,7 +251,7 @@ class LineEditor
         cand_text += " " if ci > 0
         cand_text += "#{ci + 1}:#{c}"
       end
-      visible = Editor.display_slice(cand_text, 0, Console::COLS)
+      visible = Editor.display_slice(cand_text, 0, Console.cols)
       DVI::Text.put_string(0, cand_row, visible, InputMethod::CANDIDATE_ATTR) if visible
     end
 
@@ -253,7 +261,7 @@ class LineEditor
     screen_row = @input_start_row + @buffer.cursor_y
 
     # Clamp cursor within screen
-    screen_col = Console::COLS - 1 if screen_col >= Console::COLS
+    screen_col = Console.cols - 1 if screen_col >= Console.cols
     @console.move_to(screen_col, screen_row)
     @console.show_cursor
   end
@@ -286,11 +294,31 @@ class LineEditor
   def feed
     @console.hide_cursor
     output_row = @input_start_row + @buffer.lines.length
-    if output_row >= Console::ROWS
-      scroll = output_row - Console::ROWS + 1
+    if output_row >= Console.rows
+      scroll = output_row - Console.rows + 1
       @console.scroll_up(scroll)
-      output_row = Console::ROWS - 1
+      output_row = Console.rows - 1
     end
     @console.move_to(0, output_row)
+  end
+
+  # Key name produced by physical Ctrl-Shift-'='. The Key name follows the
+  # layout-applied character: "+" on the US layout, "=" on JIS (JIS types
+  # '=' as Shift-'-').
+  def zoom_key_name
+    ENV["KEYBOARD_LAYOUT"] == "jis" ? :"=" : :+
+  end
+
+  # Toggle between the native and the 2x scaled console resolution. The
+  # console is reset because its contents do not fit the new grid; refresh
+  # then redraws the prompt and the current input buffer from row 0.
+  def toggle_zoom
+    if DVI::Text.cols == DVI::Text::COLS
+      DVI::Text.set_resolution(320, 240)
+    else
+      DVI::Text.set_resolution(640, 480)
+    end
+    @console.reset
+    @input_start_row = 0
   end
 end

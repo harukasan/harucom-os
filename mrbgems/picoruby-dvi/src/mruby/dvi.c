@@ -605,6 +605,10 @@ mrb_dvi_text_read_line(mrb_state *mrb, mrb_value klass)
   if (row < 0 || row >= dvi_text_get_rows()) mrb_raise(mrb, E_ARGUMENT_ERROR, "row out of range");
   struct dvi_text_line *line =
       (struct dvi_text_line *)mrb_malloc(mrb, sizeof(struct dvi_text_line));
+  // read_line fills only the active columns. Zero the rest so a Line
+  // written back after a resolution switch carries blanks, not heap
+  // garbage.
+  memset(line, 0, sizeof(struct dvi_text_line));
   dvi_text_read_line(row, line->cells);
   return mrb_obj_value(mrb_data_object_alloc(mrb, class_Line, line, &dvi_text_line_type));
 }
@@ -638,6 +642,45 @@ mrb_dvi_text_set_palette_entry(mrb_state *mrb, mrb_value klass)
   return mrb_nil_value();
 }
 
+/*
+ * DVI::Text.cols -> Integer
+ *   Current text grid width (106 at 640x480, 53 at 320x240).
+ */
+static mrb_value
+mrb_dvi_text_cols(mrb_state *mrb, mrb_value klass)
+{
+  return mrb_fixnum_value(dvi_text_get_cols());
+}
+
+/*
+ * DVI::Text.rows -> Integer
+ *   Current text grid height (37 at 640x480, 18 at 320x240).
+ */
+static mrb_value
+mrb_dvi_text_rows(mrb_state *mrb, mrb_value klass)
+{
+  return mrb_fixnum_value(dvi_text_get_rows());
+}
+
+/*
+ * DVI::Text.set_resolution(width, height)
+ *   Switch the text mode source resolution. 320x240 is scaled 2x to the
+ *   640x480 DVI output. Blocks until the change is applied at VSync.
+ */
+static mrb_value
+mrb_dvi_text_set_resolution(mrb_state *mrb, mrb_value klass)
+{
+  mrb_int w, h;
+  mrb_get_args(mrb, "ii", &w, &h);
+  if (w == 640 && h == 480)
+    dvi_set_text_scale(1);
+  else if (w == 320 && h == 240)
+    dvi_set_text_scale(2);
+  else
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "resolution must be 640x480 or 320x240");
+  return mrb_nil_value();
+}
+
 void
 mrb_picoruby_dvi_gem_init(mrb_state *mrb)
 {
@@ -655,8 +698,14 @@ mrb_picoruby_dvi_gem_init(mrb_state *mrb)
   // DVI::Text
   struct RClass *class_Text =
       mrb_define_class_under_id(mrb, class_DVI, MRB_SYM(Text), mrb->object_class);
+  // COLS/ROWS are the maximum grid (equal to the 640x480 grid). Use
+  // cols/rows for the current grid, which changes with set_resolution.
   mrb_define_const_id(mrb, class_Text, MRB_SYM(COLS), mrb_fixnum_value(DVI_TEXT_MAX_COLS));
   mrb_define_const_id(mrb, class_Text, MRB_SYM(ROWS), mrb_fixnum_value(DVI_TEXT_MAX_ROWS));
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(cols), mrb_dvi_text_cols, MRB_ARGS_NONE());
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(rows), mrb_dvi_text_rows, MRB_ARGS_NONE());
+  mrb_define_class_method_id(mrb, class_Text, MRB_SYM(set_resolution), mrb_dvi_text_set_resolution,
+                             MRB_ARGS_REQ(2));
   mrb_define_class_method_id(mrb, class_Text, MRB_SYM(put_char), mrb_dvi_text_put_char,
                              MRB_ARGS_REQ(4));
   mrb_define_class_method_id(mrb, class_Text, MRB_SYM(put_string), mrb_dvi_text_put_string,

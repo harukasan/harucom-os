@@ -19,8 +19,9 @@ Class: `DVI` (provided by picoruby-dvi mrbgem)
 - [DVI.wait_vsync](#dviwait_vsync)
 
 `DVI` provides display output control. Two display modes are available:
-`DVI::TEXT_MODE` (106x37 text grid at 640x480) and `DVI::GRAPHICS_MODE`
-(640x480 RGB332 framebuffer).
+`DVI::TEXT_MODE` (text grid, 640x480 native or 320x240 scaled 2x) and
+`DVI::GRAPHICS_MODE` (RGB332 framebuffer, 640x480 or 320x240). Both
+modes select their source resolution at runtime with `set_resolution`.
 
 ```ruby
 DVI.set_mode(DVI::TEXT_MODE)
@@ -50,6 +51,9 @@ Block until the next VBlank. See
 
 Class: `DVI::Text` (provided by picoruby-dvi mrbgem)
 
+- [DVI::Text.cols](#dvitextcols---integer)
+- [DVI::Text.rows](#dvitextrows---integer)
+- [DVI::Text.set_resolution](#dvitextset_resolutionwidth-height)
 - [DVI::Text.put_char](#dvitextput_charcol-row-ch-attr)
 - [DVI::Text.put_string](#dvitextput_stringcol-row-str-attr)
 - [DVI::Text.clear](#dvitextclearattr)
@@ -62,13 +66,33 @@ Class: `DVI::Text` (provided by picoruby-dvi mrbgem)
 - [DVI::Text.commit](#dvitextcommit)
 
 `DVI::Text` provides text mode rendering with double-buffered VRAM.
-Characters are placed on a 106-column, 37-row grid. The `attr` byte
-encodes foreground (bits 7-4) and background (bits 3-0) palette indices.
+Characters are placed on a runtime-sized grid: 106 columns by 37 rows at
+the native 640x480 resolution, or 53 columns by 18 rows at 320x240 (each
+pixel doubled to the 640x480 DVI output). The `attr` byte encodes
+foreground (bits 7-4) and background (bits 3-0) palette indices.
 
 All write operations modify the back buffer. Call `commit` to swap the
 back buffer to the front buffer at VBlank, preventing tearing.
 
-Constants: `DVI::Text::COLS` (106), `DVI::Text::ROWS` (37).
+Constants: `DVI::Text::COLS` (106) and `DVI::Text::ROWS` (37) are the
+maximum grid, equal to the 640x480 grid. Use `cols` and `rows` for the
+current grid.
+
+#### DVI::Text.cols -> Integer
+
+Return the current grid width (106 at 640x480, 53 at 320x240).
+
+#### DVI::Text.rows -> Integer
+
+Return the current grid height (37 at 640x480, 18 at 320x240).
+
+#### DVI::Text.set_resolution(width, height)
+
+Switch the text mode source resolution. Accepts 640x480 (native) or
+320x240 (scaled 2x to the DVI output, for demo readability). Blocks
+until the change is applied at VSync, so `cols` and `rows` read the new
+grid immediately after. Screen contents are not converted; callers
+should clear and redraw (the console does this via `Console#reset`).
 
 #### DVI::Text.put_char(col, row, ch, attr)
 

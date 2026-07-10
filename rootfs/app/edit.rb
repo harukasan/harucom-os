@@ -17,8 +17,8 @@ console  = $console
 keyboard = $keyboard
 
 # Screen layout
-COLS        = Console::COLS
-ROWS        = Console::ROWS
+COLS        = Console.cols
+ROWS        = Console.rows
 STATUS_ROW  = 0
 EDIT_TOP    = 1
 EDIT_BOTTOM = ROWS - 2
@@ -259,10 +259,10 @@ def draw_status(console, filepath, buffer, scroll_top, message)
   end
 
   # Pad to full width
-  padding = Console::COLS - Editor.display_width(status)
+  padding = Console.cols - Editor.display_width(status)
   status += " " * padding if padding > 0
 
-  console.put_string_at(0, STATUS_ROW, Editor.display_slice(status, 0, Console::COLS), STATUS_ATTR)
+  console.put_string_at(0, STATUS_ROW, Editor.display_slice(status, 0, Console.cols), STATUS_ATTR)
 end
 
 # The command bar is redrawn every frame to recover from ring buffer scrolls,
@@ -277,14 +277,14 @@ def draw_command_bar(console)
   unless bar
     bar = " Ctrl-S:Save  Ctrl-Q:Quit  Ctrl-Z:Undo  Ctrl-Y:Redo"
     if mode
-      padding = Console::COLS - Editor.display_width(bar) - Editor.display_width(mode)
+      padding = Console.cols - Editor.display_width(bar) - Editor.display_width(mode)
       bar += " " * padding if padding > 0
       bar += mode
     else
-      padding = Console::COLS - Editor.display_width(bar)
+      padding = Console.cols - Editor.display_width(bar)
       bar += " " * padding if padding > 0
     end
-    bar = Editor.display_slice(bar, 0, Console::COLS)
+    bar = Editor.display_slice(bar, 0, Console.cols)
     COMMAND_BAR_CACHE[mode] = bar
   end
   console.put_string_at(0, COMMAND_ROW, bar, COMMAND_ATTR)
@@ -298,9 +298,9 @@ def prompt_input(console, keyboard, label, y_or_n: false)
   loop do
     # Draw prompt
     display = " #{label}#{input}"
-    padding = Console::COLS - Editor.display_width(display)
+    padding = Console.cols - Editor.display_width(display)
     display += " " * padding if padding > 0
-    console.put_string_at(0, COMMAND_ROW, Editor.display_slice(display, 0, Console::COLS), COMMAND_ATTR)
+    console.put_string_at(0, COMMAND_ROW, Editor.display_slice(display, 0, Console.cols), COMMAND_ATTR)
     console.commit
 
     c = keyboard.read_char
@@ -347,9 +347,9 @@ def draw_line(console, buffer, screen_row, scroll_top, scroll_left, syntax)
     line_offset = syntax[1][rel] if rel >= 0 && rel < syntax[1].length
   end
   if line_offset
-    RubySyntax.draw_line(0, row, line, syntax[0], line_offset, scroll_left, Console::COLS, EDIT_ATTR)
+    RubySyntax.draw_line(0, row, line, syntax[0], line_offset, scroll_left, Console.cols, EDIT_ATTR)
   else
-    text = Editor.display_slice(line, scroll_left, Console::COLS)
+    text = Editor.display_slice(line, scroll_left, Console.cols)
     console.put_string_at(0, row, text, EDIT_ATTR) if text && text.bytesize > 0
   end
 end
@@ -827,14 +827,14 @@ while running
     end
     mode = $ime.mode_label
     if mode
-      padding = Console::COLS - Editor.display_width(cand_text) - Editor.display_width(mode)
+      padding = Console.cols - Editor.display_width(cand_text) - Editor.display_width(mode)
       cand_text += " " * padding if padding > 0
       cand_text += mode
     else
-      padding = Console::COLS - Editor.display_width(cand_text)
+      padding = Console.cols - Editor.display_width(cand_text)
       cand_text += " " * padding if padding > 0
     end
-    console.put_string_at(0, COMMAND_ROW, Editor.display_slice(cand_text, 0, Console::COLS), COMMAND_ATTR)
+    console.put_string_at(0, COMMAND_ROW, Editor.display_slice(cand_text, 0, Console.cols), COMMAND_ATTR)
   else
     draw_command_bar(console)
   end

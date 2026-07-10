@@ -31,6 +31,9 @@ class DVI
     YELLOW: Integer
     WHITE: Integer
 
+    def self.cols: () -> Integer
+    def self.rows: () -> Integer
+    def self.set_resolution: (Integer width, Integer height) -> void
     def self.put_char: (Integer col, Integer row, Integer ch, Integer attr) -> void
     def self.put_string: (Integer col, Integer row, String str, Integer attr) -> void
     def self.clear: (Integer attr) -> void
