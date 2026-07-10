@@ -19,7 +19,9 @@ TEXT_ATTR    = 0xF0
 BAR_ATTR     = 0x0F
 PLAYING_ATTR = 0xF4
 
-# HID keycode -> semitone (0-11)
+# HID keycode -> semitone above the base octave's C. The row keeps
+# going past the octave (12-16) like a DAW keyboard, so K L ; play
+# C D E of the next octave with O and P as their black keys.
 NOTE_KEYCODES = {
   0x04 => 0,   # A -> C
   0x1A => 1,   # W -> C#
@@ -33,6 +35,11 @@ NOTE_KEYCODES = {
   0x0B => 9,   # H -> A
   0x18 => 10,  # U -> A#
   0x0D => 11,  # J -> B
+  0x0E => 12,  # K -> C (next octave)
+  0x12 => 13,  # O -> C#
+  0x0F => 14,  # L -> D
+  0x13 => 15,  # P -> D#
+  0x33 => 16,  # ; -> E
 }
 
 # HID keycode -> drum name (bottom row)
@@ -62,13 +69,14 @@ WAVEFORM_NAMES = ["Sine", "Square", "Triangle", "Sawtooth"]
 # the home row, black keys in the gaps above them, drums half a key to
 # the right below. One cell per key: "[A]" plus a label underneath.
 WHITE_KEYS = [["A", 0x04], ["S", 0x16], ["D", 0x07], ["F", 0x09],
-              ["G", 0x0A], ["H", 0x0B], ["J", 0x0D]]
+              ["G", 0x0A], ["H", 0x0B], ["J", 0x0D], ["K", 0x0E],
+              ["L", 0x0F], [";", 0x33]]
 BLACK_KEYS = [["W", 0x1A, 0], ["E", 0x08, 1], ["T", 0x17, 3],
-              ["Y", 0x1C, 4], ["U", 0x18, 5]]
+              ["Y", 0x1C, 4], ["U", 0x18, 5], ["O", 0x12, 7],
+              ["P", 0x13, 8]]
 DRUM_KEYS = [["Z", 0x1D], ["X", 0x1B], ["C", 0x06], ["V", 0x19],
              ["B", 0x05], ["N", 0x11], ["M", 0x10], [",", 0x36]]
 
-KEY_WIDTH = 6
 BLACK_CAP_ROW = 2
 BLACK_LABEL_ROW = 3
 WHITE_CAP_ROW = 5
@@ -80,38 +88,45 @@ PLAYING_ROW = 11
 cols = DVI::Text.cols
 rows = DVI::Text.rows
 command_row = rows - 1
-left = (cols - (DRUM_KEYS.length * KEY_WIDTH + 2)) / 2
+# Ten white keys at width 6 need 60 columns; the zoomed 53-column grid
+# gets width 5.
+key_width = cols >= WHITE_KEYS.length * 6 + 4 ? 6 : 5
+left = (cols - WHITE_KEYS.length * key_width) / 2
 left = 1 if left < 1
 
 # keycode -> [column, row] of its cap on screen
 key_cells = {}
 i = 0
 while i < WHITE_KEYS.length
-  key_cells[WHITE_KEYS[i][1]] = [left + i * KEY_WIDTH, WHITE_CAP_ROW]
+  key_cells[WHITE_KEYS[i][1]] = [left + i * key_width, WHITE_CAP_ROW]
   i += 1
 end
 i = 0
 while i < BLACK_KEYS.length
   gap = BLACK_KEYS[i][2]
-  key_cells[BLACK_KEYS[i][1]] = [left + gap * KEY_WIDTH + 3, BLACK_CAP_ROW]
+  key_cells[BLACK_KEYS[i][1]] = [left + gap * key_width + key_width / 2, BLACK_CAP_ROW]
   i += 1
 end
 i = 0
 while i < DRUM_KEYS.length
-  key_cells[DRUM_KEYS[i][1]] = [left + 2 + i * KEY_WIDTH, DRUM_CAP_ROW]
+  key_cells[DRUM_KEYS[i][1]] = [left + 2 + i * key_width, DRUM_CAP_ROW]
   i += 1
 end
 
 def note_frequency(semitone, octave)
   base = [262, 277, 294, 311, 330, 349, 370, 392, 415, 440, 466, 494]
-  freq = base[semitone]
-  shift = octave - 4
+  freq = base[semitone % 12]
+  shift = octave + semitone / 12 - 4
   if shift > 0
     shift.times { freq = freq * 2 }
   elsif shift < 0
     (-shift).times { freq = freq / 2 }
   end
   freq
+end
+
+def note_name(semitone, octave)
+  "#{NOTE_NAMES[semitone % 12]}#{octave + semitone / 12}"
 end
 
 # Load the kit from /data/drums; a missing or unreadable file falls
@@ -158,7 +173,7 @@ draw_keyboard = lambda do
     keycode = BLACK_KEYS[i2][1]
     x = key_cells[keycode][0]
     draw_cap.call(keycode, false)
-    DVI::Text.put_string(x, BLACK_LABEL_ROW, NOTE_NAMES[NOTE_KEYCODES[keycode]].rjust(2), TEXT_ATTR)
+    DVI::Text.put_string(x, BLACK_LABEL_ROW, NOTE_NAMES[NOTE_KEYCODES[keycode] % 12].rjust(2), TEXT_ATTR)
     i2 += 1
   end
   i2 = 0
@@ -166,7 +181,7 @@ draw_keyboard = lambda do
     keycode = WHITE_KEYS[i2][1]
     x = key_cells[keycode][0]
     draw_cap.call(keycode, false)
-    DVI::Text.put_string(x + 1, WHITE_LABEL_ROW, NOTE_NAMES[NOTE_KEYCODES[keycode]], TEXT_ATTR)
+    DVI::Text.put_string(x + 1, WHITE_LABEL_ROW, NOTE_NAMES[NOTE_KEYCODES[keycode] % 12], TEXT_ATTR)
     i2 += 1
   end
   i2 = 0
@@ -183,7 +198,7 @@ DVI.set_mode(DVI::TEXT_MODE)
 DVI::Text.clear(TEXT_ATTR)
 draw_title.call
 draw_keyboard.call
-help = " 1-4 waveform   pad up/down octave   Esc quit"
+help = " 1-4 waveform   arrows/pad octave   Esc quit"
 DVI::Text.put_string(0, command_row, help.ljust(cols)[0, cols], BAR_ATTR)
 DVI::Text.commit
 
@@ -202,7 +217,9 @@ loop do
   key = keyboard.read_char
   break if key == Keyboard::CTRL_C || key == Keyboard::ESCAPE
 
-  # Octave shift via pad (edge detection)
+  previous_setting = [octave, waveform]
+
+  # Octave shift via pad (edge detection) or cursor keys
   left_pad.read
   if left_pad.up? && !prev_octave_up
     octave = octave + 1 if octave < 7
@@ -212,6 +229,13 @@ loop do
   end
   prev_octave_up = left_pad.up?
   prev_octave_down = left_pad.down?
+  if key
+    if key.match?(:up)
+      octave = octave + 1 if octave < 7
+    elsif key.match?(:down)
+      octave = octave - 1 if octave > 1
+    end
+  end
 
   # Read currently held keys directly from HID report
   keycodes = USB::Host.keyboard_keycodes
@@ -233,6 +257,9 @@ loop do
       waveform_idx = 3
     end
   end
+
+  # Retune held notes right away when the octave or waveform changes.
+  prev_note_keycodes = nil if [octave, waveform] != previous_setting
 
   if keycodes != prev_keycodes
     # Trigger drums on newly pressed keys (edge detection on the raw
@@ -288,7 +315,7 @@ loop do
     end
 
     if note_keycodes.length > 0
-      names = note_keycodes.map { |kc| "#{NOTE_NAMES[NOTE_KEYCODES[kc]]}#{octave}" }
+      names = note_keycodes.map { |kc| note_name(NOTE_KEYCODES[kc], octave) }
       DVI::Text.put_string(0, PLAYING_ROW, " playing: #{names.join(" + ")}".ljust(cols)[0, cols], PLAYING_ATTR)
     else
       DVI::Text.clear_line(PLAYING_ROW, TEXT_ATTR)
