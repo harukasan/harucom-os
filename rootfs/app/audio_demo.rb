@@ -115,14 +115,14 @@ end
 
 def note_frequency(semitone, octave)
   base = [262, 277, 294, 311, 330, 349, 370, 392, 415, 440, 466, 494]
-  freq = base[semitone % 12]
+  freq = base[semitone % 12].to_f
   shift = octave + semitone / 12 - 4
   if shift > 0
     shift.times { freq = freq * 2 }
   elsif shift < 0
     (-shift).times { freq = freq / 2 }
   end
-  freq
+  freq.round
 end
 
 def note_name(semitone, octave)
@@ -209,7 +209,6 @@ prev_octave_up = false
 prev_octave_down = false
 prev_note_keycodes = []
 prev_keycodes = []
-prev_title = nil
 
 loop do
   dirty = false
@@ -220,7 +219,11 @@ loop do
   key = keyboard.read_char
   break if key == Keyboard::CTRL_C || key == Keyboard::ESCAPE
 
-  previous_setting = [octave, transpose, waveform]
+  # The idle loop runs at about 1 kHz, so it must not allocate: the
+  # setting change detection compares plain Integers.
+  octave_before = octave
+  transpose_before = transpose
+  waveform_before = waveform
 
   # Octave shift via pad (edge detection) or cursor keys; left/right
   # transposes in semitones.
@@ -266,14 +269,17 @@ loop do
     end
   end
 
-  # Retune held notes right away when the setting changes, and relabel
-  # the keys with the notes they now play when the transpose moves.
-  if [octave, transpose, waveform] != previous_setting
+  # Retune held notes and refresh the title right away when a setting
+  # changes; a transpose move also relabels the keys with the notes
+  # they now play.
+  if octave != octave_before || transpose != transpose_before ||
+     waveform != waveform_before
     prev_note_keycodes = nil
-    if transpose != previous_setting[1]
+    draw_title.call
+    dirty = true
+    if transpose != transpose_before
       draw_keyboard.call
       keycodes.each { |kc| draw_cap.call(kc, true) if key_cells[kc] }
-      dirty = true
     end
   end
 
@@ -338,14 +344,6 @@ loop do
     end
 
     prev_note_keycodes = note_keycodes
-    dirty = true
-  end
-
-  # The title bar carries the octave, transpose and waveform state.
-  title_state = "#{octave}/#{transpose}/#{waveform_idx}"
-  if title_state != prev_title
-    draw_title.call
-    prev_title = title_state
     dirty = true
   end
 
