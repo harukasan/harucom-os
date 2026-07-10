@@ -6,8 +6,8 @@
 
 keyboard = $keyboard
 T = DVI::Text
-ROWS = T::ROWS
-COLS = T::COLS
+ROWS = T.rows
+COLS = T.cols
 
 def wait_key(kb)
   loop do
@@ -89,7 +89,7 @@ lines = [
   "色々な漢字を表示できます",
   "ひらがなカタカナABC混在テスト123",
   "プログラミング言語 Ruby で動いています",
-  "解像度: 640x480 文字数: 106x37",
+  "解像度: #{640 * COLS / T::COLS}x#{480 * COLS / T::COLS} 文字数: #{COLS}x#{ROWS}",
   "半角文字と全角文字の混在表示確認",
   "吾輩は猫である。名前はまだ無い。",
   "どこで生れたかとんと見当がつかぬ。",

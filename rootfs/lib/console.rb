@@ -7,10 +7,18 @@
 # Supports ANSI SGR escape sequences for color and bold.
 
 class Console
-  COLS = DVI::Text::COLS
-  ROWS = DVI::Text::ROWS
   DEFAULT_ATTR = 0xF0 # white on black
   SCROLLBACK_MAX = 200
+
+  # Current text grid. Changes with DVI::Text.set_resolution (zoom), so
+  # callers must query at use time instead of snapshotting into constants.
+  def self.cols
+    DVI::Text.cols
+  end
+
+  def self.rows
+    DVI::Text.rows
+  end
 
   # ANSI SGR escape sequence constants.
   #
@@ -108,7 +116,7 @@ class Console
 
   def show_cursor
     return if @cursor_visible
-    return if @col >= COLS
+    return if @col >= Console.cols
     a = DVI::Text.get_attr(@col, @row)
     DVI::Text.set_attr(@col, @row, ((a & 0x0F) << 4) | (a >> 4))
     @cursor_visible = true
@@ -116,7 +124,7 @@ class Console
 
   def hide_cursor
     return unless @cursor_visible
-    return if @col >= COLS
+    return if @col >= Console.cols
     a = DVI::Text.get_attr(@col, @row)
     DVI::Text.set_attr(@col, @row, ((a & 0x0F) << 4) | (a >> 4))
     @cursor_visible = false
@@ -162,7 +170,7 @@ class Console
     end
 
     width = Editor.char_display_width(ch)
-    newline if @col + width > COLS
+    newline if @col + width > Console.cols
 
     DVI::Text.put_string(@col, @row, ch, effective_attr)
     @col += width
@@ -171,9 +179,9 @@ class Console
   def newline
     @col = 0
     @row += 1
-    if @row >= ROWS
+    if @row >= Console.rows
       scroll_up
-      @row = ROWS - 1
+      @row = Console.rows - 1
     end
   end
 
@@ -226,7 +234,22 @@ class Console
   end
 
   def clear_to_end_of_line
-    DVI::Text.clear_range(@col, @row, COLS - @col, @attr)
+    DVI::Text.clear_range(@col, @row, Console.cols - @col, @attr)
+  end
+
+  # Reinitialize after a resolution change. Drops the scrollback buffer
+  # (its line snapshots come from the old grid) and clears the screen.
+  def reset
+    @scrollback.clear
+    @scroll_offset = 0
+    @viewport_snapshot = nil
+    @esc_state = :normal
+    @esc_buf = ""
+    @attr = @default_attr
+    @bold = false
+    @cursor_visible = false
+    clear
+    commit
   end
 
   # Cursor positioning
@@ -307,7 +330,7 @@ class Console
 
   def save_viewport
     @viewport_snapshot = []
-    ROWS.times { |r| @viewport_snapshot.push(DVI::Text.read_line(r)) }
+    Console.rows.times { |r| @viewport_snapshot.push(DVI::Text.read_line(r)) }
   end
 
   def restore_viewport
@@ -320,7 +343,7 @@ class Console
 
   def render_scrollback
     base = @scrollback.length - @scroll_offset
-    ROWS.times do |screen_row|
+    Console.rows.times do |screen_row|
       buf_index = base + screen_row
       if buf_index >= 0 && buf_index < @scrollback.length
         DVI::Text.write_line(screen_row, @scrollback[buf_index])
