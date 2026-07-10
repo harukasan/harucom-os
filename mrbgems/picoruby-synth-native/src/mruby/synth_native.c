@@ -164,11 +164,15 @@ mrb_native_noise(mrb_state *mrb, mrb_value self)
   mrb_get_args(mrb, "ii", &length, &state);
   synth_native_t *out = native_alloc(mrb, (uint32_t)length);
   uint32_t rng = (uint32_t)state;
+  /* Single precision product instead of a soft-double division per
+   * sample (the RP2350 FPU is single precision); the uint-to-float
+   * rounding differs from the reference by less than 1e-7. */
+  const float noise_scale = 1.0f / 2147483648.0f;
   for (mrb_int i = 0; i < length; i++) {
     rng ^= rng << 13;
     rng ^= rng >> 17;
     rng ^= rng << 5;
-    out->data[i] = (float)((double)rng / 2147483648.0 - 1.0);
+    out->data[i] = (float)rng * noise_scale - 1.0f;
   }
   mrb_value result = mrb_ary_new_capa(mrb, 2);
   mrb_ary_push(mrb, result, native_wrap(mrb, out));
@@ -209,8 +213,17 @@ mrb_native_oscillate(mrb_state *mrb, mrb_value self)
      * bits) and a drifted square flips whole samples at its edges. */
     uint32_t acc = 0;
     double scale = 4294967296.0 / (double)rate;
+    /* The step only changes when the frequency curve does, so the
+     * soft-double product (no double FPU on the RP2350) runs once for
+     * a constant tone instead of per sample. */
+    float prev = -1.0f;
+    uint32_t step = 0;
     for (uint32_t i = 0; i < freqs->length; i++) {
-      uint32_t step = (uint32_t)(int64_t)((double)freqs->data[i] * scale + 0.5);
+      float f = freqs->data[i];
+      if (f != prev) {
+        step = (uint32_t)(int64_t)((double)f * scale + 0.5);
+        prev = f;
+      }
       acc += step;
       out->data[i] = acc < 0x80000000u ? 1.0f : -1.0f;
     }
