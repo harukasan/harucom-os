@@ -270,7 +270,9 @@ reads a tolerant subset (`name`, `availableChannels` with
 library work unless they rely on matrix template channels. Loading a
 fixture names the faders after the selected mode's channels and shows
 the capability band matching the current value, like a lighting
-console.
+console. The loader is `DMX::Fixture` in
+[rootfs/lib/dmx/fixture.rb](../rootfs/lib/dmx/fixture.rb), covered by
+host tests ([tests/dmx_fixture_test.rb](../tests/dmx_fixture_test.rb)).
 [shehds_80w_led_spot_light.json](../rootfs/data/dmx/fixtures/shehds_80w_led_spot_light.json)
 covers the bench fixture in its 13 and 10 channel modes.
 

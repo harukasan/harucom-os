@@ -20,127 +20,9 @@
 #   b                blackout
 #   q / Esc / Ctrl-C blackout, stop the engine, return to IRB
 
+require "dmx/fixture"
+
 DMX_DEMO_FIXTURE_DIR = "/data/dmx/fixtures"
-
-# Read an OFL fixture JSON. Only a subset is used (availableChannels
-# with fineChannelAliases, defaultValue and capability dmxRanges, plus
-# modes); unknown keys are ignored, so files downloaded from
-# open-fixture-library.org work unless they rely on matrix template
-# channels. Returns {name:, modes: [{label:, channels: []}]} or nil.
-def dmx_demo_read_fixture(path)
-  return nil unless File.exist?(path)
-  text = File.open(path, "r") { |f| f.read }
-  return nil unless text
-  begin
-    data = JSON.parse(text)
-  rescue
-    return nil
-  end
-  return nil unless data.is_a?(Hash)
-  available = data["availableChannels"]
-  modes = data["modes"]
-  return nil unless available.is_a?(Hash) && modes.is_a?(Array)
-
-  # Fine channel aliases appear in mode lists but are defined on their
-  # coarse parent; they carry no capabilities of their own.
-  fine = {}
-  available.each do |key, defn|
-    next unless defn.is_a?(Hash)
-    aliases = defn["fineChannelAliases"]
-    next unless aliases.is_a?(Array)
-    i = 0
-    while i < aliases.length
-      fine[aliases[i]] = key
-      i += 1
-    end
-  end
-
-  parsed = []
-  mi = 0
-  while mi < modes.length
-    mode = modes[mi]
-    mi += 1
-    next unless mode.is_a?(Hash) && mode["channels"].is_a?(Array)
-    list = mode["channels"]
-    channels = []
-    ci = 0
-    while ci < list.length
-      key = list[ci]
-      ci += 1
-      defn = key ? available[key] : nil
-      defn = nil unless defn.is_a?(Hash)
-      defn = nil if key && fine[key]
-      channels << {
-        name: key,
-        default: dmx_demo_default_value(defn),
-        caps: dmx_demo_capabilities(defn),
-      }
-    end
-    next if channels.empty?
-    label = mode["shortName"] || mode["name"] || "mode #{parsed.length + 1}"
-    parsed << { label: label, channels: channels }
-  end
-  return nil if parsed.empty?
-  name = data["name"]
-  name = path.split("/").last unless name.is_a?(String)
-  { name: name, modes: parsed }
-end
-
-def dmx_demo_default_value(defn)
-  return 0 unless defn.is_a?(Hash)
-  value = defn["defaultValue"]
-  return 0 unless value.is_a?(Integer)
-  return 0 if value < 0
-  return 255 if 255 < value
-  value
-end
-
-# Normalize capability/capabilities into [[min, max, label], ...].
-def dmx_demo_capabilities(defn)
-  return [] unless defn.is_a?(Hash)
-  list = defn["capabilities"]
-  list = [defn["capability"]] unless list.is_a?(Array)
-  caps = []
-  i = 0
-  while i < list.length
-    cap = list[i]
-    i += 1
-    next unless cap.is_a?(Hash)
-    range = cap["dmxRange"]
-    if range.is_a?(Array) && range[0].is_a?(Integer) && range[1].is_a?(Integer)
-      caps << [range[0], range[1], dmx_demo_capability_label(cap)]
-    else
-      caps << [0, 255, dmx_demo_capability_label(cap)]
-    end
-  end
-  caps
-end
-
-def dmx_demo_capability_label(cap)
-  comment = cap["comment"]
-  return comment if comment.is_a?(String) && !comment.empty?
-  effect = cap["shutterEffect"]
-  if effect.is_a?(String)
-    if cap["speedStart"].is_a?(String) && cap["speedEnd"].is_a?(String)
-      return "#{effect} #{cap["speedStart"]}..#{cap["speedEnd"]}"
-    end
-    return effect
-  end
-  type = cap["type"]
-  type.is_a?(String) ? type : ""
-end
-
-def dmx_demo_fixture_paths(dir)
-  paths = []
-  return paths unless Dir.exist?(dir)
-  Dir.open(dir) do |d|
-    while entry = d.read
-      next if entry == "." || entry == ".."
-      paths << "#{dir}/#{entry}" if entry.end_with?(".json")
-    end
-  end
-  paths.sort
-end
 
 def dmx_demo
   keyboard = $keyboard
@@ -148,8 +30,8 @@ def dmx_demo
   attr_text = 0xF0
   attr_bar  = 0x0F
 
-  cols = DVI::Text.respond_to?(:cols) ? DVI::Text.cols : DVI::Text::COLS
-  rows = DVI::Text.respond_to?(:rows) ? DVI::Text.rows : DVI::Text::ROWS
+  cols = DVI::Text.cols
+  rows = DVI::Text.rows
 
   fader_width = cols >= 100 ? 8 : 4
   visible = (cols - 2) / fader_width
@@ -371,7 +253,7 @@ def dmx_demo
   end
 
   load_fixture = lambda do
-    paths = dmx_demo_fixture_paths(DMX_DEMO_FIXTURE_DIR)
+    paths = DMX::Fixture.list(DMX_DEMO_FIXTURE_DIR)
     names = []
     i2 = 0
     while i2 < paths.length
@@ -380,7 +262,7 @@ def dmx_demo
     end
     pi = pick.call("Load fixture (#{DMX_DEMO_FIXTURE_DIR})", names)
     if pi
-      fixture = dmx_demo_read_fixture(paths[pi])
+      fixture = DMX::Fixture.read(paths[pi])
       if fixture.nil?
         fixture_title = "load failed: #{names[pi]}"
       else
