@@ -54,6 +54,15 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.gem core: 'picoruby-editor'
   conf.gem core: 'picoruby-sandbox'
 
+  # Exact rational time arithmetic for the Johakyu pattern core
+  # (rootfs/lib/johakyu/); C-backed Rational keeps pattern queries off
+  # the allocation-heavy pure Ruby fraction path. mruby-bigint comes
+  # along because mruby-rational does not compile without
+  # MRB_USE_BIGINT; it also changes integer overflow from RangeError
+  # to Bignum promotion.
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-bigint', __FILE__)
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-rational', __FILE__)
+
   conf.gem File.expand_path('../../mrbgems/picoruby-pwm-audio', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-synth-native', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-dmx', __FILE__)

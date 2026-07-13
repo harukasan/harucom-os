@@ -36,4 +36,8 @@ MRuby::Build.new('harucom-host-test') do |conf|
   conf.gembox "stdlib"
   conf.gem core: 'picoruby-picotest'
   conf.gem File.expand_path('../../mrbgems/picoruby-synth-native', __FILE__)
+  # Exact rational time for the Johakyu pattern core, same gems as the
+  # board (bigint is required to compile mruby-rational).
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-bigint', __FILE__)
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-rational', __FILE__)
 end
