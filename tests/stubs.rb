@@ -83,3 +83,22 @@ module Editor
     ch.bytesize == 1 ? 1 : 2
   end
 end
+
+# Render a hap list as comparable strings: "whole|part|value" with
+# fraction times as n/d. Keeps expectations readable in assert_equal.
+def hap_sigs(haps)
+  result = []
+  i = 0
+  while i < haps.length
+    hap = haps[i]
+    i += 1
+    whole = hap.whole ? "#{frac_s(hap.whole.begin_time)}..#{frac_s(hap.whole.end_time)}" : "nil"
+    part = "#{frac_s(hap.part.begin_time)}..#{frac_s(hap.part.end_time)}"
+    result << "#{whole}|#{part}|#{hap.value.inspect}"
+  end
+  result
+end
+
+def frac_s(fraction)
+  "#{fraction.num}/#{fraction.den}"
+end
