@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harucom OS (wasm)</title>
+  <!-- style.css is built from css/app.css by `rake wasm:css` (Tailwind v4). -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="m-0 bg-base text-fg">
+  <!-- #screen is the Engine-owned DVI canvas. It starts in a hidden holder; the
+       funicular Screen panel moves it into the layout on mount (so funicular
+       never recreates it and drops the 2D context). #app is the App mount. -->
+  <div hidden><canvas id="screen" width="640" height="480"></canvas></div>
+  <div id="app"></div>
+
+  <!-- harucom.js (classic script) defines the global createHarucomModule factory;
+       main.js (ES module) boots the VM, exposes the bridge, and starts the UI. -->
+  <script src="harucom.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

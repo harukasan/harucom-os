@@ -4,6 +4,7 @@ PROJECT_DIR = __dir__
 BUILD_DIR   = File.join(PROJECT_DIR, "build")
 DICT_DIR    = File.join(PROJECT_DIR, "vendor", "harucom-os-dict")
 DICT_UF2    = File.join(DICT_DIR, "build", "dict.uf2")
+DICT_BIN    = File.join(DICT_DIR, "build", "dict.bin")
 HARUCOM_UF2 = File.join(BUILD_DIR, "harucom_os.uf2")
 FULL_UF2    = File.join(BUILD_DIR, "harucom_os_full.uf2")
 MERGE_SCRIPT = File.join(PROJECT_DIR, "scripts", "merge_uf2.rb")
@@ -39,6 +40,11 @@ end
 desc "Build dictionary UF2 (vendor/harucom-os-dict)"
 task dict_uf2: :dict_submodule do
   sh "rake uf2", chdir: DICT_DIR
+end
+
+# Build just the raw HCDK image (no UF2 wrapper) for the wasm --embed-file step.
+file DICT_BIN => :dict_submodule do
+  sh "rake build/dict.bin", chdir: DICT_DIR
 end
 
 desc "Build combined UF2 (harucom-os + dict)"
@@ -108,3 +114,200 @@ end
 
 desc "Clean everything"
 task distclean: [:clean, :clean_picoruby, :clean_dict]
+
+# ---------------------------------------------------------------------------
+# WebAssembly build (run Harucom OS in the browser via picoruby.wasm)
+# ---------------------------------------------------------------------------
+# PICORUBY_DIR is defined above with the host-test paths.
+WASM_DIR      = File.join(PROJECT_DIR, "wasm")        # source: index.html, node harness
+WASM_OUT      = File.join(BUILD_DIR, "wasm")          # build output (build/ is gitignored)
+WASM_CONFIG   = File.join(PROJECT_DIR, "build_config", "harucom-wasm.rb")
+WASM_BUILD    = File.join(PICORUBY_DIR, "build", "harucom-wasm")
+WASM_HOST     = File.join(PICORUBY_DIR, "build", "host")
+WASM_LIBMRUBY = File.join(WASM_BUILD, "lib", "libmruby.a")
+WASM_JS       = File.join(WASM_OUT, "harucom.js")
+WASM_WASM     = File.join(WASM_OUT, "harucom.wasm")
+WASM_INDEX    = File.join(WASM_OUT, "index.html")
+WASM_CSS_IN   = File.join(WASM_DIR, "css", "app.css")   # Tailwind input
+WASM_CSS_OUT  = File.join(WASM_OUT, "style.css")        # Tailwind output
+WASM_TAILWIND = File.join(WASM_DIR, "node_modules", ".bin", "tailwindcss")
+ROOTFS_DIR    = File.join(PROJECT_DIR, "rootfs")
+# Generated into build/ (a build artifact), the same path the board's CMake build
+# uses (CMAKE_BINARY_DIR/ruby_scripts.h), so the header lives in one place and not
+# in the gem source tree. harucom-os-wasm/mrbgem.rake adds build/ to its include
+# path so harucom_wasm.c can #include it.
+ROOTFS_DATA   = File.join(BUILD_DIR, "ruby_scripts.h")
+GEN_RUBY_SCRIPTS = File.join(PROJECT_DIR, "scripts", "gen_ruby_scripts.rb")
+
+# Regenerate ruby_scripts.h only when a rootfs source (or the generator) is
+# newer, so an unchanged rootfs does not force harucom_wasm.c to recompile.
+file ROOTFS_DATA =>
+     (FileList["#{ROOTFS_DIR}/**/*"].exclude { |f| File.directory?(f) } << GEN_RUBY_SCRIPTS) do
+  mkdir_p BUILD_DIR
+  sh "ruby", GEN_RUBY_SCRIPTS, ROOTFS_DIR, ROOTFS_DATA
+end
+
+namespace :wasm do
+  def require_emcc!
+    return if system("emcc --version > /dev/null 2>&1")
+    abort "emcc not found on PATH. Activate emscripten first, e.g.:\n" \
+          "  source ~/emsdk/emsdk_env.sh"
+  end
+
+  def require_tailwind!
+    return if File.executable?(WASM_TAILWIND)
+    abort "tailwindcss CLI not found at #{WASM_TAILWIND}.\n" \
+          "Run `npm install` in #{WASM_DIR} (adds @tailwindcss/cli)."
+  end
+
+  # Build the Tailwind CLI command (css/app.css -> build/wasm/style.css). Pass
+  # "--minify" for builds or "--watch" for the dev server.
+  def tailwind_command(*extra)
+    require_tailwind!
+    [WASM_TAILWIND, "-i", WASM_CSS_IN, "-o", WASM_CSS_OUT, *extra]
+  end
+
+  desc "Generate rootfs C arrays (ruby_scripts.h) when rootfs/ changes"
+  task rootfs: ROOTFS_DATA
+
+  desc "Build the Tailwind stylesheet (build/wasm/style.css) from css/app.css"
+  task :css do
+    mkdir_p WASM_OUT
+    sh(*tailwind_command("--minify"))
+  end
+
+  # Write ruby/manifest.json listing the UI sources to stage and the panel
+  # modules to require. main.js fetches it, so adding a wasm/ruby/lib/*_panel.rb
+  # file makes a new tab appear without touching JS. Globs the staged tree.
+  def stage_ruby_manifest!
+    require "json"
+    lib = File.join(WASM_OUT, "ruby", "lib")
+    files = Dir.glob(File.join(lib, "*.rb")).sort.map { |f| "lib/#{File.basename(f)}" }
+    # Feature panels are *_panel.rb; the ui_* files are framework (the ui_panel.rb
+    # base would match the glob, so reject the ui_ prefix).
+    panels = Dir.glob(File.join(lib, "*_panel.rb")).sort
+                .map { |f| File.basename(f, ".rb") }
+                .reject { |n| n.start_with?("ui_") }
+    File.write(File.join(WASM_OUT, "ruby", "manifest.json"),
+               JSON.generate("files" => files, "panels" => panels))
+  end
+
+  # Copy the static page and its ES modules next to the built module so
+  # build/wasm/ is a self-contained directory the server can host.
+  def stage_index!
+    mkdir_p WASM_OUT
+    cp File.join(WASM_DIR, "index.html"), WASM_INDEX
+    rm_rf File.join(WASM_OUT, "js")
+    cp_r File.join(WASM_DIR, "js"), File.join(WASM_OUT, "js")
+    # funicular UI sources: main.js fetches these and writes them into MEMFS /_web.
+    rm_rf File.join(WASM_OUT, "ruby")
+    cp_r File.join(WASM_DIR, "ruby"), File.join(WASM_OUT, "ruby")
+    stage_ruby_manifest!
+  end
+
+  # A coarse mtime signature of the staged source trees, so the dev server can
+  # restage when a .js / .rb / index.html edit changes it.
+  def stage_signature
+    Dir.glob([File.join(WASM_DIR, "index.html"),
+              File.join(WASM_DIR, "js", "**", "*"),
+              File.join(WASM_DIR, "ruby", "**", "*")]).sort.map do |f|
+      File.file?(f) ? File.mtime(f).to_f : 0.0
+    end
+  end
+
+  desc "Build build/wasm/harucom.{js,wasm} (CLEAN=1 to rebuild presym/host from scratch)"
+  task build: [:rootfs, DICT_BIN] do
+    require_emcc!
+    require_tailwind! # fail fast before the emcc link if the CSS tool is missing
+    if %w[1 true yes].include?(ENV["CLEAN"].to_s.downcase)
+      rm_rf WASM_BUILD
+      rm_rf WASM_HOST
+    end
+    mkdir_p WASM_OUT
+    # Build libmruby.a with emscripten outside this project's bundler env: the
+    # bundler env breaks emcc's bundled Python. The picoruby-dvi font generation
+    # still works because freetype is installed as a system gem.
+    Bundler.with_unbundled_env do
+      sh({ "MRUBY_CONFIG" => WASM_CONFIG }, "rake", chdir: PICORUBY_DIR)
+    end
+    # Link libmruby.a into the browser module. This intentionally differs from
+    # the picoruby-wasm gem's own link task: it exports harucom_init (not
+    # picorb_init) and targets web,node without EXPORT_ES6 so the node tests
+    # (wasm/tests/) can require() it. harucom_init / mrb_run_step / mrb_tick_wasm
+    # are driven by the run loop in wasm/js/runloop.js.
+    exported = '["' + %w[
+      _harucom_init _harucom_run_ruby _mrb_run_step _mrb_tick_wasm
+      _harucom_dvi_framebuffer _harucom_dvi_width _harucom_dvi_height
+      _harucom_dvi_frame_count
+      _harucom_kbd_set_state
+      _harucom_audio_pull _harucom_audio_sample_rate
+      _harucom_audio_measure_tone _harucom_audio_measure_pull
+      _harucom_pad_set
+      _malloc _free
+    ].join('","') + '"]'
+    runtime  = '["' + %w[ccall cwrap UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8 HEAPF32 FS].join('","') + '"]'
+    sh "emcc", "-g0", "-O2",
+       "-sWASM=1", "-sMODULARIZE=1", "-sEXPORT_NAME=createHarucomModule",
+       "-sEXPORTED_RUNTIME_METHODS=#{runtime}",
+       "-sEXPORTED_FUNCTIONS=#{exported}",
+       "-sINITIAL_MEMORY=32MB", "-sALLOW_MEMORY_GROWTH=1", "-sSTACK_SIZE=2MB",
+       "-sENVIRONMENT=web,node", "-sWASM_ASYNC_COMPILATION=1",
+       "-sERROR_ON_UNDEFINED_SYMBOLS=0", "--no-entry",
+       "--embed-file", "#{DICT_BIN}@/dict.bin",
+       WASM_LIBMRUBY, "-o", WASM_JS
+    stage_index!
+    sh(*tailwind_command("--minify")) # build/wasm/style.css from css/app.css
+    puts "Built #{WASM_WASM} (#{File.size(WASM_WASM)} bytes)"
+  end
+
+  desc "Serve build/wasm/ over HTTP for browser testing (PORT=8000)"
+  task :server do
+    unless File.exist?(WASM_WASM)
+      abort "#{WASM_WASM} not found. Run `rake wasm:build` first."
+    end
+    stage_index! # pick up any index.html / js / ruby edits without a full rebuild
+    # Rebuild style.css from css/app.css edits while serving, so style tweaks show
+    # up on reload without a full wasm rebuild (--watch does an initial build on
+    # startup, so no separate one-shot is needed).
+    watcher = spawn(*tailwind_command("--watch"))
+    at_exit { Process.kill("TERM", watcher) rescue nil }
+    # Restage index.html / js / ruby on change, so editing the UI Ruby or the
+    # browser glue shows up on a plain reload (no emcc rebuild, no restart). The
+    # manifest is regenerated too, so dropping in a new *_panel.rb adds a tab.
+    restager = Thread.new do
+      sig = stage_signature
+      loop do
+        sleep 1
+        now = stage_signature
+        next if now == sig
+        sig = now
+        begin
+          stage_index!
+          puts "Restaged wasm/ (js/ruby/index.html change)"
+        rescue => e
+          warn "Restage failed: #{e.message}"
+        end
+      end
+    end
+    restager.abort_on_exception = false
+    port = ENV["PORT"] || "8000"
+    puts "Serving #{WASM_OUT} at http://localhost:#{port}/  (Ctrl-C to stop)"
+    # devserver.py sends Cache-Control: no-store so a plain reload always picks up
+    # the restaged css / ruby / js (stock http.server caches them).
+    sh "python3", File.join(WASM_DIR, "devserver.py"), port, WASM_OUT
+  end
+
+  desc "Smoke-test the wasm build headlessly under Node (node:test runner)"
+  task :test do
+    abort "#{WASM_WASM} not found. Run `rake wasm:build` first." unless File.exist?(WASM_WASM)
+    # node --test expands the glob itself (a bare directory arg is treated as a
+    # module path, not a discovery root).
+    sh "node", "--test", File.join(WASM_DIR, "tests", "*.test.cjs")
+  end
+
+  desc "Remove the wasm build output"
+  task :clean do
+    rm_rf WASM_BUILD
+    rm_rf WASM_OUT
+  end
+end

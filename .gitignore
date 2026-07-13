@@ -2,5 +2,6 @@
 build/
 lib/picoruby/build/
 .bundle/
+tmp/
 
 !.vscode/*

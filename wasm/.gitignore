@@ -1,0 +1,2 @@
+# Node test harness dependencies (jsdom). Build artifacts now live in build/wasm/.
+node_modules/
