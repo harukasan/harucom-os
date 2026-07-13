@@ -11,8 +11,10 @@
 # pumps the scheduler and the DMX keepalive on every iteration.
 #
 # Keybindings:
+#   Alt-1..0: Switch scenes (ten independent buffers, like editor tabs)
 #   F5:      Evaluate the buffer (applies at the next cycle boundary)
-#   Ctrl-S:  Save, then evaluate
+#   Ctrl-S:  Save (asks for a path when untitled), then evaluate
+#   Ctrl-O:  Open a file into the current scene
 #   Ctrl-Q:  Quit (blackout)
 #   Ctrl-Z / Ctrl-Y: Undo / Redo
 #
@@ -55,28 +57,44 @@ class JohakyuApp
     "",
     "track(:wash) { dmx(:s2).dimmer(sine.slow(2)).pan(sine.range(0.3, 0.7).slow(8)) }",
     "",
-    "# F1/F2/F3 load the jo/ha/kyu scenes; F5 applies the buffer.",
+    "# Alt-1..0 switch scenes, Ctrl-O opens a file; F5 applies the buffer.",
   ]
 
-  SCENES = {
-    1 => ["/data/johakyu/jo.rb", "jo"],
-    2 => ["/data/johakyu/ha.rb", "ha"],
-    3 => ["/data/johakyu/kyu.rb", "kyu"],
-  }
-  CATALOG_PATH = "/data/johakyu/catalog.rb"
+  SCENE_COUNT = 10
+
+  # One editor tab: its own buffer, file binding, undo history, and
+  # viewport. Buffers start untitled with a single empty line.
+  class Scene
+    attr_accessor :filepath, :scroll_top, :scroll_left
+    attr_reader :buffer, :undo_stack, :redo_stack
+
+    def initialize
+      @buffer = Editor::Buffer.new
+      @buffer.lines.push("")
+      @filepath = nil
+      @undo_stack = []
+      @redo_stack = []
+      @scroll_top = 0
+      @scroll_left = 0
+    end
+  end
 
   def initialize(filepath)
     @console = $console
     @keyboard = $keyboard
-    @filepath = filepath
 
-    @buffer = Editor::Buffer.new
+    @scenes = Array.new(SCENE_COUNT)
+    @scenes[0] = Scene.new
+    @scene_index = 0
+    scene = @scenes[0]
+    @buffer = scene.buffer
+    @filepath = filepath
+    @undo_stack = scene.undo_stack
+    @redo_stack = scene.redo_stack
     @scroll_top = 0
     @scroll_left = 0
     @running = true
     @message = nil
-    @undo_stack = []
-    @redo_stack = []
     @syntax = nil     # [highlight_map, window_offsets, win_start] or nil
     @win_start = 0
     @win_end = 0
@@ -95,7 +113,6 @@ class JohakyuApp
 
     @view = Johakyu::UniverseView.new(@session, top: VIEW_TOP)
     @sandbox = new_eval_sandbox
-    load_catalog
 
     @console.clear
     @view.reset
@@ -173,58 +190,38 @@ class JohakyuApp
     sandbox
   end
 
-  # Evaluate the jo/ha/kyu catalog once at startup. Its top-level
-  # definitions are global, so every later buffer eval sees them; the
-  # resident sandbox does not need a reload.
-  def load_catalog
-    source = nil
-    begin
-      source = File.open(CATALOG_PATH, "r") { |f| f.read }
-    rescue
-      source = nil
-    end
-    if source.nil? || source.bytesize == 0
-      @message = "catalog missing: #{CATALOG_PATH}"
-      return
-    end
-    if @sandbox.compile(source)
-      @sandbox.execute
-      @sandbox.wait(timeout: 3000)
-      @sandbox.suspend
-      error = @sandbox.result
-      if error.is_a?(Exception)
-        @message = "catalog: #{error.message}"
-      end
-    else
-      @message = "catalog failed to compile"
-    end
+  # -- Scenes (editor tabs) --
+
+  # Write the viewport and file binding back to the current scene.
+  # The buffer and undo arrays are shared objects mutated in place,
+  # so they never need copying back.
+  def store_scene
+    scene = @scenes[@scene_index]
+    scene.filepath = @filepath
+    scene.scroll_top = @scroll_top
+    scene.scroll_left = @scroll_left
   end
 
-  # Load a jo/ha/kyu scene file into the buffer (F1-F3). Nothing is
-  # applied until F5, like any other edit.
-  def load_scene(number)
-    entry = SCENES[number]
-    return unless entry
-    source = nil
-    begin
-      source = File.open(entry[0], "r") { |f| f.read }
-    rescue
-      source = nil
-    end
-    if source.nil? || source.bytesize == 0
-      @message = "scene missing: #{entry[0]}"
-      return
-    end
-    @buffer.lines.clear
-    source.split("\n").each { |l| @buffer.lines.push(l) }
-    @buffer.lines.push("") if @buffer.lines.empty?
-    @buffer.move_to(0, 0)
-    @scroll_top = 0
-    @scroll_left = 0
-    @undo_stack.clear
-    @redo_stack.clear
+  # Switch to scene number 1..SCENE_COUNT. Scenes are created on
+  # first visit; switching only swaps editor state, the running show
+  # is untouched until the new buffer is applied.
+  def switch_scene(number)
+    index = number - 1
+    return if index == @scene_index
+    store_scene
+    @scene_index = index
+    scene = @scenes[index] ||= Scene.new
+    @buffer = scene.buffer
+    @filepath = scene.filepath
+    @undo_stack = scene.undo_stack
+    @redo_stack = scene.redo_stack
+    @scroll_top = scene.scroll_top
+    @scroll_left = scene.scroll_left
+    @old_scroll_top = @scroll_top
+    @old_scroll_left = @scroll_left
+    @syntax = nil
     @buffer.mark_dirty(:structure)
-    @message = "Scene #{entry[1]} loaded - F5 to apply"
+    @message = "Scene #{number}"
   end
 
   def start_eval
@@ -320,6 +317,38 @@ class JohakyuApp
   rescue => e
     @message = "Save failed: #{e.message}"
     false
+  end
+
+  # Open a file into the current scene, replacing its buffer. Asks
+  # before discarding unsaved changes.
+  def open_file
+    if @buffer.changed
+      answer = prompt_input("Discard unsaved changes? (y/n): ", y_or_n: true)
+      draw_command_bar
+      @buffer.mark_dirty(:structure)
+      return unless answer && (answer == "y" || answer == "Y")
+    end
+    path = prompt_input("Open: ")
+    draw_command_bar
+    @buffer.mark_dirty(:structure)
+    return unless path && path.bytesize > 0
+    unless File.file?(path)
+      @message = "No such file: #{path}"
+      return
+    end
+    content = File.open(path, "r") { |f| f.read }
+    @buffer.lines.clear
+    content.split("\n").each { |l| @buffer.lines.push(l) } if content
+    @buffer.lines.push("") if @buffer.lines.empty?
+    @buffer.move_to(0, 0)
+    @scroll_top = 0
+    @scroll_left = 0
+    @undo_stack.clear
+    @redo_stack.clear
+    @buffer.changed = false
+    @buffer.mark_dirty(:structure)
+    @filepath = path
+    @message = "Opened #{path}"
   end
 
   # -- Undo plumbing (same behavior as edit.rb) --
@@ -496,7 +525,7 @@ class JohakyuApp
     col_num = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x) + 1
     modified = @buffer.changed ? " [+]" : ""
     name = @filepath || "[untitled]"
-    status = " #{name}#{modified}  #{line_num}:#{col_num}"
+    status = " [#{@scene_index + 1}] #{name}#{modified}  #{line_num}:#{col_num}"
     status = " #{@message}" if @message
     width = Editor.display_width(status)
     if width < Console.cols
@@ -513,7 +542,7 @@ class JohakyuApp
     mode = $ime ? $ime.mode_label : nil
     if @command_bar_text.nil? || mode != @command_bar_mode
       @command_bar_mode = mode
-      bar = " F1-F3:Scene  F5:Eval  Ctrl-S:Save+Eval  Ctrl-Q:Quit  Ctrl-Z:Undo"
+      bar = " Alt-1..0:Scene  F5:Eval  Ctrl-S:Save+Eval  Ctrl-O:Open  Ctrl-Q:Quit"
       if mode
         padding = Console.cols - Editor.display_width(bar) - Editor.display_width(mode)
         bar += " " * padding if padding > 0
@@ -684,6 +713,19 @@ class JohakyuApp
     @old_scroll_left = @scroll_left
     @buffer.clear_dirty
 
+    # Editor commands checked before the IME: an Alt+digit would
+    # otherwise be fed into the preedit as a plain digit.
+    if c.alt? && c.char && c.char >= "0" && c.char <= "9"
+      switch_scene(c.char == "0" ? 10 : c.char.to_i)
+      redraw_after_key(old_dirty)
+      return
+    end
+    if c.match?(:o, ctrl: true)
+      open_file
+      redraw_after_key(old_dirty)
+      return
+    end
+
     ime_handled = false
     if $ime
       ime_result = $ime.process(c)
@@ -715,12 +757,6 @@ class JohakyuApp
         start_eval if save_buffer
       when Keyboard::F5
         start_eval
-      when Keyboard::F1
-        load_scene(1)
-      when Keyboard::F2
-        load_scene(2)
-      when Keyboard::F3
-        load_scene(3)
       when Keyboard::CTRL_Z
         @message = "Undo" if perform_undo
       when Keyboard::CTRL_Y

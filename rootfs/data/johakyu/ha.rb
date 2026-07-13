@@ -1,7 +1,10 @@
 # 破 (ha): the development. Forms combine: a full beat, circles and
-# figure-eights around the stage, colors riding the dimmer. Scene
-# loaded by F2; apply with F5. Try:
+# figure-eights around the stage, colors riding the dimmer. Open into
+# a scene with Ctrl-O; apply with F5. Try:
 #   ha("mirror") ha("chase", fast: 2) _track to mute a layer
+
+$LOAD_PATH << "/data/johakyu" unless $LOAD_PATH.include?("/data/johakyu")
+require "catalog"
 
 tempo 120
 

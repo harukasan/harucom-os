@@ -1,8 +1,8 @@
 # Jo-ha-kyu catalog: the show vocabulary for the johakyu app. The
 # names jo/ha/kyu live only in this /data/johakyu module; the library
-# under /lib stays generic (research 08). The app evaluates this file
-# once at startup in the resident sandbox; the top-level definitions
-# then serve every buffer eval.
+# under /lib stays generic (research 08). Scene files require this
+# file; the top-level definitions are global, so one require serves
+# every later buffer eval.
 #
 # Usage in the editor buffer (a catalog call is one statement, so it
 # records like sound()/pan(); inside track blocks it returns the
