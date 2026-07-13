@@ -1,4 +1,4 @@
-# Hardware stubs for host tests. Loaded into the target VM (microruby)
+# Hardware stubs for host tests. Loaded into the target VM (picoruby)
 # before each test file, replacing the board's C modules so rootfs
 # scripts run unmodified. Tests control time through Machine.millis=.
 

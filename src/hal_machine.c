@@ -16,6 +16,8 @@
 #include "hardware/timer.h"
 #include "hardware/watchdog.h"
 #include "hardware/sync.h"
+#include "hardware/structs/ioqspi.h"
+#include "hardware/structs/sio.h"
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
 #include "pico/aon_timer.h"
@@ -25,7 +27,8 @@
 #include "io-console.h"
 
 /* Forward declarations */
-int hal_write(int fd, const void *buf, int nbytes);
+int mrb_hal_write(int fd, const void *buf, int nbytes);
+int picorb_hal_getchar(void);
 
 /* ===================================================================
  * HAL I/O (hal.h)
@@ -59,20 +62,20 @@ hal_stdin_init(void)
   RingBuffer_init(stdin_rb, PICORB_STDIN_BUFFER_SIZE);
 }
 
-void
-hal_stdin_push(uint8_t ch)
+bool
+picorb_hal_stdin_push(uint8_t ch)
 {
   if (!io_raw_q()) {
     if (ch == 3) {
       sigint_status = MACHINE_SIGINT_RECEIVED;
-      return;
+      return true;
     }
     if (ch == 26) {
       sigint_status = MACHINE_SIGTSTP_RECEIVED;
-      return;
+      return true;
     }
   }
-  RingBuffer_push(stdin_rb, ch);
+  return RingBuffer_push(stdin_rb, ch);
 }
 
 /*-------------------------------------
@@ -101,7 +104,7 @@ canon_process_char(uint8_t raw)
     if (canon_len > 0) {
       canon_len--;
       if (io_echo_q()) {
-        hal_write(1, "\b \b", 3);
+        mrb_hal_write(1, "\b \b", 3);
       }
     }
     return CANON_ACCUMULATING;
@@ -111,7 +114,7 @@ canon_process_char(uint8_t raw)
       canon_buf[canon_len++] = raw;
     }
     if (io_echo_q()) {
-      hal_write(1, "\r\n", 2);
+      mrb_hal_write(1, "\r\n", 2);
     }
     canon_read_pos = 0;
     return CANON_LINE_READY;
@@ -130,7 +133,7 @@ canon_process_char(uint8_t raw)
   if (canon_len < PICORB_CANONICAL_BUF_SIZE) {
     canon_buf[canon_len++] = raw;
     if (io_echo_q()) {
-      hal_write(1, &raw, 1);
+      mrb_hal_write(1, &raw, 1);
     }
   }
   return CANON_ACCUMULATING;
@@ -150,12 +153,12 @@ poll_stdio_to_ringbuffer(void)
 {
   int c = getchar_timeout_us(0);
   if (c >= 0) {
-    hal_stdin_push((uint8_t)c);
+    picorb_hal_stdin_push((uint8_t)c);
   }
 }
 
 int
-hal_write(int fd, const void *buf, int nbytes)
+mrb_hal_write(int fd, const void *buf, int nbytes)
 {
   (void)fd;
   const char *p = (const char *)buf;
@@ -166,7 +169,7 @@ hal_write(int fd, const void *buf, int nbytes)
 }
 
 int
-hal_flush(int fd)
+mrb_hal_flush(int fd)
 {
   (void)fd;
   stdio_flush();
@@ -174,7 +177,7 @@ hal_flush(int fd)
 }
 
 int
-hal_getchar(void)
+picorb_hal_getchar(void)
 {
   poll_stdio_to_ringbuffer();
 
@@ -217,7 +220,7 @@ hal_getchar(void)
   int result = canon_process_char(raw);
   switch (result) {
   case CANON_LINE_READY:
-    return hal_getchar();
+    return picorb_hal_getchar();
   case CANON_EOF:
     canon_eof = false;
     return HAL_GETCHAR_EOF;
@@ -227,7 +230,7 @@ hal_getchar(void)
 }
 
 int
-hal_read_available(void)
+picorb_hal_read_available(void)
 {
   poll_stdio_to_ringbuffer();
 
@@ -245,7 +248,7 @@ hal_read_available(void)
 }
 
 void
-hal_abort(const char *s)
+mrb_hal_abort(const char *s)
 {
   if (s) {
     printf("%s\n", s);
@@ -347,6 +350,50 @@ void
 Machine_reboot(void)
 {
   watchdog_reboot(0, 0, 0);
+}
+
+/*
+ * Read the BOOTSEL button via the QSPI chip select pin.
+ * Based on tinyusb BSP (hw/bsp/rp2040/family.c).
+ * Weak symbol: if tinyusb_board provides get_bootsel_button,
+ * the linker uses that version instead.
+ *
+ * Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
+ * Copyright (c) 2021, Ha Thach (tinyusb.org)
+ * SPDX-License-Identifier: MIT
+ */
+__attribute__((weak))
+bool __no_inline_not_in_flash_func(get_bootsel_button)(void) {
+  const uint CS_PIN_INDEX = 1;
+
+  uint32_t flags = save_and_disable_interrupts();
+
+  hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
+                  GPIO_OVERRIDE_LOW << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
+                  IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
+
+  for (volatile int i = 0; i < 1000; ++i);
+
+#ifdef __ARM_ARCH_6M__
+  #define CS_BIT (1u << 1)
+#else
+  #define CS_BIT SIO_GPIO_HI_IN_QSPI_CSN_BITS
+#endif
+  bool button_state = (sio_hw->gpio_hi_in & CS_BIT);
+
+  hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
+                  GPIO_OVERRIDE_NORMAL << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
+                  IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
+
+  restore_interrupts(flags);
+
+  return button_state;
+}
+
+bool
+Machine_bootsel_pressed_q(void)
+{
+  return !get_bootsel_button();
 }
 
 /*-------------------------------------

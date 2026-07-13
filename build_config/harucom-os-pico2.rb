@@ -2,11 +2,14 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
 
   conf.toolchain("gcc")
 
+  conf.cc.defines << "PICORB_PLATFORM_RP2"
+
   conf.cc.defines << "MRB_TICK_UNIT=1"
   conf.cc.defines << "MRB_TIMESLICE_TICK_COUNT=10"
 
   conf.cc.defines << "MRB_UTF8_STRING"
   conf.cc.defines << "MRB_INT64"
+  conf.cc.defines << "MRB_NO_BOXING"
   conf.cc.defines << "MRB_32BIT"
   conf.cc.defines << "PICORB_ALLOC_ESTALLOC"
   conf.cc.defines << "PICORB_ALLOC_ALIGN=8"
@@ -37,7 +40,7 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.cc.flags << "-ffunction-sections"
   conf.cc.flags << "-fdata-sections"
 
-  conf.microruby
+  conf.picoruby
 
   conf.gembox "minimum"
   conf.gembox "core"

@@ -63,9 +63,9 @@ end
 
 PICORUBY_DIR = File.join(PROJECT_DIR, "lib", "picoruby")
 HOST_TEST_CONFIG = File.join(PROJECT_DIR, "build_config", "harucom-os-host-test.rb")
-HOST_TEST_VM = File.join(PICORUBY_DIR, "build", "harucom-host-test", "bin", "microruby")
+HOST_TEST_VM = File.join(PICORUBY_DIR, "build", "harucom-host-test", "bin", "picoruby")
 
-desc "Build the host test VM (microruby with board-parity defines)"
+desc "Build the host test VM (picoruby with board-parity defines)"
 task :test_vm do
   sh({ "MRUBY_CONFIG" => HOST_TEST_CONFIG }, "rake all", chdir: PICORUBY_DIR)
 end

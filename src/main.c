@@ -47,7 +47,8 @@ static const char ruby_bootstrap[] =
     "\n"
     "load \"/system.rb\"\n";
 
-mrb_state *global_mrb = NULL;
+/* Defined in mruby-compiler (ccontext.c); main() points it at the VM. */
+extern mrb_state *global_mrb;
 
 /* PSRAM heap passed to mruby */
 static void *heap_pool_g;

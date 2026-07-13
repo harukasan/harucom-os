@@ -1,4 +1,4 @@
-# Host test VM for rootfs scripts: a POSIX microruby binary with the
+# Host test VM for rootfs scripts: a POSIX picoruby binary with the
 # picotest gem, driven by tests/runner.rb (CRuby orchestrator).
 #
 # The VM class and the integer/string defines mirror the board build
@@ -18,23 +18,22 @@ MRuby::Build.new('harucom-host-test') do |conf|
   conf.cc.defines << "PICORB_ALLOC_ESTALLOC"
   conf.cc.defines << "MRB_UTF8_STRING"
   conf.cc.defines << "MRB_INT64"
+  # Upstream POSIX builds all run without boxing; 64-bit word boxing
+  # is untested there and crashes.
+  conf.cc.defines << "MRB_NO_BOXING"
 
-  conf.microruby
+  conf.picoruby
 
   # The stdlib gembox pulls in the socket gem, which links against SSL.
   conf.linker.libraries << 'ssl'
   conf.linker.libraries << 'crypto'
 
+  # On POSIX the minimum gembox also provides mruby-bin-mrbc and the
+  # bin/picoruby executable the test runner spawns.
   conf.gembox "mruby-posix"
   conf.gembox "minimum"
   conf.gembox "core"
   conf.gembox "stdlib"
-  conf.gem core: 'picoruby-bin-microruby'
   conf.gem core: 'picoruby-picotest'
   conf.gem File.expand_path('../../mrbgems/picoruby-synth-native', __FILE__)
-
-  # A named build resolves no 'host' fallback, so it must carry its own
-  # bytecode compiler (mruby-bin-mrbc2 emits bin/picorbc).
-  conf.gem core: 'mruby-bin-mrbc2'
-  conf.instance_variable_set :@mrbcfile, "#{conf.build_dir}/bin/picorbc"
 end

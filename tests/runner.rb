@@ -3,7 +3,7 @@
 # Usage: rake test / rake "test[filter]"   (or: ruby tests/runner.rb [filter])
 #
 # Picotest's Runner runs here on CRuby to discover *_test.rb files, and
-# executes each test class on the microruby host VM (ENV["RUBY"], built
+# executes each test class on the picoruby host VM (ENV["RUBY"], built
 # from build_config/harucom-os-host-test.rb). Tests live outside
 # rootfs/ so they are never flashed to the board.
 
@@ -17,7 +17,7 @@ $LOAD_PATH.unshift rootfs_lib     # test files require rootfs libs during discov
 require "picotest"
 require "tmpdir"
 
-ENV["RUBY"] ||= File.join(project_dir, "lib/picoruby/build/harucom-host-test/bin/microruby")
+ENV["RUBY"] ||= File.join(project_dir, "lib/picoruby/build/harucom-host-test/bin/picoruby")
 unless File.executable?(ENV["RUBY"])
   abort "Test VM not found: #{ENV["RUBY"]}\nBuild it with: rake test_vm"
 end
