@@ -1,21 +1,35 @@
-# Johakyu Pattern Core
+# Johakyu
 
-Johakyu is a live coding pattern engine in the style of [TidalCycles][tidal]
-and [Strudel][strudel]. A pattern describes repeating musical or lighting
+Johakyu is a live coding engine in the style of [TidalCycles][tidal]
+and [Strudel][strudel] that drives PWM audio and DMX lighting from one
+pattern language. A pattern describes repeating musical or lighting
 events as a function of time, and the same query semantics as
 [strudel-rb][strudel-rb] let patterns written for Strudel port over
-directly. The core is pure Ruby in [rootfs/lib/johakyu/](../rootfs/lib/johakyu/),
-with time arithmetic on the C-backed Rational class (the mruby-rational
-and mruby-bigint gems from the mruby tree).
+directly. The engine is pure Ruby in
+[rootfs/lib/johakyu/](../rootfs/lib/johakyu/), with time arithmetic on
+the C-backed Rational class (the mruby-rational and mruby-bigint gems
+from the mruby tree). The live coding UI is
+[rootfs/app/johakyu.rb](../rootfs/app/johakyu.rb); the show vocabulary
+(jo/ha/kyu scenes and the sound/light catalog) lives in
+[rootfs/data/johakyu/](../rootfs/data/johakyu/), not in the library.
 
 ## Ruby API
 
 Module: `Johakyu`
 
+Pattern core:
+
 - [Johakyu.mini](#johakyumatext---pattern)
 - [Johakyu::Pattern](#johakyupattern)
 - [Johakyu::Signal](#johakyusignal)
 - [Johakyu::Clock](#johakyuclock)
+
+Control plane:
+
+- [Control statements](#control-statements)
+- [Johakyu::Session](#johakyusession)
+- [Johakyu::Live](#johakyulive)
+- [Fixtures](#fixtures)
 
 Patterns are built from mini notation or from factory methods, transformed
 by chaining, and read back by querying a time span. Time is measured in
@@ -88,6 +102,83 @@ minute, Strudel setcpm), or `cps=` (cycles per second, Strudel setcps);
 rebases the origin so the position stays continuous. There is no
 maintenance task and no dependency on the audio engine.
 
+### Control statements
+
+Every statement is a Pattern whose values are control maps (Hash)
+carrying the sound key (`:s`) and light keys (fixture personality
+attributes plus `:target`). One query drives both sinks; the session
+dispatcher splits the map.
+
+```ruby
+Johakyu.sound("bd*4").color("<red blue>")   # light rides the kick
+Johakyu.pan(Johakyu.sine.slow(8)).on(:s1)   # standalone automation
+Johakyu.dimmer("1 0").spread(0.5, on: :all) # chase across members
+```
+
+Chaining attaches controls with structure from the left (Tidal's `#`):
+`dimmer("1 0").color("<red blue>")` samples the colors at the dimmer's
+event times. Use two statements when the structures must stay
+independent.
+
+### Johakyu::Session
+
+The dispatcher ([dsl.rb](../rootfs/lib/johakyu/dsl.rb)). Statements are
+bound to named tracks; `update` must run every loop iteration.
+
+```ruby
+session = Johakyu::Session.new(audio: Board::PWMAudio.new, bpm: 120)
+session.load_kit    # /data/drums WAVs, or renders the kit on board
+session.bind_statement(:drums, Johakyu.sound("bd*4").color("<red blue>"))
+loop do
+  session.update
+  DMX.keepalive
+  sleep_ms 10
+end
+```
+
+Sound controls become sample-accurate reservations on the C audio
+engine; light controls become fixture writes at their target frame
+time. `tempo`, `audio_latency_ms=`, and quantized rebinding keep a
+running show editable.
+
+### Johakyu::Live
+
+The live coding isolation layer ([live.rb](../rootfs/lib/johakyu/live.rb)).
+The johakyu app evaluates the editor buffer in a resident Sandbox task,
+which must not touch the running session: the scheduler arrays are
+mutated by the app task on every update, and a preemptive task switch
+mid-mutation would corrupt them. The script instead talks to a `Live`
+recorder through top-level DSL methods (`tempo`, `track`, `_track`,
+`sound`, ...) that only build patterns and record intents. When the
+sandbox finishes cleanly the app task calls `Live#apply`, which replays
+the recording onto the session; if the script raised, the recording is
+discarded and the show keeps playing. Each eval describes the whole
+desired state: tracks absent from the new recording are removed, so an
+empty buffer silences everything.
+
+### Fixtures
+
+The fixture model ([fixture.rb](../rootfs/lib/johakyu/fixture.rb)):
+`Personality` maps attribute names to channel offsets, `Patch` assigns
+base addresses, `Group` broadcasts with optional value spread. The DMX
+universe lives in the C engine; this layer only resolves attributes to
+absolute channels and quantizes values, and reads back through
+`DMX.get` instead of caching.
+
+```ruby
+Johakyu.dmx(:s1).pan(0.5).tilt(0.2)      # normalized 0.0-1.0, chainable
+Johakyu.dmx(:all).dimmer(1.0)            # group broadcast
+Johakyu.dmx(:s1).color(:red)             # named wheel positions
+Johakyu.dmx(:s1).raw(:pan, 200)          # raw 0-255 escape hatch
+```
+
+`Johakyu::UniverseView`
+([universe_view.rb](../rootfs/lib/johakyu/universe_view.rb)) renders
+the cycle bar, scheduler health, per-fixture readbacks, and the raw
+channel grid at the top of the live coding UI. Drawing is differential
+with a precomputed value-string table, so the steady-state draw path
+allocates nothing.
+
 ## Mini notation
 
 `Johakyu.mini` accepts the strudel-rb subset:
@@ -130,6 +221,33 @@ quantizes onto a 1/3840 grid, which covers halves, thirds, quarters,
 fifths, and 16ths exactly. The Rational arithmetic itself runs in C; a
 pure Ruby fraction class in this position dominated the board tick cost
 through per-operation allocation.
+
+### Scheduling and timing
+
+The scheduler ([scheduler.rb](../rootfs/lib/johakyu/scheduler.rb))
+stages tracks in cycle-sized chunks: each track keeps a staged_until
+position, and `tick` advances at most one track per call (the most
+urgent one), converting every onset in the chunk into a pending event
+stamped with its target board_millis. Querying per chunk instead of per
+tick keeps the mruby query cost (Fraction and Hap allocation, GC
+pressure) off the main loop; a typical tick does no query work at all,
+so `pump` fires events with loop-iteration jitter only.
+
+Events fire RESERVE_LEAD_MS early. For sound, the dispatcher converts
+the musical target time to a sample offset (board_millis and the audio
+engine's sample_clock read as an anchor pair) and reserves the sound in
+C through `play_at`/`tone_at`, so playback lands sample accurate
+regardless of loop jitter; the lead absorbs staging pauses and GC.
+Light writes wait in a small due list and land on their target time
+with loop granularity, well inside one 25 ms DMX frame. A fixed
+audio_latency_ms offset aligns the two sinks (PWM audio and moving
+head response differ by roughly 20 ms).
+
+Live replacement is quantized: rebinding an existing track applies at
+the next integer cycle boundary. Events already staged past that
+boundary are dropped and restaged from the new pattern, so edits land
+musically. A track whose query raises falls back to its last good
+pattern instead of silencing the whole scheduler.
 
 ### Determinism
 

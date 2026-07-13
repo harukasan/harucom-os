@@ -69,7 +69,7 @@ Design documents and implementation notes are in `doc/`:
 - [doc/pwm-audio.md](doc/pwm-audio.md) — PWM audio output (wrap-paced DMA, 8-channel mixer, QOA/WAV samples, flash streaming, sample-accurate scheduling)
 - [doc/synth.md](doc/synth.md) — Synth render DSL (sample synthesis in Ruby, shared board/host, drum kit definitions)
 - [doc/dmx.md](doc/dmx.md) — DMX output (background 40 Hz UART/DMA engine, frame collision guard, dead-man switch)
-- [doc/johakyu.md](doc/johakyu.md) — Johakyu pattern core (Strudel-style patterns, mini notation, signals, master clock)
+- [doc/johakyu.md](doc/johakyu.md) — Johakyu live coding engine (Strudel-style patterns, mini notation, chunked scheduler, DMX fixtures, live eval isolation)
 - [doc/editor-buffer-improvements.md](doc/editor-buffer-improvements.md) — Editor::Buffer improvement plan (desired column, tab width)
 
 ## Documentation style
