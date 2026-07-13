@@ -1,6 +1,6 @@
 # 序 (jo): the quiet opening. Basic forms played alone: a sparse
 # heartbeat, home pose, one slow sway. Open into a scene with Ctrl-O;
-# apply with F5. Swap forms from the catalog:
+# apply with Ctrl-Enter. Swap forms from the catalog:
 #   jo("kick2") jo("kick4") jo("backbeat") jo("snare24") jo("hats8")
 #   jo("tilt_ud") jo("dimmer_beat") jo("color_cycle") jo("focus_sweep")
 

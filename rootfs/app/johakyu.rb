@@ -11,11 +11,11 @@
 # pumps the scheduler and the DMX keepalive on every iteration.
 #
 # Keybindings:
-#   Alt-1..0: Switch scenes (ten independent buffers, like editor tabs)
-#   F5:      Evaluate the buffer (applies at the next cycle boundary)
-#   Ctrl-S:  Save (asks for a path when untitled), then evaluate
-#   Ctrl-O:  Open a file into the current scene
-#   Ctrl-Q:  Quit (blackout)
+#   Alt-1..0:   Switch scenes (ten independent buffers, like editor tabs)
+#   Ctrl-Enter: Evaluate the buffer (applies at the next cycle boundary)
+#   Ctrl-S:     Save (asks for a path when untitled), then evaluate
+#   Ctrl-O:     Open a file into the current scene
+#   Ctrl-Q:     Quit (blackout)
 #   Ctrl-Z / Ctrl-Y: Undo / Redo
 #
 # The buffer is evaluated in a resident Sandbox task. The script only
@@ -57,7 +57,7 @@ class JohakyuApp
     "",
     "track(:wash) { dmx(:s2).dimmer(sine.slow(2)).pan(sine.range(0.3, 0.7).slow(8)) }",
     "",
-    "# Alt-1..0 switch scenes, Ctrl-O opens a file; F5 applies the buffer.",
+    "# Alt-1..0 switch scenes, Ctrl-O opens a file; Ctrl-Enter applies the buffer.",
   ]
 
   SCENE_COUNT = 10
@@ -542,7 +542,7 @@ class JohakyuApp
     mode = $ime ? $ime.mode_label : nil
     if @command_bar_text.nil? || mode != @command_bar_mode
       @command_bar_mode = mode
-      bar = " Alt-1..0:Scene  F5:Eval  Ctrl-S:Save+Eval  Ctrl-O:Open  Ctrl-Q:Quit"
+      bar = " Alt-1..0:Scene  Ctrl-Enter:Eval  Ctrl-S:Save+Eval  Ctrl-O:Open  Ctrl-Q:Quit"
       if mode
         padding = Console.cols - Editor.display_width(bar) - Editor.display_width(mode)
         bar += " " * padding if padding > 0
@@ -702,7 +702,7 @@ class JohakyuApp
     new_scroll
   end
 
-  # -- Key handling (edit.rb behavior + F5/Ctrl-S eval) --
+  # -- Key handling (edit.rb behavior + Ctrl-Enter/Ctrl-S eval) --
 
   def handle_key(c)
     @console.hide_cursor
@@ -722,6 +722,11 @@ class JohakyuApp
     end
     if c.match?(:o, ctrl: true)
       open_file
+      redraw_after_key(old_dirty)
+      return
+    end
+    if c.match?(:enter, ctrl: true)
+      start_eval
       redraw_after_key(old_dirty)
       return
     end
@@ -755,8 +760,6 @@ class JohakyuApp
         @message = "Quit cancelled"
       when Keyboard::CTRL_S
         start_eval if save_buffer
-      when Keyboard::F5
-        start_eval
       when Keyboard::CTRL_Z
         @message = "Undo" if perform_undo
       when Keyboard::CTRL_Y

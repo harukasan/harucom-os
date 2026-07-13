@@ -1,5 +1,6 @@
 # 急 (kyu): the climax. Everything faster, wider, brighter. Open into
-# a scene with Ctrl-O; apply with F5. Build your own development on top:
+# a scene with Ctrl-O; apply with Ctrl-Enter. Build your own
+# development on top:
 #   track(:finale) { kyu("finale") }   # full-on ending
 
 $LOAD_PATH << "/data/johakyu" unless $LOAD_PATH.include?("/data/johakyu")
