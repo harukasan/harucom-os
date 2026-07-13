@@ -17,7 +17,7 @@ class DmxFixtureTest < Picotest::Test
     assert_equal "1ch", mode[:label]
     assert_equal 1, mode[:channels].length
     assert_equal "Dimmer", mode[:channels][0][:name]
-    assert_equal [[0, 255, "Intensity"]], mode[:channels][0][:caps]
+    assert_equal [[0, 255, "Intensity", "Intensity"]], mode[:channels][0][:caps]
   end
 
   def test_capability_bands_and_labels
@@ -27,14 +27,16 @@ class DmxFixtureTest < Picotest::Test
         {"dmxRange": [0, 15], "type": "ShutterStrobe", "shutterEffect": "Open"},
         {"dmxRange": [16, 251], "type": "ShutterStrobe", "shutterEffect": "Strobe",
          "speedStart": "slow", "speedEnd": "fast"},
-        {"dmxRange": [252, 255], "comment": "open again"}
+        {"dmxRange": [252, 254], "comment": "open again"},
+        {"dmxRange": [255, 255], "type": "Effect", "effectName": "Sound control"}
       ]}},
       "modes":[{"name":"only","channels":["Strobe"]}]}')
     channel = fixture[:modes][0][:channels][0]
     assert_equal 255, channel[:default]
-    assert_equal [0, 15, "Open"], channel[:caps][0]
-    assert_equal [16, 251, "Strobe slow..fast"], channel[:caps][1]
-    assert_equal [252, 255, "open again"], channel[:caps][2]
+    assert_equal [0, 15, "Open", "ShutterStrobe"], channel[:caps][0]
+    assert_equal [16, 251, "Strobe slow..fast", "ShutterStrobe"], channel[:caps][1]
+    assert_equal [252, 254, "open again", ""], channel[:caps][2]
+    assert_equal [255, 255, "Sound control", "Effect"], channel[:caps][3]
     assert_equal "only", fixture[:modes][0][:label]
   end
 
@@ -81,7 +83,7 @@ class DmxFixtureTest < Picotest::Test
     assert_equal "Dimmer", mode13[:channels][5][:name]
     assert_equal "Pan fine", mode13[:channels][1][:name]
     strobe = mode13[:channels][6]
-    assert_equal [16, 251, "Strobe slow..fast"], strobe[:caps][1]
+    assert_equal [16, 251, "Strobe slow..fast", "ShutterStrobe"], strobe[:caps][1]
 
     mode10 = fixture[:modes][1]
     assert_equal "10ch", mode10[:label]

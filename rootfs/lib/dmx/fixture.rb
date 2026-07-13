@@ -12,7 +12,7 @@
 #   mode = fixture[:modes][0]
 #   mode[:label]                # => "13ch"
 #   mode[:channels][5][:name]   # => "Dimmer"
-#   mode[:channels][6][:caps]   # => [[0, 15, "Open"], [16, 251, ...]]
+#   mode[:channels][6][:caps]   # => [[0, 15, "Open", "ShutterStrobe"], ...]
 #
 # Mode channels are ordered as on the wire, so the DMX channel of entry
 # i is the fixture base address plus i. Fine channel aliases appear as
@@ -122,7 +122,10 @@ module DMX
       value
     end
 
-    # Normalize capability/capabilities into [[min, max, label], ...].
+    # Normalize capability/capabilities into
+    # [[min, max, label, type], ...]. The type string is the raw OFL
+    # capability type ("Pan", "WheelSlot", ...), kept so consumers can
+    # classify channels without parsing labels.
     def self.capabilities(defn)
       return [] unless defn.is_a?(Hash)
       list = defn["capabilities"]
@@ -133,22 +136,26 @@ module DMX
         cap = list[i]
         i += 1
         next unless cap.is_a?(Hash)
+        type = cap["type"]
+        type = "" unless type.is_a?(String)
         range = cap["dmxRange"]
         if range.is_a?(Array) && range[0].is_a?(Integer) && range[1].is_a?(Integer)
-          caps << [range[0], range[1], capability_label(cap)]
+          caps << [range[0], range[1], capability_label(cap), type]
         else
-          caps << [0, 255, capability_label(cap)]
+          caps << [0, 255, capability_label(cap), type]
         end
       end
       caps
     end
 
     # A display label like the one a lighting console would show:
-    # the comment, or the shutter effect with its speed span, or the
-    # capability type.
+    # the comment, the effect name, the shutter effect with its speed
+    # span, or the capability type.
     def self.capability_label(cap)
       comment = cap["comment"]
       return comment if comment.is_a?(String) && !comment.empty?
+      effect_name = cap["effectName"]
+      return effect_name if effect_name.is_a?(String) && !effect_name.empty?
       effect = cap["shutterEffect"]
       if effect.is_a?(String)
         if cap["speedStart"].is_a?(String) && cap["speedEnd"].is_a?(String)
