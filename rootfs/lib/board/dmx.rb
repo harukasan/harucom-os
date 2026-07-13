@@ -22,16 +22,9 @@ module Board
   class DMX
     SLOTS = 512
 
-    # The wiring defaults come from the board header (harucom_board.h):
-    # the Grove port (J5) with UART1 TX through the M5 DMX Unit. The
-    # unit's Grove RX direction exists for DMX receive use, which this
-    # transmit-only engine does not use.
     def initialize
-      @dma_channel = ::DMX.init
+      ::DMX.init
     end
-
-    # DMA channel claimed by the engine, for diagnostics.
-    attr_reader :dma_channel
 
     # Start background transmission. The universe is cleared first to
     # overwrite stale fixture state, so set values after start.
