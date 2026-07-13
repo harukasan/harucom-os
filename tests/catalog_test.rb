@@ -10,7 +10,7 @@ class CatalogTest < Picotest::Test
   def setup
     Machine.millis = 0
     DMX.reset
-    Johakyu.patch = Johakyu.default_patch
+    Johakyu.patch = johakyu_test_patch
     @audio = FakeAudio.new
     @session = Johakyu::Session.new(audio: @audio, bpm: 120, audio_latency_ms: 0)
     @live = Johakyu::Live.new(@session)

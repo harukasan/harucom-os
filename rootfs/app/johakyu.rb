@@ -51,6 +51,10 @@ class JohakyuApp
   SYNTAX_MAX_BYTES   = 8100
 
   STARTER = [
+    "fixture :s1, \"shehds_80w_led_spot_light\", mode: \"13ch\", address: 1",
+    "fixture :s2, \"shehds_80w_led_spot_light\", mode: \"13ch\", address: 14",
+    "group :all, :s1, :s2",
+    "",
     "tempo 120",
     "",
     "track(:drums) { sound(\"bd ~ [sd sd] ~, hh*8\").color(\"<red blue>\").on(:s1) }",
@@ -114,17 +118,22 @@ class JohakyuApp
     @view = Johakyu::UniverseView.new(@session, top: VIEW_TOP)
     @sandbox = new_eval_sandbox
 
+    redraw_screen
+    @console.commit
+
+    main_loop
+  ensure
+    shutdown
+  end
+
+  # Full repaint: universe view furniture, editor lines, and bars.
+  def redraw_screen
     @console.clear
     @view.reset
     draw_command_bar
     draw_all_lines
     draw_status
     place_cursor
-    @console.commit
-
-    main_loop
-  ensure
-    shutdown
   end
 
   private
@@ -133,7 +142,10 @@ class JohakyuApp
     DMX.init
     DMX.start
     DMX.deadman_ms = 500
-    DMX.active_slots = Johakyu.patch.max_channel
+    # The rig is patched by the live script (fixture statements in the
+    # buffer); before the first apply there are no slots to shorten to.
+    slots = Johakyu.patch.max_channel
+    DMX.active_slots = slots if slots > 0
     @audio = Board::PWMAudio.new
     @session = Johakyu::Session.new(audio: @audio, bpm: 120)
     # Attach the drum samples; without this the sound reservations
@@ -259,8 +271,15 @@ class JohakyuApp
           @message = "#{error.message} (#{error.class})"
         end
       else
+        patch_before = Johakyu.patch
         @live.apply
         @message = "Applied (next cycle)"
+        unless Johakyu.patch.equal?(patch_before)
+          # The rig changed: rebuild the universe view layout and
+          # repaint everything over the new channel grid.
+          @view.repatch
+          redraw_screen
+        end
       end
       @sandbox.suspend
       draw_status

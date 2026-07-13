@@ -32,7 +32,13 @@ end
 
 require "johakyu/live"
 
-Johakyu.patch = Johakyu.default_patch
+personality = Johakyu.personality(
+  "rootfs/data/dmx/fixtures/shehds_80w_led_spot_light.json", "13ch")
+patch = Johakyu::Patch.new
+patch.add(:s1, personality, base: 1)
+patch.add(:s2, personality, base: 14)
+patch.group(:all, :s1, :s2)
+Johakyu.patch = patch
 
 STATEMENTS = {
   drums: Johakyu.sound("bd*4, hh*8"),

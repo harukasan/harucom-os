@@ -9,7 +9,7 @@ class LiveTest < Picotest::Test
   def setup
     Machine.millis = 0
     DMX.reset
-    Johakyu.patch = Johakyu.default_patch
+    Johakyu.patch = johakyu_test_patch
     @audio = FakeAudio.new
     @session = Johakyu::Session.new(audio: @audio, bpm: 120, audio_latency_ms: 0)
     @live = Johakyu::Live.new(@session)
@@ -149,6 +149,43 @@ class LiveTest < Picotest::Test
       raised = true
     end
     assert_equal true, raised
+  end
+
+  def test_fixture_statements_swap_the_patch
+    @live.begin_recording
+    fixture(:m1, JOHAKYU_TEST_FIXTURE, mode: "13ch", address: 40)
+    group(:rig, :m1)
+    # Later statements resolve against the pending rig, so one eval
+    # patches fixtures and targets them.
+    track(:x) { dimmer("1").on(:m1) }
+    @live.apply
+    assert_equal 45, Johakyu.dmx(:m1).channel(:dimmer)
+    assert_equal 52, $dmx_active_slots
+    assert_raise(ArgumentError) { Johakyu.dmx(:s1) }
+    run_until(400)
+    assert_equal 255, DMX.get(45)
+  end
+
+  def test_recording_without_fixtures_keeps_the_patch
+    patch_before = Johakyu.patch
+    @live.begin_recording
+    track(:drums) { sound("bd*4") }
+    @live.apply
+    assert_equal true, Johakyu.patch.equal?(patch_before)
+    assert_equal nil, $dmx_active_slots
+  end
+
+  def test_discard_restores_the_resolution_context
+    @live.begin_recording
+    fixture(:m2, JOHAKYU_TEST_FIXTURE, mode: "13ch", address: 40)
+    @live.discard
+    assert_raise(ArgumentError) { Johakyu.dmx(:m2) }
+    assert_equal 6, Johakyu.dmx(:s1).channel(:dimmer)
+  end
+
+  def test_group_before_fixture_raises
+    @live.begin_recording
+    assert_raise(ArgumentError) { group(:rig, :s1) }
   end
 
   def test_track_block_must_return_a_pattern

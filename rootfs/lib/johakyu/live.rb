@@ -19,6 +19,15 @@
 # tracks bound by a previous apply but absent from the new recording
 # are removed, so an empty buffer silences everything.
 #
+# The rig is patched from the script too: fixture/group statements
+# build a pending patch (personalities load from the OFL definitions
+# under /data/dmx/fixtures), and later statements resolve against it,
+# so one eval can patch fixtures and target them. Put the fixture
+# lines first. A script without fixture statements keeps the current
+# rig; the patch is infrastructure, not a track.
+#
+#   fixture :s1, "shehds_80w_led_spot_light", mode: "13ch", address: 1
+#   group :all, :s1
 #   tempo 130
 #   track(:drums) { sound("bd*2 [~ sd] bd sd, hh*8").color("<red blue>") }
 #   _track(:wash) { dimmer(sine.slow(4)).on(:all) }
@@ -41,8 +50,9 @@ module Johakyu
     # Start a fresh recording. Call from the app task right before
     # executing the eval script.
     def begin_recording
-      @recording = { tempo: nil, latency: nil, tracks: [] }
+      @recording = { tempo: nil, latency: nil, tracks: [], patch: nil }
       @capturing = 0
+      Johakyu.build_patch = nil
     end
 
     def recording?
@@ -52,6 +62,7 @@ module Johakyu
     # Drop the recording without applying (script raised or timed out).
     def discard
       @recording = nil
+      Johakyu.build_patch = nil
     end
 
     # -- Recorder side: called from the eval script (sandbox task). --
@@ -63,6 +74,28 @@ module Johakyu
 
     def audio_latency(ms)
       @recording[:latency] = ms
+    end
+
+    # Patch one fixture into the pending rig. The first fixture
+    # statement starts a fresh patch and makes it the resolution
+    # context, so the rest of the script targets the new rig.
+    def fixture(name, file, mode: nil, address:)
+      pending = @recording[:patch]
+      unless pending
+        pending = Patch.new
+        @recording[:patch] = pending
+        Johakyu.build_patch = pending
+      end
+      pending.add(name, Johakyu.personality(file, mode), base: address)
+    end
+
+    # Define a group over fixtures patched above.
+    def group(name, *members)
+      pending = @recording[:patch]
+      unless pending
+        raise ArgumentError, "group needs fixture statements before it"
+      end
+      pending.group(name, *members)
     end
 
     # Named track: the block builds and returns a Pattern. Sugar
@@ -113,6 +146,15 @@ module Johakyu
       recording = @recording
       return false unless recording
       @recording = nil
+      Johakyu.build_patch = nil
+
+      # Swap the rig first so the engine frame length follows before
+      # any rebound track fires. A recording without fixture
+      # statements keeps the current patch.
+      if recording[:patch]
+        Johakyu.patch = recording[:patch]
+        ::DMX.active_slots = recording[:patch].max_channel
+      end
 
       if recording[:tempo] && recording[:tempo] != @session.clock.bpm
         @session.tempo(recording[:tempo])
@@ -350,6 +392,14 @@ end
 
 def audio_latency(ms)
   $johakyu_live.audio_latency(ms)
+end
+
+def fixture(name, file, mode: nil, address:)
+  $johakyu_live.fixture(name, file, mode: mode, address: address)
+end
+
+def group(name, *members)
+  $johakyu_live.group(name, *members)
 end
 
 def track(name, &block)

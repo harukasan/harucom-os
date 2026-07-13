@@ -5,15 +5,27 @@
 # resolves attribute names to absolute channels and quantizes values. It
 # never caches channel values in Ruby; DMX.get reads the engine directly.
 #
+# Personalities come from Open Fixture Library JSON definitions under
+# /data/dmx/fixtures (the DMX::Fixture loader), converted by
+# Personality.from_ofl. The patch is assigned from the live script
+# (fixture/group statements, see live.rb); there is no built-in rig.
+#
 # Usage:
 #   require "johakyu/fixture"
-#   patch = Johakyu.patch                    # default rig, see below
+#   personality = Johakyu.personality("shehds_80w_led_spot_light", "13ch")
+#   patch = Johakyu::Patch.new
+#   patch.add(:s1, personality, base: 1)
+#   patch.group(:all, :s1)
+#   Johakyu.patch = patch
 #   DMX.active_slots = patch.max_channel     # shorten frames to used range
 #   Johakyu.dmx(:s1).pan(0.5).tilt(0.2)      # normalized 0.0-1.0, chainable
 #   Johakyu.dmx(:all).dimmer(1.0)            # group broadcast
 #   Johakyu.dmx(:all).spread(0.5).pan(0.25)  # fan values across members
 #   Johakyu.dmx(:s1).color(:red)             # named wheel positions
 #   Johakyu.dmx(:s1).raw(:pan, 200)          # raw 0-255 escape hatch
+
+require "dmx/fixture"
+
 module Johakyu
   # Attribute sugar shared by Fixture, Group and Spread. Each method
   # forwards to set(attribute, value) and returns self for chaining.
@@ -93,6 +105,164 @@ module Johakyu
 
     def range(attribute)
       @ranges[attribute]
+    end
+
+    # Build a Personality from a parsed OFL fixture (DMX::Fixture.read)
+    # and a mode label (first mode when nil). Channel order gives the
+    # offsets; attributes are classified by OFL capability type, with
+    # the slugged channel name as the fallback. Wheel, prism, and
+    # effect channels get name tables from their capability labels
+    # (band midpoint values); a strobe channel gets its active range
+    # from the widest capability band.
+    def self.from_ofl(fixture, mode_label = nil)
+      mode = nil
+      modes = fixture[:modes]
+      if mode_label
+        i = 0
+        while i < modes.length
+          mode = modes[i] if modes[i][:label] == mode_label
+          i += 1
+        end
+        unless mode
+          raise ArgumentError, "unknown mode #{mode_label} for #{fixture[:name]}"
+        end
+      else
+        mode = modes[0]
+      end
+
+      map = {}
+      tables = {}
+      ranges = {}
+      by_name = {}
+      channels = mode[:channels]
+      i = 0
+      while i < channels.length
+        entry = channels[i]
+        offset = i + 1
+        i += 1
+        name = entry[:name]
+        next unless name
+        attribute = ofl_attribute(name, entry[:caps], by_name)
+        next unless attribute
+        next if map[attribute]
+        map[attribute] = offset
+        by_name[name] = attribute
+        table = ofl_table(entry[:caps])
+        tables[attribute] = table if table
+        range = ofl_range(entry[:caps])
+        ranges[attribute] = range if range
+      end
+
+      Personality.new(
+        name: "#{fixture[:name]} #{mode[:label]}",
+        channels: channels.length,
+        map: map,
+        tables: tables,
+        ranges: ranges,
+      )
+    end
+
+    # Capability types that make a channel a named-position channel
+    # (wheel slots, prism modes, effect and maintenance bands).
+    TABLE_TYPES = {
+      "WheelSlot" => true, "WheelShake" => true, "WheelRotation" => true,
+      "Prism" => true, "PrismRotation" => true,
+      "Effect" => true, "Maintenance" => true,
+    }
+
+    # Attribute symbol for one OFL channel. "<name> fine" channels pair
+    # with their coarse parent seen earlier in the mode.
+    def self.ofl_attribute(name, caps, by_name)
+      if name.length > 5 && name[name.length - 5, 5] == " fine"
+        parent = by_name[name[0, name.length - 5]]
+        return parent ? "#{parent}_fine".to_sym : nil
+      end
+      types = {}
+      i = 0
+      while i < caps.length
+        types[caps[i][3]] = true
+        i += 1
+      end
+      return :pan if types["Pan"]
+      return :tilt if types["Tilt"]
+      return :speed if types["PanTiltSpeed"]
+      return :dimmer if types["Intensity"]
+      return :strobe if types["ShutterStrobe"]
+      return :focus if types["Focus"]
+      return :zoom if types["Zoom"]
+      return :prism if types["Prism"] || types["PrismRotation"]
+      if types["WheelSlot"] || types["WheelShake"] || types["WheelRotation"]
+        lower = ofl_slug(name)
+        return :color if lower && lower.include?("color")
+        return :gobo if lower && lower.include?("gobo")
+      end
+      slug = ofl_slug(name)
+      slug ? slug.to_sym : nil
+    end
+
+    # Name table from labeled capability bands: slugged label to the
+    # band midpoint. Labels that fell back to the bare type are not
+    # names and are skipped.
+    def self.ofl_table(caps)
+      wants = false
+      i = 0
+      while i < caps.length
+        wants = true if TABLE_TYPES[caps[i][3]]
+        i += 1
+      end
+      return nil unless wants
+      table = {}
+      i = 0
+      while i < caps.length
+        cap = caps[i]
+        i += 1
+        label = cap[2]
+        next if label.nil? || label.length == 0 || label == cap[3]
+        key = ofl_slug(label)
+        next unless key
+        table[key.to_sym] = (cap[0] + cap[1] + 1) / 2
+      end
+      table.empty? ? nil : table
+    end
+
+    # Active range for strobe-like channels whose effect band does not
+    # start at zero: the widest capability band carries the effect.
+    def self.ofl_range(caps)
+      strobe = false
+      i = 0
+      while i < caps.length
+        strobe = true if caps[i][3] == "ShutterStrobe"
+        i += 1
+      end
+      return nil unless strobe
+      best = nil
+      i = 0
+      while i < caps.length
+        cap = caps[i]
+        i += 1
+        best = cap if best.nil? || cap[1] - cap[0] > best[1] - best[0]
+      end
+      [best[0], best[1]]
+    end
+
+    # Lowercase word joined with underscores: "light blue + white" to
+    # "light_blue_white", "Gobo Wheel" to "gobo_wheel".
+    def self.ofl_slug(text)
+      result = ""
+      i = 0
+      while i < text.length
+        ch = text[i]
+        i += 1
+        if (ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9")
+          result += ch
+        elsif ch >= "A" && ch <= "Z"
+          result += ch.downcase
+        elsif result.length > 0 && !result.end_with?("_")
+          result += "_"
+        end
+      end
+      result = result[0, result.length - 1].to_s while result.end_with?("_")
+      result.length == 0 ? nil : result
     end
   end
 
@@ -326,104 +496,48 @@ module Johakyu
     end
   end
 
-  # SHEHDS LED Spot 80W (3 face prism) wheel tables, from the vendor
-  # manual. Values sit mid band to stay clear of range boundaries.
-  SHEHDS_SPOT_80W_COLORS = {
-    white: 4, red: 12, green: 20, blue: 28, yellow: 36, pink: 44,
-    light_green: 52, light_blue: 60,
-    light_blue_white: 68, light_blue_light_green: 76,
-    light_green_pink: 84, pink_yellow: 92, yellow_blue: 100,
-    blue_green: 108, green_red: 116, red_white: 124,
-    rotate: 192,
-  }
+  # Where fixture statements resolve bare definition names.
+  FIXTURE_DIR = "/data/dmx/fixtures"
 
-  SHEHDS_SPOT_80W_GOBOS = {
-    open: 4,
-    gobo1: 13, gobo2: 21, gobo3: 30, gobo4: 38,
-    gobo5: 47, gobo6: 55, gobo7: 64,
-    gobo7_shake: 72, gobo6_shake: 81, gobo5_shake: 89, gobo4_shake: 98,
-    gobo3_shake: 106, gobo2_shake: 115, gobo1_shake: 123,
-    rotate: 192,
-  }
-
-  SHEHDS_SPOT_80W_PRISMS = {
-    off: 0,       # 0-15
-    on: 72,       # 16-127 prism in, static
-    rotate: 192,  # 128-255
-  }
-
-  # CH13 (13ch mode) / CH10 (10ch mode). The manual lists full auto as
-  # 150-249 and sound as 200-249, which overlap; the chosen values keep
-  # full_auto in the unambiguous 150-199 band.
-  SHEHDS_SPOT_80W_FUNCTIONS = {
-    none: 0,
-    full_auto: 180,
-    sound: 225,
-    reset: 252,   # 250-255, resets the fixture
-  }
-
-  SHEHDS_SPOT_80W_TABLES = {
-    color: SHEHDS_SPOT_80W_COLORS,
-    gobo: SHEHDS_SPOT_80W_GOBOS,
-    prism: SHEHDS_SPOT_80W_PRISMS,
-    function: SHEHDS_SPOT_80W_FUNCTIONS,
-  }
-
-  # Strobe is steady on below 16 (bench verified); 16-251 sets the
-  # strobe frequency. strobe(0) writes raw 0 for steady light.
-  SHEHDS_SPOT_80W_RANGES = {
-    strobe: [16, 251],
-  }
-
-  # 13ch mode chart from the vendor manual, cross checked on the bench
-  # in M0-M2c (pan 1, dimmer 6, strobe below 16 steady, color 0 white,
-  # gobo 0 open).
-  SHEHDS_SPOT_80W_13CH = Personality.new(
-    name: "SHEHDS Spot 80W 13ch",
-    channels: 13,
-    map: {
-      pan: 1, pan_fine: 2, tilt: 3, tilt_fine: 4, speed: 5,
-      dimmer: 6, strobe: 7, color: 8, gobo: 9, focus: 10,
-      prism: 11, motor_auto: 12, function: 13,
-    },
-    tables: SHEHDS_SPOT_80W_TABLES,
-    ranges: SHEHDS_SPOT_80W_RANGES,
-  )
-
-  # 10ch mode of the same fixture (menu chnd). Not used by the default
-  # rig; defined for completeness from the same manual.
-  SHEHDS_SPOT_80W_10CH = Personality.new(
-    name: "SHEHDS Spot 80W 10ch",
-    channels: 10,
-    map: {
-      pan: 1, tilt: 2, dimmer: 3, strobe: 4, color: 5,
-      gobo: 6, focus: 7, prism: 8, speed: 9, function: 10,
-    },
-    tables: SHEHDS_SPOT_80W_TABLES,
-    ranges: SHEHDS_SPOT_80W_RANGES,
-  )
-
-  # Default rig: two SHEHDS Spot 80W in 13ch mode, daisy chained.
-  # Fixture body addresses must match the patch: s1 = 001, s2 = 014.
-  def self.default_patch
-    patch = Patch.new
-    patch.add(:s1, SHEHDS_SPOT_80W_13CH, base: 1)
-    patch.add(:s2, SHEHDS_SPOT_80W_13CH, base: 14)
-    patch.group(:all, :s1, :s2)
-    patch
+  # Load a personality from an OFL fixture definition. A bare name
+  # resolves under /data/dmx/fixtures with the .json suffix added; a
+  # name containing a slash is used as a path. Personalities are
+  # cached per definition and mode, so repeated patch statements do
+  # not reread the file.
+  def self.personality(file, mode = nil)
+    @personalities ||= {}
+    key = "#{file}|#{mode}"
+    cached = @personalities[key]
+    return cached if cached
+    path = file.include?("/") ? file : "#{FIXTURE_DIR}/#{file}.json"
+    fixture = ::DMX::Fixture.read(path)
+    unless fixture
+      raise ArgumentError, "fixture definition not found: #{path}"
+    end
+    @personalities[key] = Personality.from_ofl(fixture, mode)
   end
 
+  # The running rig. Starts empty; the live script assigns it through
+  # fixture/group statements (see live.rb).
   def self.patch
-    @patch ||= default_patch
+    @patch ||= Patch.new
   end
 
   def self.patch=(patch)
     @patch = patch
   end
 
+  # Resolution context while a live recording builds a new rig:
+  # pattern building resolves against the pending patch, so one eval
+  # can patch fixtures and target them. Only the task recording the
+  # script touches this; the dispatcher and views read Johakyu.patch.
+  def self.build_patch=(patch)
+    @build_patch = patch
+  end
+
   # Resolve a fixture or group by name: Johakyu.dmx(:s1).pan(0.5).
   def self.dmx(name)
-    target = patch[name]
+    target = (@build_patch || patch)[name]
     unless target
       raise ArgumentError, "unknown fixture or group #{name}"
     end

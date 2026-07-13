@@ -4,6 +4,10 @@ require "johakyu/control"
 # The all-pattern control surface: statements are Patterns of control
 # maps, one query feeding both the sound and light sinks.
 class ControlTest < Picotest::Test
+  def setup
+    Johakyu.patch = johakyu_test_patch
+  end
+
   def onsets(pattern, from = 0, to = 1)
     haps = pattern.query_arc(from, to)
     result = []

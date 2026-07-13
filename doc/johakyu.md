@@ -11,7 +11,9 @@ the C-backed Rational class (the mruby-rational and mruby-bigint gems
 from the mruby tree). The live coding UI is
 [rootfs/app/johakyu.rb](../rootfs/app/johakyu.rb); the show vocabulary
 (jo/ha/kyu scenes and the sound/light catalog) lives in
-[rootfs/data/johakyu/](../rootfs/data/johakyu/), not in the library.
+[rootfs/data/johakyu/](../rootfs/data/johakyu/), not in the library,
+and fixture definitions are [Open Fixture Library][ofl] JSON under
+[rootfs/data/dmx/fixtures/](../rootfs/data/dmx/fixtures/).
 
 ## Ruby API
 
@@ -154,7 +156,8 @@ sandbox finishes cleanly the app task calls `Live#apply`, which replays
 the recording onto the session; if the script raised, the recording is
 discarded and the show keeps playing. Each eval describes the whole
 desired state: tracks absent from the new recording are removed, so an
-empty buffer silences everything.
+empty buffer silences everything. The patch is the exception, kept
+unless the script states a new rig.
 
 ### Fixtures
 
@@ -164,6 +167,22 @@ base addresses, `Group` broadcasts with optional value spread. The DMX
 universe lives in the C engine; this layer only resolves attributes to
 absolute channels and quantizes values, and reads back through
 `DMX.get` instead of caching.
+
+Personalities are built from [Open Fixture Library][ofl] JSON
+definitions under `/data/dmx/fixtures` (read by the `DMX::Fixture`
+loader): channel order gives the offsets, capability types classify
+the attributes, and labeled capability bands become the name tables,
+valued at the band midpoint. A strobe channel takes its active range
+from the widest capability band. There is no built-in rig; the live
+script patches it, and later statements in the same eval resolve
+against the pending rig, so the fixture lines come first. A script
+without fixture statements keeps the current patch.
+
+```ruby
+fixture :s1, "shehds_80w_led_spot_light", mode: "13ch", address: 1
+fixture :s2, "shehds_80w_led_spot_light", mode: "13ch", address: 14
+group :all, :s1, :s2
+```
 
 ```ruby
 Johakyu.dmx(:s1).pan(0.5).tilt(0.2)      # normalized 0.0-1.0, chainable
@@ -289,9 +308,12 @@ For readers coming from DAW or lighting console software:
   notation reference
 - [strudel-rb][strudel-rb]: Ruby port whose query semantics this core
   follows
+- [Open Fixture Library][ofl]: the fixture definition format read from
+  `/data/dmx/fixtures`
 - Godfried Toussaint, "The Euclidean Algorithm Generates Traditional
   Musical Rhythms": the basis of `Pattern.euclid`
 
 [tidal]: https://tidalcycles.org/
 [strudel]: https://strudel.cc/
 [strudel-rb]: https://github.com/asonas/strudel-rb
+[ofl]: https://open-fixture-library.org/

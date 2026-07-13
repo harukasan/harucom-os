@@ -9,7 +9,7 @@ class SchedulerTest < Picotest::Test
   def setup
     Machine.millis = 0
     DMX.reset
-    Johakyu.patch = Johakyu.default_patch
+    Johakyu.patch = johakyu_test_patch
   end
 
   def run_until(session_or_scheduler, until_ms, step_ms = 10)

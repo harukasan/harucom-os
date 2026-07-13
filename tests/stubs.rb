@@ -89,6 +89,11 @@ module DMX
   def self.reset
     $dmx_universe = nil
     $dmx_writes = nil
+    $dmx_active_slots = nil
+  end
+
+  def self.active_slots=(count)
+    $dmx_active_slots = count
   end
 
   def self.universe
@@ -195,4 +200,19 @@ end
 
 def frac_s(fraction)
   "#{fraction.num}/#{fraction.den}"
+end
+
+# The shipped SHEHDS OFL definition, read from the repository so host
+# tests exercise the same file the board loads from /data.
+JOHAKYU_TEST_FIXTURE = "rootfs/data/dmx/fixtures/shehds_80w_led_spot_light.json"
+
+# The bench rig: two SHEHDS units in 13ch mode (s1 = 1, s2 = 14) and
+# the :all group, built through the OFL loader like a live script.
+def johakyu_test_patch
+  personality = Johakyu.personality(JOHAKYU_TEST_FIXTURE, "13ch")
+  patch = Johakyu::Patch.new
+  patch.add(:s1, personality, base: 1)
+  patch.add(:s2, personality, base: 14)
+  patch.group(:all, :s1, :s2)
+  patch
 end

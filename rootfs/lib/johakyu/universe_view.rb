@@ -61,14 +61,31 @@ module Johakyu
         s += 1
       end
 
-      # Fixture rows: [name, [[attribute, channel, value_x], ...], row]
+      @prev_values = Array.new(513, -1)
+      @changed_ms = Array.new(513, 0)
+      @prev_step = -1
+      @prev_cycle = -1
+      @prev_bpm = 0
+      @last_draw_ms = 0
+      @last_stats_ms = 0
+
+      repatch
+    end
+
+    # Rebuild the patch-dependent layout (fixture rows and the channel
+    # grid extent) from the running rig. Call after a patch swap, then
+    # reset to repaint. Kept out of reset so scrolling, which resets
+    # every frame it shifts, does not reallocate the layout.
+    def repatch
+      # Fixture rows: [name, [[attribute, channel, label_x, value_x,
+      # last_drawn], ...]]
       @fixture_rows = []
       names = Johakyu.patch.fixture_names
       i = 0
       while i < names.length && @fixture_rows.length < 2
         name = names[i]
         i += 1
-        fixture = Johakyu.dmx(name)
+        fixture = Johakyu.patch[name]
         fields = []
         x = 4
         j = 0
@@ -93,14 +110,6 @@ module Johakyu
 
       @channel_count = Johakyu.patch.max_channel
       @cells_per_row = Console.cols / 8
-
-      @prev_values = Array.new(513, -1)
-      @changed_ms = Array.new(513, 0)
-      @prev_step = -1
-      @prev_cycle = -1
-      @prev_bpm = 0
-      @last_draw_ms = 0
-      @last_stats_ms = 0
     end
 
     # Draw the static furniture and force every cell to repaint on the

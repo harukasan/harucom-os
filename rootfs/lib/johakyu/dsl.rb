@@ -67,7 +67,6 @@ module Johakyu
       @audio = audio
       @audio_latency_ms = audio_latency_ms
       @light_pending = []
-      @default_target = nil
       @output_late_count = 0
       @output_late_ms_max = 0
     end
@@ -172,7 +171,11 @@ module Johakyu
         writes << v
       end
       return if writes.nil?
-      target = map[:target] || (@default_target ||= Johakyu.dmx(:all))
+      # Untargeted light controls default to the :all group of the
+      # running rig, resolved per event so a patch swap redirects
+      # immediately; without a rig the write is dropped, Tidal style.
+      target = map[:target] || Johakyu.patch[:all]
+      return if target.nil?
       @light_pending << [target_ms, target, writes]
     end
 

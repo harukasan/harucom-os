@@ -26,6 +26,17 @@
 require "board/pwm_audio"
 require "johakyu/live"
 
+# The rig is patched through the live layer like any script: two
+# SHEHDS units from the shipped OFL definition, group :all. Presets
+# that follow leave the patch alone (no fixture statements).
+def patch_rig(live)
+  live.begin_recording
+  fixture :s1, "shehds_80w_led_spot_light", mode: "13ch", address: 1
+  fixture :s2, "shehds_80w_led_spot_light", mode: "13ch", address: 14
+  group :all, :s1, :s2
+  live.apply
+end
+
 # Presets record through the live layer, so they read exactly like
 # an editor buffer (top-level DSL, no receiver) and stale tracks
 # disappear through the replace semantics. Returns the preset name.
@@ -83,14 +94,13 @@ def johakyu_demo
   DMX.init
   DMX.start
   DMX.deadman_ms = 500
-  patch = Johakyu.patch
-  DMX.active_slots = patch.max_channel
 
   audio = Board::PWMAudio.new
   session = Johakyu::Session.new(audio: audio, bpm: 120)
   session.load_kit
   live = Johakyu::Live.new(session)
   $johakyu_live = live
+  patch_rig(live)
   bpm = 120
 
   preset_name = apply_preset(session, live, 1)

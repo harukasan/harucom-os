@@ -1,17 +1,23 @@
 require "picotest"
 require "johakyu/fixture"
 
-# Johakyu fixture layer: attribute to absolute channel resolution,
-# quantization, name tables, groups and spread. Runs against the DMX
-# stub from tests/stubs.rb.
+# Johakyu fixture layer: OFL personality conversion, attribute to
+# absolute channel resolution, quantization, name tables, groups and
+# spread. Runs against the DMX stub from tests/stubs.rb; the values
+# pin the bench-verified SHEHDS chart (M0-M3), so they also guard the
+# from_ofl conversion of the shipped definition.
 class FixtureTest < Picotest::Test
   def setup
     DMX.reset
-    Johakyu.patch = Johakyu.default_patch
+    Johakyu.patch = johakyu_test_patch
   end
 
   def dmx(name)
     Johakyu.dmx(name)
+  end
+
+  def personality_13ch
+    Johakyu.personality(JOHAKYU_TEST_FIXTURE, "13ch")
   end
 
   def test_patch_layout
@@ -19,6 +25,51 @@ class FixtureTest < Picotest::Test
     assert_equal 6, dmx(:s1).channel(:dimmer)
     assert_equal 19, dmx(:s2).channel(:dimmer)
     assert_equal [:s1, :s2], Johakyu.patch.fixture_names
+  end
+
+  def test_from_ofl_channel_map
+    p13 = personality_13ch
+    assert_equal 13, p13.channels
+    assert_equal 1, p13.offset(:pan)
+    assert_equal 2, p13.offset(:pan_fine)
+    assert_equal 3, p13.offset(:tilt)
+    assert_equal 4, p13.offset(:tilt_fine)
+    assert_equal 5, p13.offset(:speed)
+    assert_equal 6, p13.offset(:dimmer)
+    assert_equal 7, p13.offset(:strobe)
+    assert_equal 8, p13.offset(:color)
+    assert_equal 9, p13.offset(:gobo)
+    assert_equal 10, p13.offset(:focus)
+    assert_equal 11, p13.offset(:prism)
+    assert_equal 13, p13.offset(:function)
+  end
+
+  def test_from_ofl_mode_selection
+    p10 = Johakyu.personality(JOHAKYU_TEST_FIXTURE, "10ch")
+    assert_equal 10, p10.channels
+    assert_equal 3, p10.offset(:dimmer)
+    assert_equal nil, p10.offset(:pan_fine)
+    assert_raise(ArgumentError) do
+      fixture = DMX::Fixture.read(JOHAKYU_TEST_FIXTURE)
+      Johakyu::Personality.from_ofl(fixture, "31ch")
+    end
+  end
+
+  def test_from_ofl_effect_table
+    table = personality_13ch.table(:function)
+    assert_equal 175, table[:full_auto]
+    assert_equal 225, table[:sound_control]
+    assert_equal 253, table[:reset]
+  end
+
+  def test_from_ofl_strobe_range
+    assert_equal [16, 251], personality_13ch.range(:strobe)
+  end
+
+  def test_loader_rejects_missing_definition
+    assert_raise(ArgumentError) do
+      Johakyu.personality("rootfs/data/dmx/fixtures/no_such_light.json")
+    end
   end
 
   def test_pan_writes_16bit_pair
@@ -102,17 +153,17 @@ class FixtureTest < Picotest::Test
 
   def test_overlapping_patch_raises
     patch = Johakyu::Patch.new
-    patch.add(:a, Johakyu::SHEHDS_SPOT_80W_13CH, base: 1)
+    patch.add(:a, personality_13ch, base: 1)
     assert_raise(ArgumentError) do
-      patch.add(:b, Johakyu::SHEHDS_SPOT_80W_13CH, base: 13)
+      patch.add(:b, personality_13ch, base: 13)
     end
   end
 
   def test_nested_groups_flatten
     patch = Johakyu::Patch.new
-    patch.add(:a, Johakyu::SHEHDS_SPOT_80W_13CH, base: 1)
-    patch.add(:b, Johakyu::SHEHDS_SPOT_80W_13CH, base: 14)
-    patch.add(:c, Johakyu::SHEHDS_SPOT_80W_10CH, base: 100)
+    patch.add(:a, personality_13ch, base: 1)
+    patch.add(:b, personality_13ch, base: 14)
+    patch.add(:c, Johakyu.personality(JOHAKYU_TEST_FIXTURE, "10ch"), base: 100)
     patch.group(:pair, :a, :b)
     patch.group(:everything, :pair, :c)
     assert_equal 3, patch[:everything].members.length
