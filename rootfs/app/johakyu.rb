@@ -1,7 +1,7 @@
 # johakyu: live coding UI for sound and light (research 06, M9).
 #
 # Usage from IRB:
-#   johakyu               (edits /live.rb)
+#   johakyu               (edits an untitled buffer, Ctrl-S asks for a path)
 #   johakyu /my/show.rb
 #
 # Split screen: the top shows the clock, fixtures, and the raw DMX
@@ -68,7 +68,7 @@ class JohakyuApp
   def initialize(filepath)
     @console = $console
     @keyboard = $keyboard
-    @filepath = filepath || "/live.rb"
+    @filepath = filepath
 
     @buffer = Editor::Buffer.new
     @scroll_top = 0
@@ -286,7 +286,7 @@ class JohakyuApp
 
   def load_buffer
     @buffer.lines.clear
-    if File.exist?(@filepath)
+    if @filepath && File.exist?(@filepath)
       content = File.open(@filepath, "r") { |f| f.read }
       if content
         content.split("\n").each { |l| @buffer.lines.push(l) }
@@ -298,14 +298,28 @@ class JohakyuApp
     @buffer.changed = false
   end
 
+  # Save the buffer, asking for a path first when it is untitled.
+  # Returns false when the prompt is cancelled or the write fails.
   def save_buffer
+    unless @filepath
+      path = prompt_input("Save as: ")
+      draw_command_bar
+      @buffer.mark_dirty(:structure)
+      unless path && path.bytesize > 0
+        @message = "Save cancelled"
+        return false
+      end
+      @filepath = path
+    end
     File.open(@filepath, "w") do |f|
       f.write(@buffer.lines.join("\n") + "\n")
     end
     @buffer.changed = false
     @message = "Saved #{@filepath}"
+    true
   rescue => e
     @message = "Save failed: #{e.message}"
+    false
   end
 
   # -- Undo plumbing (same behavior as edit.rb) --
@@ -481,7 +495,8 @@ class JohakyuApp
     line_num = @buffer.cursor_y + 1
     col_num = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x) + 1
     modified = @buffer.changed ? " [+]" : ""
-    status = " #{@filepath}#{modified}  #{line_num}:#{col_num}"
+    name = @filepath || "[untitled]"
+    status = " #{name}#{modified}  #{line_num}:#{col_num}"
     status = " #{@message}" if @message
     width = Editor.display_width(status)
     if width < Console.cols
@@ -697,8 +712,7 @@ class JohakyuApp
         end
         @message = "Quit cancelled"
       when Keyboard::CTRL_S
-        save_buffer
-        start_eval
+        start_eval if save_buffer
       when Keyboard::F5
         start_eval
       when Keyboard::F1
