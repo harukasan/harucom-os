@@ -473,6 +473,20 @@ module Johakyu
   # Where fixture statements resolve bare definition names.
   FIXTURE_DIR = "/data/dmx/fixtures"
 
+  # Parsed OFL definition per path. The parse is the expensive part
+  # (pure Ruby JSON, a second-plus on the board), so it is cached
+  # separately from the per-mode personalities.
+  def self.ofl_fixture(path)
+    @fixtures ||= {}
+    cached = @fixtures[path]
+    return cached if cached
+    fixture = ::DMX::Fixture.read(path)
+    unless fixture
+      raise ArgumentError, "fixture definition not found: #{path}"
+    end
+    @fixtures[path] = fixture
+  end
+
   # Load a personality from an OFL fixture definition. A bare name
   # resolves under /data/dmx/fixtures with the .json suffix added; a
   # name containing a slash is used as a path. Personalities are
@@ -484,11 +498,28 @@ module Johakyu
     cached = @personalities[key]
     return cached if cached
     path = file.include?("/") ? file : "#{FIXTURE_DIR}/#{file}.json"
-    fixture = ::DMX::Fixture.read(path)
-    unless fixture
-      raise ArgumentError, "fixture definition not found: #{path}"
+    @personalities[key] = Personality.from_ofl(ofl_fixture(path), mode)
+  end
+
+  # Read and parse every fixture definition under dir into the cache,
+  # skipping unreadable files (they surface properly when a script
+  # asks for them). Call from the app task at startup so fixture
+  # statements inside a sandboxed eval never pay the JSON parse
+  # inside the eval budget. Returns the number of cached definitions.
+  def self.preload_fixtures(dir = FIXTURE_DIR)
+    paths = ::DMX::Fixture.list(dir)
+    count = 0
+    i = 0
+    while i < paths.length
+      begin
+        ofl_fixture(paths[i])
+        count += 1
+      rescue ArgumentError
+        # skip
+      end
+      i += 1
     end
-    @personalities[key] = Personality.from_ofl(fixture, mode)
+    count
   end
 
   # The running rig. Starts empty; the live script assigns it through

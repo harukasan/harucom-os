@@ -175,10 +175,14 @@ definitions under `/data/dmx/fixtures` (read by the `DMX::Fixture`
 loader): channel order gives the offsets, capability types classify
 the attributes, and labeled capability bands become the name tables,
 valued at the band midpoint. A strobe channel takes its active range
-from the widest capability band. There is no built-in rig; the live
-script patches it, and later statements in the same eval resolve
-against the pending rig, so the fixture lines come first. A script
-without fixture statements keeps the current patch.
+from the widest capability band. The app parses every definition
+under `/data/dmx/fixtures` at startup (`Johakyu.preload_fixtures`),
+so fixture statements inside an eval resolve from the cache instead
+of paying the JSON parse against the eval timeout. There is no
+built-in rig; the live script patches it, and later statements in
+the same eval resolve against the pending rig, so the fixture lines
+come first. A script without fixture statements keeps the current
+patch.
 
 ```ruby
 fixture :s1, "shehds_80w_led_spot_light", mode: "13ch", address: 1

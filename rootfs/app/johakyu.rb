@@ -37,11 +37,11 @@ class JohakyuApp
 
   UNDO_MAX = 200
 
-  # Runaway-script guard. Evals legitimately read fixture definitions
-  # from flash and parse them (pure Ruby JSON, around a second per
-  # file on the board, sharing the CPU with the running show), so the
-  # guard leaves generous headroom over the slowest legitimate eval.
-  # Later evals hit the personality cache and finish far faster.
+  # Runaway-script guard. Fixture definitions are preloaded at
+  # startup, but a definition dropped into /data mid-session still
+  # parses its JSON inside the eval (a second-plus on the board while
+  # sharing the CPU with the show), so the guard leaves headroom over
+  # that slowest legitimate eval.
   EVAL_TIMEOUT_MS = 10_000
 
   # Windowed syntax analysis (same design as edit.rb): only a window
@@ -168,6 +168,10 @@ class JohakyuApp
     # Attach the drum samples; without this the sound reservations
     # land on sourceless channels and play silence.
     @session.load_kit
+    # Parse the OFL definitions now, on the app task, so fixture
+    # statements inside evals resolve from the cache instead of
+    # paying the JSON parse against the eval timeout.
+    Johakyu.preload_fixtures
     @live = Johakyu::Live.new(@session)
     $johakyu_live = @live
   end
