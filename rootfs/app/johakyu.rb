@@ -747,6 +747,13 @@ class JohakyuApp
       redraw_after_key(old_dirty)
       return
     end
+    # Other Alt-modified keys are reserved for commands: ignore them
+    # instead of feeding the IME or inserting their character (the
+    # gem's printable? only excludes Ctrl).
+    if c.alt?
+      redraw_after_key(old_dirty)
+      return
+    end
     if c.match?(:o, ctrl: true)
       open_file
       redraw_after_key(old_dirty)
