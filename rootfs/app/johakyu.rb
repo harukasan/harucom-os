@@ -221,6 +221,19 @@ class JohakyuApp
     scene.scroll_left = @scroll_left
   end
 
+  # Scenes with unsaved changes, the current one included (its buffer
+  # object is shared with its slot).
+  def unsaved_scene_count
+    count = 0
+    i = 0
+    while i < @scenes.length
+      scene = @scenes[i]
+      count += 1 if scene && scene.buffer.changed
+      i += 1
+    end
+    count
+  end
+
   # Switch to scene number 1..SCENE_COUNT. Scenes are created on
   # first visit; switching only swaps editor state, the running show
   # is untouched until the new buffer is applied.
@@ -797,7 +810,15 @@ class JohakyuApp
     unless ime_handled
       case c
       when Keyboard::CTRL_Q, Keyboard::CTRL_C
-        answer = prompt_input("Quit and blackout? (y/n): ", y_or_n: true)
+        unsaved = unsaved_scene_count
+        label = if unsaved == 0
+          "Quit and blackout? (y/n): "
+        elsif unsaved == 1
+          "Quit and blackout? 1 scene unsaved (y/n): "
+        else
+          "Quit and blackout? #{unsaved} scenes unsaved (y/n): "
+        end
+        answer = prompt_input(label, y_or_n: true)
         draw_command_bar
         @buffer.mark_dirty(:structure)
         if answer && (answer == "y" || answer == "Y")
