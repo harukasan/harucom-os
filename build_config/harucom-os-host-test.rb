@@ -40,4 +40,5 @@ MRuby::Build.new('harucom-host-test') do |conf|
   # board (bigint is required to compile mruby-rational).
   conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-bigint', __FILE__)
   conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-rational', __FILE__)
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-metaprog', __FILE__)
 end

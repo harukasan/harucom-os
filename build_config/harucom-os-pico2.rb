@@ -63,6 +63,8 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-bigint', __FILE__)
   conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-rational', __FILE__)
 
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-metaprog', __FILE__)
+
   conf.gem File.expand_path('../../mrbgems/picoruby-pwm-audio', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-synth-native', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-dmx', __FILE__)
