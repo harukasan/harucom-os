@@ -36,7 +36,13 @@ class JohakyuApp
   EDIT_ATTR    = 0xF0
 
   UNDO_MAX = 200
-  EVAL_TIMEOUT_MS = 2000
+
+  # Runaway-script guard. Evals legitimately read fixture definitions
+  # from flash and parse them (pure Ruby JSON, around a second per
+  # file on the board, sharing the CPU with the running show), so the
+  # guard leaves generous headroom over the slowest legitimate eval.
+  # Later evals hit the personality cache and finish far faster.
+  EVAL_TIMEOUT_MS = 10_000
 
   # Windowed syntax analysis (same design as edit.rb): only a window
   # of lines around the viewport is parsed, rebuilt on edits or when
