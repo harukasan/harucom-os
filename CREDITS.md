@@ -89,6 +89,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## strudel-rb
+
+- Repository: https://github.com/asonas/strudel-rb
+- License: none published
+
+The Johakyu pattern core and mini notation
+([rootfs/lib/johakyu/](rootfs/lib/johakyu/)) reimplement the query
+semantics of strudel-rb for mruby and are verified against its output
+(see [doc/johakyu.md](doc/johakyu.md)). The pattern model originates in
+[TidalCycles](https://tidalcycles.org/) (GPL-3.0) and
+[Strudel](https://strudel.cc/) (AGPL-3.0).
+
 ## M+ BITMAP FONTS
 
 - Repository: https://ftp.iij.ad.jp/pub/osdn.jp/mplus-fonts/5030/
