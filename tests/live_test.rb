@@ -65,6 +65,17 @@ class LiveTest < Picotest::Test
     assert_equal 3, plays[1][2]
   end
 
+  def test_bare_chain_attaches_controls
+    @live.begin_recording
+    sound("bd").color("red")
+    @live.apply
+    run_until(200)
+    # the light rides the kick on the default :all group: red lands
+    # on both color channels (s1 ch8, s2 ch21)
+    reds = DMX.writes.select { |w| w[2] == 12 }.map { |w| w[1] }
+    assert_equal [8, 21], reds
+  end
+
   def test_sugar_inside_track_block_stays_pure
     @live.begin_recording
     track(:one) { sound("bd") }

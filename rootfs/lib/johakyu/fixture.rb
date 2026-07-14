@@ -27,43 +27,17 @@
 require "dmx/fixture"
 
 module Johakyu
+  # Fixture personality attributes addressable from patterns. Also the
+  # single source of the attribute sugar: AttributeMethods,
+  # ControlBuilder, Pattern, TrackProxy, LiveDmxBuilder, and the
+  # top-level live DSL generate one method per entry.
+  LIGHT_CONTROLS = [:pan, :tilt, :dimmer, :strobe, :color, :gobo, :focus, :prism, :speed]
+
   # Attribute sugar shared by Fixture, Group and Spread. Each method
   # forwards to set(attribute, value) and returns self for chaining.
   module AttributeMethods
-    def pan(value)
-      set(:pan, value)
-    end
-
-    def tilt(value)
-      set(:tilt, value)
-    end
-
-    def dimmer(value)
-      set(:dimmer, value)
-    end
-
-    def strobe(value)
-      set(:strobe, value)
-    end
-
-    def color(value)
-      set(:color, value)
-    end
-
-    def gobo(value)
-      set(:gobo, value)
-    end
-
-    def focus(value)
-      set(:focus, value)
-    end
-
-    def prism(value)
-      set(:prism, value)
-    end
-
-    def speed(value)
-      set(:speed, value)
+    LIGHT_CONTROLS.each do |attribute|
+      define_method(attribute) { |value| set(attribute, value) }
     end
   end
 

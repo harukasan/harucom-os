@@ -18,9 +18,6 @@ require "johakyu/mini"
 require "johakyu/fixture"
 
 module Johakyu
-  # Fixture personality attributes addressable from patterns.
-  LIGHT_CONTROLS = [:pan, :tilt, :dimmer, :strobe, :color, :gobo, :focus, :prism, :speed]
-
   # A bare Signal used as a structure source is discretized to this
   # many steps per cycle. 16 steps (125 ms at 120 bpm) is the first
   # rung of the optimization ladder: it halves the staging query cost
@@ -45,40 +42,9 @@ module Johakyu
     control_source(:s, source)
   end
 
-  def self.pan(source)
-    control_source(:pan, source)
-  end
-
-  def self.tilt(source)
-    control_source(:tilt, source)
-  end
-
-  def self.dimmer(source)
-    control_source(:dimmer, source)
-  end
-
-  def self.strobe(source)
-    control_source(:strobe, source)
-  end
-
-  def self.color(source)
-    control_source(:color, source)
-  end
-
-  def self.gobo(source)
-    control_source(:gobo, source)
-  end
-
-  def self.focus(source)
-    control_source(:focus, source)
-  end
-
-  def self.prism(source)
-    control_source(:prism, source)
-  end
-
-  def self.speed(source)
-    control_source(:speed, source)
+  # One statement builder per light control: Johakyu.pan(source) etc.
+  LIGHT_CONTROLS.each do |key|
+    define_singleton_method(key) { |source| control_source(key, source) }
   end
 
   # Target sugar: dmx(:s1).dimmer("1 0") == dimmer("1 0").on(:s1).
@@ -95,40 +61,8 @@ module Johakyu
       @target = target
     end
 
-    def pan(source)
-      build(:pan, source)
-    end
-
-    def tilt(source)
-      build(:tilt, source)
-    end
-
-    def dimmer(source)
-      build(:dimmer, source)
-    end
-
-    def strobe(source)
-      build(:strobe, source)
-    end
-
-    def color(source)
-      build(:color, source)
-    end
-
-    def gobo(source)
-      build(:gobo, source)
-    end
-
-    def focus(source)
-      build(:focus, source)
-    end
-
-    def prism(source)
-      build(:prism, source)
-    end
-
-    def speed(source)
-      build(:speed, source)
+    LIGHT_CONTROLS.each do |key|
+      define_method(key) { |source| build(key, source) }
     end
 
     private
@@ -151,40 +85,10 @@ module Johakyu
       with_control(:target, fixture_or_group)
     end
 
-    def pan(source)
-      attach_control(:pan, source)
-    end
-
-    def tilt(source)
-      attach_control(:tilt, source)
-    end
-
-    def dimmer(source)
-      attach_control(:dimmer, source)
-    end
-
-    def strobe(source)
-      attach_control(:strobe, source)
-    end
-
-    def color(source)
-      attach_control(:color, source)
-    end
-
-    def gobo(source)
-      attach_control(:gobo, source)
-    end
-
-    def focus(source)
-      attach_control(:focus, source)
-    end
-
-    def prism(source)
-      attach_control(:prism, source)
-    end
-
-    def speed(source)
-      attach_control(:speed, source)
+    # Chained controls sample at this pattern's event times (structure
+    # from left); one method per light control.
+    LIGHT_CONTROLS.each do |key|
+      define_method(key) { |source| attach_control(key, source) }
     end
 
     # Duplicate this pattern across the members of a group, each copy

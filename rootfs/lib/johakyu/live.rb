@@ -280,40 +280,10 @@ module Johakyu
       replace(@pattern.spread(amount, on: on))
     end
 
-    def pan(source)
-      replace(@pattern.pan(source))
-    end
-
-    def tilt(source)
-      replace(@pattern.tilt(source))
-    end
-
-    def dimmer(source)
-      replace(@pattern.dimmer(source))
-    end
-
-    def strobe(source)
-      replace(@pattern.strobe(source))
-    end
-
-    def color(source)
-      replace(@pattern.color(source))
-    end
-
-    def gobo(source)
-      replace(@pattern.gobo(source))
-    end
-
-    def focus(source)
-      replace(@pattern.focus(source))
-    end
-
-    def prism(source)
-      replace(@pattern.prism(source))
-    end
-
-    def speed(source)
-      replace(@pattern.speed(source))
+    # One mirror per light control; the transforms above stay explicit
+    # because their arities differ.
+    LIGHT_CONTROLS.each do |key|
+      define_method(key) { |source| replace(@pattern.send(key, source)) }
     end
 
     private
@@ -335,40 +305,8 @@ module Johakyu
       @target = target
     end
 
-    def pan(source)
-      build(:pan, source)
-    end
-
-    def tilt(source)
-      build(:tilt, source)
-    end
-
-    def dimmer(source)
-      build(:dimmer, source)
-    end
-
-    def strobe(source)
-      build(:strobe, source)
-    end
-
-    def color(source)
-      build(:color, source)
-    end
-
-    def gobo(source)
-      build(:gobo, source)
-    end
-
-    def focus(source)
-      build(:focus, source)
-    end
-
-    def prism(source)
-      build(:prism, source)
-    end
-
-    def speed(source)
-      build(:speed, source)
+    LIGHT_CONTROLS.each do |key|
+      define_method(key) { |source| build(key, source) }
     end
 
     private
@@ -415,49 +353,13 @@ def sound(source)
   $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
 end
 
-def pan(source)
-  pattern = Johakyu.pan(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
-end
-
-def tilt(source)
-  pattern = Johakyu.tilt(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
-end
-
-def dimmer(source)
-  pattern = Johakyu.dimmer(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
-end
-
-def strobe(source)
-  pattern = Johakyu.strobe(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
-end
-
-def color(source)
-  pattern = Johakyu.color(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
-end
-
-def gobo(source)
-  pattern = Johakyu.gobo(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
-end
-
-def focus(source)
-  pattern = Johakyu.focus(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
-end
-
-def prism(source)
-  pattern = Johakyu.prism(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
-end
-
-def speed(source)
-  pattern = Johakyu.speed(source)
-  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+# One top-level statement per light control, the same shape as sound:
+# pure inside track blocks, recorded as a bare statement otherwise.
+Johakyu::LIGHT_CONTROLS.each do |key|
+  define_method(key) do |source|
+    pattern = Johakyu.control_source(key, source)
+    $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+  end
 end
 
 def dmx(target)
