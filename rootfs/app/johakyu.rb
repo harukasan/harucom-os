@@ -15,6 +15,7 @@
 #   Ctrl-Enter: Evaluate the buffer (applies at the next cycle boundary)
 #   Ctrl-S:     Save (asks for a path when untitled), then evaluate
 #   Ctrl-O:     Open a file into the current scene
+#   Ctrl-B:     Blackout (running light tracks relight on their next event)
 #   Ctrl-Q:     Quit (blackout)
 #   Ctrl-Z / Ctrl-Y: Undo / Redo
 #
@@ -570,7 +571,7 @@ class JohakyuApp
     mode = $ime ? $ime.mode_label : nil
     if @command_bar_text.nil? || mode != @command_bar_mode
       @command_bar_mode = mode
-      bar = " Alt-1..0:Scene  Ctrl-Enter:Eval  Ctrl-S:Save+Eval  Ctrl-O:Open  Ctrl-Q:Quit"
+      bar = " Alt-1..0:Scene  Ctrl-Enter:Eval  Ctrl-S:Save+Eval  Ctrl-O:Open  Ctrl-B:Blackout  Ctrl-Q:Quit"
       if mode
         padding = Console.cols - Editor.display_width(bar) - Editor.display_width(mode)
         bar += " " * padding if padding > 0
@@ -764,6 +765,15 @@ class JohakyuApp
     end
     if c.match?(:enter, ctrl: true)
       start_eval
+      redraw_after_key(old_dirty)
+      return
+    end
+    if c.match?(:b, ctrl: true)
+      # Panic switch: zero the universe now. Bound light tracks keep
+      # writing, so this darkens until their next event; eval an
+      # empty buffer to silence for good.
+      DMX.blackout
+      @message = "Blackout (running tracks relight)"
       redraw_after_key(old_dirty)
       return
     end
