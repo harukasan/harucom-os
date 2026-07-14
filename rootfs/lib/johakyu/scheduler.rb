@@ -25,10 +25,12 @@ module Johakyu
     # a time. The minimum must cover several loop iterations so all
     # tracks get their staging turn before events fall due. The
     # threshold compares as Float so an idle tick allocates nothing.
-    # Quarter-cycle chunks halve the fixed per-query overhead compared
-    # to smaller chunks. The stall a staging tick can cause is roughly
-    # one chunk's query cost; the dispatcher's RESERVE_LEAD_MS absorbs
-    # it, so sounds and lights still land on time (see dsl.rb).
+    # The stall a staging tick can cause is roughly one chunk's query
+    # cost, and the dispatcher's RESERVE_LEAD_MS must absorb it (see
+    # dsl.rb). Quarter-cycle chunks keep the fixed per-query overhead
+    # paid few times per cycle; smaller chunks were measured worse on
+    # the board because the roughly 20 ms fixed cost then dominates
+    # the doubled query count.
     STAGE_AHEAD_MIN = 0.25
     STAGE_CHUNK = Fraction.new(1, 4)
 

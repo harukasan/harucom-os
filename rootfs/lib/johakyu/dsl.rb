@@ -56,7 +56,10 @@ module Johakyu
     # output_late_count. The cost of a larger lead: a quantized track
     # swap leaks at most this much of the old pattern into the new
     # cycle.
-    RESERVE_LEAD_MS = 120
+    # 300 ms budgets for the bumped VM with the interpreter pinned in
+    # SRAM: the busiest preset still fires up to roughly 276 ms after
+    # target on the board, so 250 ms leaked single events.
+    RESERVE_LEAD_MS = 300
 
     # The audio engine renders at a fixed 50 kHz (PWMAudio::SAMPLE_RATE).
     SAMPLES_PER_MS = 50

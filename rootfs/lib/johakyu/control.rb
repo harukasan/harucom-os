@@ -19,11 +19,12 @@ require "johakyu/fixture"
 
 module Johakyu
   # A bare Signal used as a structure source is discretized to this
-  # many steps per cycle. 16 steps (125 ms at 120 bpm) is the first
-  # rung of the optimization ladder: it halves the staging query cost
-  # of signal-driven tracks and the fixtures smooth the coarser moves.
-  # Use an explicit segment(n) where finer resolution matters.
-  SEGMENT_DEFAULT = 16
+  # many steps per cycle. 8 steps (250 ms at 120 bpm) is the second
+  # rung of the optimization ladder: each halving halves the staging
+  # query cost of signal-driven tracks, and the fixtures smooth the
+  # coarser moves. Use an explicit segment(n) where finer resolution
+  # matters.
+  SEGMENT_DEFAULT = 8
 
   # Build a structure source from mini notation, a Pattern, a Signal
   # (auto-segmented), or a plain value, with values wrapped into

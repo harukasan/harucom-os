@@ -218,8 +218,8 @@ class SchedulerTest < Picotest::Test
                            Johakyu.dmx_builder(:s2).pan(Johakyu.sine.range(0.2, 0.8).slow(8)))
     run_until(session, 500, 20)
     pans = DMX.writes.select { |w| w[1] == 14 }
-    # the default segment(16) yields a write every 125 ms
-    assert_equal true, pans.length >= 4
+    # the default segment(8) yields a write every 250 ms
+    assert_equal true, pans.length >= 2
     assert_equal true, pans.all? { |w| w[2] >= 51 && w[2] <= 204 }
   end
 
