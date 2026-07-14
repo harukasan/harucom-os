@@ -210,15 +210,14 @@ class JohakyuApp
 
   # -- Live eval --
 
-  # Resident sandbox, primed once so later compiles reuse the task
-  # (the irb compile/execute/suspend pattern).
+  # One sandbox per eval. On the board a failed compile left the
+  # resident sandbox erroring on every later eval even after the
+  # buffer was fixed; a fresh task per eval carries no compiler or
+  # task state across evals and takes the same first-run path that
+  # app launching uses. Creation cost is one task, negligible next to
+  # the eval itself.
   def new_eval_sandbox
-    sandbox = Sandbox.new("johakyu-live")
-    sandbox.compile("_ = nil")
-    sandbox.execute
-    sandbox.wait(timeout: nil)
-    sandbox.suspend
-    sandbox
+    Sandbox.new("johakyu-live")
   end
 
   # -- Scenes (editor tabs) --
@@ -272,6 +271,8 @@ class JohakyuApp
     return if @evaling
     source = @buffer.lines.join("\n")
     @live.begin_recording
+    @sandbox.terminate if @sandbox
+    @sandbox = new_eval_sandbox
     if @sandbox.compile(source)
       @sandbox.execute
       @evaling = true
@@ -315,17 +316,15 @@ class JohakyuApp
           redraw_screen
         end
       end
-      @sandbox.suspend
       draw_status
     elsif Machine.board_millis - @eval_started_ms > EVAL_TIMEOUT_MS
       # Do not stop a running task: the stop flag forces a return out
       # of a possibly nested mrb_vm_exec and hardfaults (the known
       # mruby-task nested-exec family). Terminate instead: it only
       # flips the task to DORMANT without unwinding it, so the
-      # runaway script is dropped for good rather than piling up as
-      # suspended tasks, and a fresh sandbox takes over.
+      # runaway script is dropped for good; the next eval brings its
+      # own fresh sandbox.
       @sandbox.terminate
-      @sandbox = new_eval_sandbox
       @live.discard
       @evaling = false
       @message = "Eval timeout: scripts must not loop (bindings keep running)"
