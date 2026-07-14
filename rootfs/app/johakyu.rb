@@ -294,10 +294,11 @@ class JohakyuApp
     elsif Machine.board_millis - @eval_started_ms > EVAL_TIMEOUT_MS
       # Do not stop a running task: the stop flag forces a return out
       # of a possibly nested mrb_vm_exec and hardfaults (the known
-      # mruby-task nested-exec family). Suspending only parks the task
-      # at its next safe point, so the runaway script is abandoned and
-      # a fresh sandbox takes over.
-      @sandbox.suspend
+      # mruby-task nested-exec family). Terminate instead: it only
+      # flips the task to DORMANT without unwinding it, so the
+      # runaway script is dropped for good rather than piling up as
+      # suspended tasks, and a fresh sandbox takes over.
+      @sandbox.terminate
       @sandbox = new_eval_sandbox
       @live.discard
       @evaling = false
