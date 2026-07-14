@@ -52,6 +52,51 @@ module Johakyu
     def to_cycle_i
       floor_i
     end
+
+    # The bundled mruby-rational defines <=> in Ruby through Float
+    # conversion with a rescue frame per call, and <, <=, >, >= go
+    # through Comparable on top: several dispatches per comparison on
+    # the hottest path of the query engine (span intersection
+    # compares constantly). Cross-multiplied integer comparison is
+    # exact (denominators are positive after normalization),
+    # allocation free, and one dispatch deep. Exactness also improves:
+    # Float conversion cannot distinguish rationals closer than one
+    # double ulp.
+    def <=>(other)
+      if other.is_a?(Rational)
+        numerator * other.denominator <=> other.numerator * denominator
+      elsif other.is_a?(Integer)
+        numerator <=> other * denominator
+      elsif other.is_a?(Float)
+        to_f <=> other
+      else
+        nil
+      end
+    end
+
+    def <(other)
+      cmp = self <=> other
+      raise ArgumentError, "comparison of Rational with #{other.class} failed" if cmp.nil?
+      cmp < 0
+    end
+
+    def <=(other)
+      cmp = self <=> other
+      raise ArgumentError, "comparison of Rational with #{other.class} failed" if cmp.nil?
+      cmp <= 0
+    end
+
+    def >(other)
+      cmp = self <=> other
+      raise ArgumentError, "comparison of Rational with #{other.class} failed" if cmp.nil?
+      cmp > 0
+    end
+
+    def >=(other)
+      cmp = self <=> other
+      raise ArgumentError, "comparison of Rational with #{other.class} failed" if cmp.nil?
+      cmp >= 0
+    end
   end
 
   # Exact rational time. The arithmetic runs in C (mruby-rational);

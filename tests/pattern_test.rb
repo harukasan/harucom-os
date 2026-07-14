@@ -120,6 +120,21 @@ class PatternTest < Picotest::Test
     assert_equal true, Johakyu::Fraction.new(2, 6) == third
   end
 
+  # The engine overrides Rational comparisons with cross-multiplied
+  # integer comparison: exact beyond Float precision, and the mixed
+  # Integer/Float forms the query paths use keep working.
+  def test_fraction_comparisons_are_exact
+    big = 1 << 60
+    assert_equal 1, Johakyu::Fraction.new(big + 1, big) <=> 1
+    assert_equal true, Johakyu::Fraction.new(big + 1, big) > 1
+    assert_equal true, Johakyu::Fraction.new(1, 3) < Johakyu::Fraction.new(1, 2)
+    assert_equal true, Johakyu::Fraction.new(3, 4) >= Johakyu::Fraction.new(6, 8)
+    assert_equal true, Johakyu::Fraction.new(1, 2) <= 1
+    assert_equal true, Johakyu::Fraction.new(1, 2) < 0.75
+    assert_equal(-1, Johakyu::Fraction.new(1, 4) <=> Johakyu::Fraction.new(1, 2))
+    assert_raise(ArgumentError) { Johakyu::Fraction.new(1, 2) < "x" }
+  end
+
   def test_continuous_detection
     assert_equal true, Johakyu.sine.continuous?
     assert_equal true, Johakyu.sine.range(0.2, 0.8).slow(8).continuous?
