@@ -28,12 +28,7 @@ require "johakyu/live"
 require "johakyu/universe_view"
 
 class JohakyuApp
-  VIEW_TOP    = 0
-  STATUS_ROW  = Johakyu::UniverseView::ROWS       # row 6
-  EDIT_TOP    = STATUS_ROW + 1
-  EDIT_BOTTOM = Console.rows - 2
-  EDIT_ROWS   = EDIT_BOTTOM - EDIT_TOP + 1
-  COMMAND_ROW = Console.rows - 1
+  VIEW_TOP = 0
 
   STATUS_ATTR  = 0x0F
   COMMAND_ATTR = 0x0F
@@ -112,10 +107,11 @@ class JohakyuApp
 
   def run
     setup_engine
+    @view = Johakyu::UniverseView.new(@session, top: VIEW_TOP)
+    apply_layout
     load_buffer
     analyze_viewport
 
-    @view = Johakyu::UniverseView.new(@session, top: VIEW_TOP)
     @sandbox = new_eval_sandbox
 
     redraw_screen
@@ -124,6 +120,16 @@ class JohakyuApp
     main_loop
   ensure
     shutdown
+  end
+
+  # Screen geometry below the universe view. The view height follows
+  # the patch, so this is recomputed after every rig swap.
+  def apply_layout
+    @status_row = VIEW_TOP + @view.rows
+    @edit_top = @status_row + 1
+    @edit_bottom = Console.rows - 2
+    @edit_rows = @edit_bottom - @edit_top + 1
+    @command_row = Console.rows - 1
   end
 
   # Full repaint: universe view furniture, editor lines, and bars.
@@ -275,9 +281,11 @@ class JohakyuApp
         @live.apply
         @message = "Applied (next cycle)"
         unless Johakyu.patch.equal?(patch_before)
-          # The rig changed: rebuild the universe view layout and
-          # repaint everything over the new channel grid.
+          # The rig changed: resize the universe view, re-lay the
+          # editor out below it, and repaint everything.
           @view.repatch
+          apply_layout
+          @scroll_top = adjust_vertical_scroll
           redraw_screen
         end
       end
@@ -531,7 +539,7 @@ class JohakyuApp
   end
 
   def analyze_viewport
-    analyze_window(@scroll_top, @scroll_top + EDIT_ROWS - 1)
+    analyze_window(@scroll_top, @scroll_top + @edit_rows - 1)
   end
 
   # -- Drawing --
@@ -552,7 +560,7 @@ class JohakyuApp
     elsif width > Console.cols
       status = Editor.display_slice(status, 0, Console.cols)
     end
-    @console.put_string_at(0, STATUS_ROW, status, STATUS_ATTR)
+    @console.put_string_at(0, @status_row, status, STATUS_ATTR)
   end
 
   # The bar text only changes with the IME mode label; cache the
@@ -572,7 +580,7 @@ class JohakyuApp
       end
       @command_bar_text = bar
     end
-    @console.put_string_at(0, COMMAND_ROW, @command_bar_text, COMMAND_ATTR)
+    @console.put_string_at(0, @command_row, @command_bar_text, COMMAND_ATTR)
   end
 
   # Prompt on the command bar. Keeps the show alive while waiting.
@@ -582,7 +590,7 @@ class JohakyuApp
       display = " #{label}#{input}"
       padding = Console.cols - Editor.display_width(display)
       display += " " * padding if padding > 0
-      @console.put_string_at(0, COMMAND_ROW, Editor.display_slice(display, 0, Console.cols), COMMAND_ATTR)
+      @console.put_string_at(0, @command_row, Editor.display_slice(display, 0, Console.cols), COMMAND_ATTR)
       @console.commit
 
       c = @keyboard.read_char
@@ -618,7 +626,7 @@ class JohakyuApp
   end
 
   def draw_line(screen_row)
-    row = EDIT_TOP + screen_row
+    row = @edit_top + screen_row
     line_index = @scroll_top + screen_row
     @console.clear_line(row)
     return if line_index >= @buffer.lines.length
@@ -639,7 +647,7 @@ class JohakyuApp
 
   def draw_all_lines
     i = 0
-    while i < EDIT_ROWS
+    while i < @edit_rows
       draw_line(i)
       i += 1
     end
@@ -652,8 +660,8 @@ class JohakyuApp
   def scroll_view(vdelta)
     if vdelta > 0
       DVI::Text.scroll_up(vdelta, EDIT_ATTR)
-      row = EDIT_ROWS - vdelta
-      while row < EDIT_ROWS
+      row = @edit_rows - vdelta
+      while row < @edit_rows
         draw_line(row)
         row += 1
       end
@@ -675,7 +683,7 @@ class JohakyuApp
   def draw_hscroll(old_scroll_left)
     threshold = old_scroll_left < @scroll_left ? old_scroll_left : @scroll_left
     i = 0
-    while i < EDIT_ROWS
+    while i < @edit_rows
       line = @buffer.lines[@scroll_top + i]
       if line.nil? || Editor.display_width(line) <= threshold
         i += 1
@@ -688,7 +696,7 @@ class JohakyuApp
 
   def place_cursor
     screen_col = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x) - @scroll_left + @preedit_width
-    screen_row = EDIT_TOP + @buffer.cursor_y - @scroll_top
+    screen_row = @edit_top + @buffer.cursor_y - @scroll_top
     @console.move_to(screen_col, screen_row)
     @console.show_cursor
   end
@@ -699,8 +707,8 @@ class JohakyuApp
     if @buffer.cursor_y < @scroll_top
       return @buffer.cursor_y
     end
-    if @buffer.cursor_y >= @scroll_top + EDIT_ROWS
-      return @buffer.cursor_y - EDIT_ROWS + 1
+    if @buffer.cursor_y >= @scroll_top + @edit_rows
+      return @buffer.cursor_y - @edit_rows + 1
     end
     @scroll_top
   end
@@ -784,15 +792,15 @@ class JohakyuApp
       when Keyboard::CTRL_Y
         @message = "Redo" if perform_redo
       when Keyboard::PAGEUP
-        @scroll_top -= EDIT_ROWS
+        @scroll_top -= @edit_rows
         @scroll_top = 0 if @scroll_top < 0
         @buffer.move_to(@buffer.cursor_x, @scroll_top)
       when Keyboard::PAGEDOWN
-        max_scroll = @buffer.lines.length - EDIT_ROWS
+        max_scroll = @buffer.lines.length - @edit_rows
         max_scroll = 0 if max_scroll < 0
-        @scroll_top += EDIT_ROWS
+        @scroll_top += @edit_rows
         @scroll_top = max_scroll if @scroll_top > max_scroll
-        new_y = @scroll_top + EDIT_ROWS - 1
+        new_y = @scroll_top + @edit_rows - 1
         new_y = @buffer.lines.length - 1 if new_y >= @buffer.lines.length
         @buffer.move_to(@buffer.cursor_x, new_y)
       when Keyboard::HOME
@@ -897,14 +905,14 @@ class JohakyuApp
 
     content_changed = dirty == :content || dirty == :structure
     window_rebuilt = false
-    vis_bottom = @scroll_top + EDIT_ROWS
+    vis_bottom = @scroll_top + @edit_rows
     vis_bottom = @buffer.lines.length if vis_bottom > @buffer.lines.length
     if content_changed || @scroll_top < @win_start || vis_bottom > @win_end
       analyze_viewport
       window_rebuilt = true
     end
 
-    if dirty == :structure || vdelta.abs >= EDIT_ROWS ||
+    if dirty == :structure || vdelta.abs >= @edit_rows ||
        (hscrolled && vdelta != 0) || (window_rebuilt && !content_changed)
       draw_all_lines
     elsif hscrolled
@@ -923,8 +931,8 @@ class JohakyuApp
     @preedit_width = 0
     if $ime && $ime.preedit.bytesize > 0
       cursor_col = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x) - @scroll_left
-      preedit_row = EDIT_TOP + @buffer.cursor_y - @scroll_top
-      if preedit_row >= EDIT_TOP && preedit_row <= EDIT_BOTTOM
+      preedit_row = @edit_top + @buffer.cursor_y - @scroll_top
+      if preedit_row >= @edit_top && preedit_row <= @edit_bottom
         max_preedit = Console.cols - cursor_col
         if max_preedit > 0
           visible = Editor.display_slice($ime.preedit, 0, max_preedit)
@@ -954,7 +962,7 @@ class JohakyuApp
         padding = Console.cols - Editor.display_width(cand_text)
         cand_text += " " * padding if padding > 0
       end
-      @console.put_string_at(0, COMMAND_ROW, Editor.display_slice(cand_text, 0, Console.cols), COMMAND_ATTR)
+      @console.put_string_at(0, @command_row, Editor.display_slice(cand_text, 0, Console.cols), COMMAND_ATTR)
     else
       draw_command_bar
     end

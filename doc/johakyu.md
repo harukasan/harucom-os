@@ -194,8 +194,12 @@ Johakyu.dmx(:s1).raw(:pan, 200)          # raw 0-255 escape hatch
 `Johakyu::UniverseView`
 ([universe_view.rb](../rootfs/lib/johakyu/universe_view.rb)) renders
 the cycle bar, scheduler health, per-fixture readbacks, and the raw
-channel grid at the top of the live coding UI. Drawing is differential
-with a precomputed value-string table, so the steady-state draw path
+channel grid at the top of the live coding UI. The view sizes itself
+from the patch: one readback row per fixture and enough grid rows for
+the patched channels (both capped), and without a rig it collapses to
+the clock row, so the app doubles as an audio-only sequencer with the
+editor taking the rest of the screen. Drawing is differential with a
+precomputed value-string table, so the steady-state draw path
 allocates nothing.
 
 ## Mini notation

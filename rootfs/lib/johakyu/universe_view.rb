@@ -10,19 +10,21 @@
 # nothing (the scheduler runs in the same loop; string churn here
 # would turn into GC pauses there).
 #
-# Row layout, relative to `top`:
-#   0  [johakyu] |cycle bar| cyc/bpm and scheduler stats
-#   1  fixture 1 attribute readbacks
-#   2  fixture 2 attribute readbacks
-#   3  universe channels, first row
-#   4  universe channels, second row
-#   5  separator line
+# Row layout, relative to `top`, sized from the running rig (rows):
+#   0      [johakyu] |cycle bar| cyc/bpm and scheduler stats
+#   1..    one attribute readback row per fixture (capped)
+#   next.. universe channel grid rows (capped to the first channels)
+#   last   separator line
+# Without a rig only the clock row is shown, so the app doubles as an
+# audio-only sequencer with the editor taking the rest of the screen.
 
 require "johakyu/fixture"
 
 module Johakyu
   class UniverseView
-    ROWS = 6
+    # Height in rows for the current rig; the app lays the editor out
+    # below this.
+    attr_reader :rows
 
     ATTR_NORMAL  = 0xF0
     ATTR_TITLE   = 0x1F
@@ -72,17 +74,23 @@ module Johakyu
       repatch
     end
 
-    # Rebuild the patch-dependent layout (fixture rows and the channel
-    # grid extent) from the running rig. Call after a patch swap, then
-    # reset to repaint. Kept out of reset so scrolling, which resets
-    # every frame it shifts, does not reallocate the layout.
+    # Rebuild the patch-dependent layout (fixture rows, channel grid
+    # extent, and the view height) from the running rig. Call after a
+    # patch swap, then reset to repaint. Kept out of reset so
+    # scrolling, which resets every frame it shifts, does not
+    # reallocate the layout.
     def repatch
+      # Caps keep a large rig from squeezing the editor out; the grid
+      # shows the first rows worth of channels.
+      cap = Console.rows >= 30 ? 4 : 2
+      @cells_per_row = Console.cols / 8
+
       # Fixture rows: [name, [[attribute, channel, label_x, value_x,
       # last_drawn], ...]]
       @fixture_rows = []
       names = Johakyu.patch.fixture_names
       i = 0
-      while i < names.length && @fixture_rows.length < 2
+      while i < names.length && @fixture_rows.length < cap
         name = names[i]
         i += 1
         fixture = Johakyu.patch[name]
@@ -109,7 +117,21 @@ module Johakyu
       end
 
       @channel_count = Johakyu.patch.max_channel
-      @cells_per_row = Console.cols / 8
+      grid_rows = (@channel_count + @cells_per_row - 1) / @cells_per_row
+      grid_rows = cap if grid_rows > cap
+      @grid_rows = grid_rows
+      @channel_display_count = @channel_count
+      limit = @grid_rows * @cells_per_row
+      @channel_display_count = limit if @channel_display_count > limit
+      @grid_top = @top + 1 + @fixture_rows.length
+
+      # Clock row, fixture rows, grid rows, and a closing separator
+      # when a rig is patched; the clock row alone without one.
+      if @channel_count > 0
+        @rows = 1 + @fixture_rows.length + @grid_rows + 1
+      else
+        @rows = 1
+      end
     end
 
     # Draw the static furniture and force every cell to repaint on the
@@ -132,18 +154,20 @@ module Johakyu
       end
       # Channel grid labels ("001:") drawn once.
       ch = 1
-      while ch <= @channel_count
+      while ch <= @channel_display_count
         x, y = channel_cell(ch)
         DVI::Text.put_string(x, y, format_3(ch) + ":", ATTR_NORMAL)
         ch += 1
       end
-      separator = ""
-      i = 0
-      while i < Console.cols
-        separator = separator + "-"
-        i += 1
+      if @channel_count > 0
+        separator = ""
+        i = 0
+        while i < Console.cols
+          separator = separator + "-"
+          i += 1
+        end
+        DVI::Text.put_string(0, @top + @rows - 1, separator, ATTR_NORMAL)
       end
-      DVI::Text.put_string(0, @top + 5, separator, ATTR_NORMAL)
 
       i = 0
       while i < @prev_values.length
@@ -228,7 +252,7 @@ module Johakyu
 
     def draw_channel_grid(now)
       ch = 1
-      while ch <= @channel_count
+      while ch <= @channel_display_count
         value = DMX.get(ch)
         if value != @prev_values[ch]
           @prev_values[ch] = value
@@ -248,7 +272,7 @@ module Johakyu
       index = ch - 1
       row = index / @cells_per_row
       col = index % @cells_per_row
-      [col * 8, @top + 3 + row]
+      [col * 8, @grid_top + row]
     end
 
     def format_3(value)
