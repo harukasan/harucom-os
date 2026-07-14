@@ -126,6 +126,24 @@ class InputMethod
     text
   end
 
+  # Discard any composition in progress: pending engine input,
+  # preedit, candidates, and a word registration. The active engine
+  # and its input mode stay. For editor commands that switch the
+  # buffer context (scene switch, file open), where a half-typed
+  # composition must not leak into the new buffer.
+  def reset
+    cancel_register if @registering
+    if @engine
+      # Engine reset flushes pending input as committed text; that
+      # flush is exactly what a discard throws away.
+      @engine.reset(self)
+      @committed = ""
+    end
+    @preedit = ""
+    @candidates = nil
+    @candidate_index = 0
+  end
+
   # Mode label for display: "[A]", "[あ]", "[ア]", "[漢]"
   def mode_label
     return nil unless @engine

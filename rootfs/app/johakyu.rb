@@ -743,6 +743,7 @@ class JohakyuApp
     # Editor commands checked before the IME: an Alt+digit would
     # otherwise be fed into the preedit as a plain digit.
     if c.alt? && c.char && c.char >= "0" && c.char <= "9"
+      $ime.reset if $ime
       switch_scene(c.char == "0" ? 10 : c.char.to_i)
       redraw_after_key(old_dirty)
       return
@@ -755,6 +756,7 @@ class JohakyuApp
       return
     end
     if c.match?(:o, ctrl: true)
+      $ime.reset if $ime
       open_file
       redraw_after_key(old_dirty)
       return
