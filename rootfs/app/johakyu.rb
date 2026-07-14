@@ -325,25 +325,25 @@ class JohakyuApp
 
   # -- File I/O --
 
-  def load_buffer
+  # Replace the buffer content with text, split into lines; nil or an
+  # empty string leaves a single empty line.
+  def fill_buffer(content)
     @buffer.lines.clear
-    if @filepath && File.exist?(@filepath)
-      content = File.open(@filepath, "r") { |f| f.read }
-      if content
-        content.split("\n").each { |l| @buffer.lines.push(l) }
-      end
-    else
-      content = nil
-      if File.file?(STARTER_PATH)
-        content = File.open(STARTER_PATH, "r") { |f| f.read }
-      end
-      if content
-        content.split("\n").each { |l| @buffer.lines.push(l) }
-      else
-        STARTER.each { |l| @buffer.lines.push(l) }
-      end
+    if content
+      content.split("\n").each { |l| @buffer.lines.push(l) }
     end
     @buffer.lines.push("") if @buffer.lines.empty?
+  end
+
+  def load_buffer
+    content = nil
+    if @filepath && File.exist?(@filepath)
+      content = File.open(@filepath, "r") { |f| f.read }
+    elsif File.file?(STARTER_PATH)
+      content = File.open(STARTER_PATH, "r") { |f| f.read }
+    end
+    content = STARTER.join("\n") if content.nil?
+    fill_buffer(content)
     @buffer.changed = false
   end
 
@@ -388,10 +388,7 @@ class JohakyuApp
       @message = "No such file: #{path}"
       return
     end
-    content = File.open(path, "r") { |f| f.read }
-    @buffer.lines.clear
-    content.split("\n").each { |l| @buffer.lines.push(l) } if content
-    @buffer.lines.push("") if @buffer.lines.empty?
+    fill_buffer(File.open(path, "r") { |f| f.read })
     @buffer.move_to(0, 0)
     @scroll_top = 0
     @scroll_left = 0
