@@ -178,6 +178,7 @@ add_executable(harucom_os
     src/hal_task.c
     src/hal_machine.c
     src/psram.c
+    src/alloc_diagnostics.c
     src/init_rootfs.c
     ports/picoruby-littlefs/flash_hal.c
     src/platform.c
@@ -280,6 +281,12 @@ target_link_libraries(harucom_os
 # Core 0 needs 32 KB stack for mruby compiler (mrc_load_string_cxt).
 # Default __STACK_SIZE is 0x800 (2 KB), which is insufficient.
 target_link_options(harucom_os PRIVATE -Wl,--defsym=__STACK_SIZE=0x8000)
+
+# Print the failing request size when the mruby heap allocator returns
+# NULL, and the C call site when a wrapped-around negative size comes
+# through (see src/alloc_diagnostics.c).
+target_link_options(harucom_os PRIVATE -Wl,--wrap=est_realloc)
+target_link_options(harucom_os PRIVATE -Wl,--wrap=mrb_realloc -Wl,--wrap=mrb_malloc)
 
 # Custom linker script: keeps the mruby interpreter core (vm.o, gc.o)
 # and the synth kernels in RAM instead of flash. Running the VM from
