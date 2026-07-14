@@ -19,6 +19,8 @@
 # channels of their own with no capabilities. Each channel entry is
 # {name:, default:, caps:}; name is nil for unused (null) slots.
 
+require "dmx/json_parser"
+
 module DMX
   module Fixture
     # List fixture definition files in a directory, sorted.
@@ -51,7 +53,7 @@ module DMX
     # document lacks the required sections.
     def self.parse(text)
       begin
-        data = JSON.parse(text)
+        data = JSONParser.parse(text)
       rescue
         return nil
       end
