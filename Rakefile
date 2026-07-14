@@ -16,8 +16,27 @@ end
 desc "Configure, build and produce combined UF2 (default)"
 task default: :full_uf2
 
+MRUBY_DIR = File.join(PROJECT_DIR, "lib", "picoruby", "mrbgems",
+                      "picoruby-mruby", "lib", "mruby")
+MRUBY_PATCHES = Dir.glob(File.join(PROJECT_DIR, "patches", "mruby", "*.patch")).sort
+
+# Vendored mruby fixes not yet in the pinned submodule, applied to the
+# submodule working tree before anything compiles libmruby. Patches
+# that are already applied are skipped, so the task is idempotent; a
+# submodule re-checkout is healed by the next build. Drop each patch
+# when the picoruby pin advances past its upstream fix.
+desc "Apply vendored mruby patches to the submodule working tree"
+task :mruby_patches do
+  MRUBY_PATCHES.each do |patch|
+    applied = system("git", "-C", MRUBY_DIR, "apply", "--reverse", "--check", patch,
+                     out: File::NULL, err: File::NULL)
+    next if applied
+    sh "git", "-C", MRUBY_DIR, "apply", patch
+  end
+end
+
 desc "Run cmake configure"
-task :configure do
+task configure: :mruby_patches do
   sh "cmake -B #{BUILD_DIR} -G Ninja"
 end
 
@@ -66,7 +85,7 @@ HOST_TEST_CONFIG = File.join(PROJECT_DIR, "build_config", "harucom-os-host-test.
 HOST_TEST_VM = File.join(PICORUBY_DIR, "build", "harucom-host-test", "bin", "picoruby")
 
 desc "Build the host test VM (picoruby with board-parity defines)"
-task :test_vm do
+task test_vm: :mruby_patches do
   sh({ "MRUBY_CONFIG" => HOST_TEST_CONFIG }, "rake all", chdir: PICORUBY_DIR)
 end
 

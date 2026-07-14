@@ -1,0 +1,32 @@
+stack_extend_alloc: cover the frame offset, not the remaining space
+
+Upstream mruby bug, present in master as of 2026-07-15. The refactor
+commit 16baea067 turned the base-size floor into "stend - ci->stack",
+which is at most the remaining capacity while ci->stack is in range
+(the branch never fires) and wraps around to a huge size_t when
+cipush has already placed the frame past stend (mrb_funcall and
+OP_SEND push the callinfo before extending). The wrapped value
+poisons the growth math and the VM raises NoMemoryError from a
+negative realloc size. Restore the pre-refactor meaning: the frame
+base offset from the stack bottom.
+
+Remove this patch when the picoruby pin advances past the upstream
+fix. Investigation notes: mruby-stack-extend-bug-notes.md (harukasan).
+
+diff --git a/src/vm.c b/src/vm.c
+index d8dc154c2..2a59ef32f 100644
+--- a/src/vm.c
++++ b/src/vm.c
+@@ -180,7 +180,11 @@ stack_extend_alloc(mrb_state *mrb, mrb_int room)
+   mrb_value *oldbase = mrb->c->stbase;
+   size_t oldsize = mrb->c->stend - mrb->c->stbase;
+   size_t size = oldsize;
+-  size_t off = mrb->c->ci->stack ? mrb->c->stend - mrb->c->ci->stack : 0;
++  /* ci->stack may already sit past stend (cipush places the frame before
++   * the stack is extended). The base size must cover the frame offset;
++   * the old "stend - ci->stack" form went negative in exactly that case
++   * and the unsigned wrap-around poisoned the growth math below. */
++  size_t off = mrb->c->ci->stack ? (size_t)(mrb->c->ci->stack - mrb->c->stbase) : 0;
+ 
+   if (off > size) size = off;
+ #ifdef MRB_STACK_EXTEND_DOUBLING

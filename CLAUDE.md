@@ -192,7 +192,9 @@ Build responsibilities:
   `rake` to confirm real build errors.
 - **`lib/picoruby` submodule may show as "modified content" in git status.**
   `rake distclean` recreates `lib/picoruby/build/.gitignore` to prevent
-  this issue. If it still appears, do not stage or commit the submodule.
+  this issue. The inner mruby tree also carries the working-tree patches
+  from `patches/mruby/` (applied automatically by `rake`), so "modified
+  content" there is expected. Never stage or commit the submodule.
 
 ## Commit messages
 
