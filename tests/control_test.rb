@@ -8,6 +8,21 @@ class ControlTest < Picotest::Test
     Johakyu.patch = johakyu_test_patch
   end
 
+  # Pins the generated statement sugar on every layer that builds
+  # control maps: the bare statement, the target builder, and the
+  # pattern chain must all wrap values under their own key.
+  def test_every_light_control_builds_its_key
+    Johakyu::LIGHT_CONTROLS.each do |key|
+      bare = onsets(Johakyu.send(key, "1"))
+      assert_equal({ key => "1" }, bare[0].value)
+      targeted = onsets(Johakyu.dmx_builder(:s1).send(key, "1"))
+      assert_equal "1", targeted[0].value[key]
+      assert_equal 6, targeted[0].value[:target].channel(:dimmer)
+      chained = onsets(Johakyu.sound("bd").send(key, "0.5"))
+      assert_equal "0.5", chained[0].value[key]
+    end
+  end
+
   def onsets(pattern, from = 0, to = 1)
     haps = pattern.query_arc(from, to)
     result = []

@@ -114,6 +114,24 @@ class LiveTest < Picotest::Test
     assert_equal 240, @session.clock.bpm
   end
 
+  def test_audio_latency_records_and_applies
+    @live.begin_recording
+    audio_latency(25)
+    track(:drums) { sound("bd") }
+    @live.apply
+    assert_equal 25, @session.audio_latency_ms
+  end
+
+  # Every generated top-level statement records a bare slot under its
+  # own key.
+  def test_every_top_level_control_records
+    @live.begin_recording
+    Johakyu::LIGHT_CONTROLS.each { |key| send(key, "1").on(:s1) }
+    @live.apply
+    assert_equal Johakyu::LIGHT_CONTROLS.length,
+                 @session.scheduler.track_names.length
+  end
+
   def test_replace_removes_stale_tracks
     @live.begin_recording
     track(:drums) { sound("bd*4") }

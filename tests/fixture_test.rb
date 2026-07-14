@@ -143,6 +143,19 @@ class FixtureTest < Picotest::Test
     assert_equal 255, DMX.get(6)
   end
 
+  # Pins the generated attribute sugar: every LIGHT_CONTROLS entry has
+  # its method and each captures its own attribute (a shared closure
+  # would send them all to one channel).
+  def test_every_attribute_writes_its_own_channel
+    fixture = dmx(:s1)
+    Johakyu::LIGHT_CONTROLS.each do |attribute|
+      DMX.reset
+      fixture.send(attribute, 1.0)
+      expected = attribute == :strobe ? 251 : 255
+      assert_equal expected, DMX.get(fixture.channel(attribute))
+    end
+  end
+
   def test_unknown_attribute_raises
     assert_raise(ArgumentError) { dmx(:s1).channel(:laser) }
   end

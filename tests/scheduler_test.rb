@@ -250,6 +250,16 @@ class SchedulerTest < Picotest::Test
     assert_equal [0, 2000, 4500, 6500], times
   end
 
+  # Integer control values bypass normalization and write raw 0-255
+  # (Session.write_dmx's raw path).
+  def test_integer_values_write_raw
+    session, _audio = new_session
+    session.bind_statement(:raw,
+                           Johakyu.dmx_builder(:s1).dimmer(Johakyu::Pattern.pure(200)))
+    run_until(session, 100)
+    assert_equal 200, DMX.get(6)
+  end
+
   def test_remove_statement_stops_future_events
     session, audio = new_session
     session.bind_statement(:drums, Johakyu.sound("bd*4"))
