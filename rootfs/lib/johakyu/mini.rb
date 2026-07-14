@@ -26,6 +26,13 @@ module Johakyu
     ONE = Fraction.new(1)
 
     def self.parse(input)
+      # Parse memo: live evals rebuild every track, so unchanged
+      # pattern strings dominate. Patterns are pure (the cycle memo
+      # below caches results of a pure function), so sharing one
+      # instance across tracks and evals is safe.
+      @parsed ||= {}
+      cached = @parsed[input]
+      return cached if cached
       ast = Reader.new(input).read_pattern
       events_fn = Compiler.compile(ast)
       # One-entry memo: staging queries walk cycles sequentially, and
@@ -33,7 +40,7 @@ module Johakyu
       # last cycle's event list halves the interpreter work.
       memo_cycle = nil
       memo_events = nil
-      Pattern.new do |span|
+      @parsed[input] = Pattern.new do |span|
         spans = span.span_cycles
         haps = []
         i = 0

@@ -111,6 +111,7 @@ class JohakyuApp
 
     @evaling = false
     @eval_started_ms = 0
+    @eval_compile_ms = 0
     @preedit_width = 0
     @dmx_running = false
   end
@@ -168,10 +169,11 @@ class JohakyuApp
     # Attach the drum samples; without this the sound reservations
     # land on sourceless channels and play silence.
     @session.load_kit
-    # Parse the OFL definitions now, on the app task, so fixture
-    # statements inside evals resolve from the cache instead of
-    # paying the JSON parse against the eval timeout.
-    Johakyu.preload_fixtures
+    # Parse the OFL definitions and build every mode personality now,
+    # on the app task, so fixture statements inside evals resolve
+    # from the cache instead of paying the JSON parse and the mode
+    # table build against the eval timeout.
+    Johakyu.preload_personalities
     @live = Johakyu::Live.new(@session)
     $johakyu_live = @live
   end
@@ -271,9 +273,12 @@ class JohakyuApp
     return if @evaling
     source = @buffer.lines.join("\n")
     @live.begin_recording
+    compile_t0 = Machine.board_millis
     @sandbox.terminate if @sandbox
     @sandbox = new_eval_sandbox
-    if @sandbox.compile(source)
+    compiled = @sandbox.compile(source)
+    @eval_compile_ms = Machine.board_millis - compile_t0
+    if compiled
       @sandbox.execute
       @evaling = true
       @eval_started_ms = Machine.board_millis
@@ -305,8 +310,11 @@ class JohakyuApp
         end
       else
         patch_before = Johakyu.patch
+        apply_t0 = Machine.board_millis
         @live.apply
-        @message = "Applied (next cycle)"
+        apply_ms = Machine.board_millis - apply_t0
+        run_ms = apply_t0 - @eval_started_ms
+        @message = "Applied (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms)"
         unless Johakyu.patch.equal?(patch_before)
           # The rig changed: resize the universe view, re-lay the
           # editor out below it, and repaint everything.

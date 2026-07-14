@@ -9,6 +9,10 @@ class MiniTest < Picotest::Test
     Johakyu::Mini.parse(text)
   end
 
+  def test_parse_memoizes_by_string
+    assert_equal true, parse("bd ~ sd ~").equal?(parse("bd ~ sd ~"))
+  end
+
   def test_sequence_with_rests
     assert_equal ["0/1..1/4|0/1..1/4|\"bd\"", "1/2..3/4|1/2..3/4|\"sn\""],
                  hap_sigs(parse("bd ~ sn -").query_arc(0, 1))

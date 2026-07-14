@@ -77,6 +77,13 @@ class FixtureTest < Picotest::Test
     assert_equal 13, Johakyu.personality(JOHAKYU_TEST_FIXTURE, "13ch").channels
   end
 
+  def test_preload_personalities_warms_every_mode
+    assert_equal 1, Johakyu.preload_personalities("rootfs/data/dmx/fixtures")
+    warmed = Johakyu.personality(JOHAKYU_TEST_FIXTURE, "13ch")
+    assert_equal true, warmed.equal?(Johakyu.personality(JOHAKYU_TEST_FIXTURE, "13ch"))
+    assert_equal 10, Johakyu.personality(JOHAKYU_TEST_FIXTURE, "10ch").channels
+  end
+
   def test_pan_writes_16bit_pair
     dmx(:s1).pan(0.5)
     assert_equal 128, DMX.get(1)

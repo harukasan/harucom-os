@@ -522,6 +522,35 @@ module Johakyu
     count
   end
 
+  # Build and cache the personality of every mode of every preloaded
+  # definition. The mode table build costs a couple hundred ms per
+  # mode on the board, so warming it at app startup keeps the first
+  # fixture statement of an eval off that bill too.
+  def self.preload_personalities(dir = FIXTURE_DIR)
+    count = preload_fixtures(dir)
+    paths = ::DMX::Fixture.list(dir)
+    i = 0
+    while i < paths.length
+      path = paths[i]
+      i += 1
+      fixture = @fixtures ? @fixtures[path] : nil
+      next unless fixture
+      base = path.split("/").last.to_s.sub(".json", "")
+      begin
+        personality(base)
+        modes = fixture[:modes]
+        j = 0
+        while j < modes.length
+          personality(base, modes[j][:label])
+          j += 1
+        end
+      rescue ArgumentError
+        # skip unusable definitions
+      end
+    end
+    count
+  end
+
   # The running rig. Starts empty; the live script assigns it through
   # fixture/group statements (see live.rb).
   def self.patch
