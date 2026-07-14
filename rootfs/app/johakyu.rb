@@ -104,6 +104,7 @@ class JohakyuApp
     @evaling = false
     @eval_started_ms = 0
     @preedit_width = 0
+    @dmx_running = false
   end
 
   def run
@@ -148,6 +149,7 @@ class JohakyuApp
   def setup_engine
     DMX.init
     DMX.start
+    @dmx_running = true
     DMX.deadman_ms = 500
     # The rig is patched by the live script (fixture statements in the
     # buffer); before the first apply there are no slots to shorten to.
@@ -162,16 +164,21 @@ class JohakyuApp
     $johakyu_live = @live
   end
 
+  # Runs from the ensure in run, so setup may have failed at any
+  # point; only tear down what actually came up, and do not let a
+  # teardown error mask the original exception.
   def shutdown
     @sandbox.terminate if @sandbox
     @session.stop_sounds if @session
     @audio.deinit if @audio
-    DMX.blackout
-    8.times do
-      DMX.keepalive
-      sleep_ms 25
+    if @dmx_running
+      DMX.blackout
+      8.times do
+        DMX.keepalive
+        sleep_ms 25
+      end
+      DMX.stop
     end
-    DMX.stop
     @console.hide_cursor
     @console.clear
     @console.commit
