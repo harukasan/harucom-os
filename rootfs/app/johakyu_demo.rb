@@ -97,10 +97,14 @@ def johakyu_demo
 
   audio = Board::PWMAudio.new
   session = Johakyu::Session.new(audio: audio, bpm: 120)
+  kit_t0 = Machine.board_millis
   session.load_kit
+  puts "load_kit: #{Machine.board_millis - kit_t0} ms"
   live = Johakyu::Live.new(session)
   $johakyu_live = live
+  rig_t0 = Machine.board_millis
   patch_rig(live)
+  puts "patch_rig: #{Machine.board_millis - rig_t0} ms"
   bpm = 120
 
   preset_name = apply_preset(session, live, 1)
