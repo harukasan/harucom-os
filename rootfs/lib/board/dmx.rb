@@ -35,9 +35,7 @@ module Board
     # Send zero to every slot, wait for the frames to reach the
     # fixtures, then stop transmission.
     def stop
-      ::DMX.blackout
-      sleep_ms 100
-      ::DMX.stop
+      ::DMX.shutdown
     end
 
     # Set one slot. channel is 1-512, value is 0-255.

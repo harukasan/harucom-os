@@ -188,12 +188,7 @@ def johakyu_demo
 
   session.stop_sounds
   audio.deinit
-  DMX.blackout
-  8.times do
-    DMX.keepalive
-    sleep_ms 25
-  end
-  DMX.stop
+  DMX.shutdown
   DVI::Text.clear(attr_clear)
   DVI::Text.commit
   puts "johakyu_demo: done (engine stopped)."

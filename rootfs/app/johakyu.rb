@@ -173,14 +173,7 @@ class JohakyuApp
     @sandbox.terminate if @sandbox
     @session.stop_sounds if @session
     @audio.deinit if @audio
-    if @dmx_running
-      DMX.blackout
-      8.times do
-        DMX.keepalive
-        sleep_ms 25
-      end
-      DMX.stop
-    end
+    DMX.shutdown if @dmx_running
     @console.hide_cursor
     @console.clear
     @console.commit

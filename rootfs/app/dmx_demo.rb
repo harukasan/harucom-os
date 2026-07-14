@@ -211,13 +211,7 @@ class DmxDemo
       end
     end
 
-    # Go dark, let the zero frames reach the fixtures, then stop.
-    blackout
-    8.times do
-      DMX.keepalive
-      sleep_ms 25
-    end
-    DMX.stop
+    DMX.shutdown
     DVI::Text.clear(TEXT_ATTR)
     DVI::Text.commit
     puts "dmx_demo: done (engine stopped, rig blacked out)."

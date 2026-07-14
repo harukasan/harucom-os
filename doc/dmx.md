@@ -16,6 +16,7 @@ Module: `DMX`
 - [DMX.init](#dmxinitunit-txd_pin---integer)
 - [DMX.start](#dmxstart)
 - [DMX.stop](#dmxstop)
+- [DMX.shutdown](#dmxshutdown)
 - [DMX.set](#dmxsetchannel-value)
 - [DMX.set_range](#dmxset_rangechannel-values)
 - [DMX.get](#dmxgetchannel---integer)
@@ -46,8 +47,8 @@ dmx.stop             # blackout, wait, then stop transmission
 Fixtures hold their last values when the DMX signal stops, so turning the
 signal off does not darken the rig. Two behaviors follow from this: the
 engine has a dead-man switch (see [DMX.keepalive](#dmxkeepalive)), and
-`Board::DMX#stop` sends a blackout and waits 100 ms for the frames to
-reach the fixtures before stopping.
+teardown goes through [DMX.shutdown](#dmxshutdown), which darkens the
+rig before stopping transmission (`Board::DMX#stop` calls it).
 
 ### DMX.init(unit:, txd_pin:) -> Integer
 
@@ -72,7 +73,12 @@ not before.
 ### DMX.stop
 
 Stops transmission. Fixtures keep their last values; use
-`Board::DMX#stop` or send `DMX.blackout` first to darken the rig.
+[DMX.shutdown](#dmxshutdown) instead to darken the rig first.
+
+### DMX.shutdown
+
+Engine teardown: blackout, keepalive while the zero frames reach the
+fixtures (eight frame periods), then stop transmission.
 
 ### DMX.set(channel, value)
 
