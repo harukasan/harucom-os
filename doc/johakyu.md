@@ -9,8 +9,11 @@ directly. The engine is pure Ruby in
 [rootfs/lib/johakyu/](../rootfs/lib/johakyu/), with time arithmetic on
 the C-backed Rational class (the mruby-rational and mruby-bigint gems
 from the mruby tree). The live coding UI is
-[rootfs/app/johakyu.rb](../rootfs/app/johakyu.rb); show-specific
-vocabulary belongs in show scripts under /data, not in the library,
+[rootfs/app/johakyu.rb](../rootfs/app/johakyu.rb), which seeds its
+untitled session from
+[rootfs/data/johakyu/starter.rb](../rootfs/data/johakyu/starter.rb)
+when present; show-specific vocabulary, the starter rig included,
+belongs in show scripts under /data, not in the library or the app,
 and fixture definitions are [Open Fixture Library][ofl] JSON under
 [rootfs/data/dmx/fixtures/](../rootfs/data/dmx/fixtures/).
 

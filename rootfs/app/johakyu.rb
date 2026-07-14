@@ -1,7 +1,7 @@
 # johakyu: live coding UI for sound and light (research 06, M9).
 #
 # Usage from IRB:
-#   johakyu               (edits an untitled buffer, Ctrl-S asks for a path)
+#   johakyu               (untitled buffer seeded from /data/johakyu/starter.rb)
 #   johakyu /my/show.rb
 #
 # Split screen: the top shows the clock, fixtures, and the raw DMX
@@ -46,16 +46,18 @@ class JohakyuApp
   SYNTAX_ANCHOR_SCAN = 60
   SYNTAX_MAX_BYTES   = 8100
 
+  # The untitled session is seeded from this show-owned template, so
+  # the rig lines live under /data with the rest of the show, not in
+  # the app source. It loads as a template: the buffer stays untitled
+  # and Ctrl-S will not overwrite it.
+  STARTER_PATH = "/data/johakyu/starter.rb"
+
+  # Fallback when no starter is shipped: a sound-only sketch, so the
+  # app works on a board with nothing under /data.
   STARTER = [
-    "fixture :s1, \"shehds_80w_led_spot_light\", mode: \"13ch\", address: 1",
-    "fixture :s2, \"shehds_80w_led_spot_light\", mode: \"13ch\", address: 14",
-    "group :all, :s1, :s2",
-    "",
     "tempo 120",
     "",
-    "track(:drums) { sound(\"bd ~ [sd sd] ~, hh*8\").color(\"<red blue>\").on(:s1) }",
-    "",
-    "track(:wash) { dmx(:s2).dimmer(sine.slow(2)).pan(sine.range(0.3, 0.7).slow(8)) }",
+    "track(:drums) { sound(\"bd ~ [sd sd] ~, hh*8\") }",
     "",
     "# Alt-1..0 switch scenes, Ctrl-O opens a file; Ctrl-Enter applies the buffer.",
   ]
@@ -338,7 +340,15 @@ class JohakyuApp
         content.split("\n").each { |l| @buffer.lines.push(l) }
       end
     else
-      STARTER.each { |l| @buffer.lines.push(l) }
+      content = nil
+      if File.file?(STARTER_PATH)
+        content = File.open(STARTER_PATH, "r") { |f| f.read }
+      end
+      if content
+        content.split("\n").each { |l| @buffer.lines.push(l) }
+      else
+        STARTER.each { |l| @buffer.lines.push(l) }
+      end
     end
     @buffer.lines.push("") if @buffer.lines.empty?
     @buffer.changed = false
