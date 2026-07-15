@@ -169,20 +169,25 @@ module Johakyu
     def pump
       now = Machine.board_millis
       fired = 0
+      kept = 0
       i = 0
       while i < @pending.length
         event = @pending[i]
+        i += 1
         if event[0] <= now
-          @pending.delete_at(i)
           reference = event[0] > event[4] ? event[0] : event[4]
           delay = now - reference
           @fire_delay_ms_max = delay if delay > @fire_delay_ms_max
           event[1].call(event[2], event[0])
           fired += 1
         else
-          i += 1
+          # Compact in place: delete_at per fired event made a busy
+          # pump quadratic in the queue length.
+          @pending[kept] = event
+          kept += 1
         end
       end
+      @pending.pop while @pending.length > kept
       @fired_count += fired
       fired
     end
@@ -196,6 +201,9 @@ module Johakyu
     private
 
     def add_track(name, pattern, sink, latency_ms)
+      # A rebind supersedes whatever failed before; last_error then
+      # always describes the currently bound statement.
+      @errors.delete(name)
       track = @tracks[name]
       if track
         # Quantize the swap to the next integer cycle boundary. Events

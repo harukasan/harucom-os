@@ -533,10 +533,22 @@ module Johakyu
     # take their Float fast path); anything else is a constant. When
     # the sampled value is nil (silence in `other`), the event passes
     # through unchanged.
+    # Receiver values must be control maps. A bare signal or mini
+    # pattern reaching here means the source was never wrapped by a
+    # light control; the raw dup would crash with a NoMethodError
+    # deep in staging, so name the mistake instead (the scheduler
+    # contains the raise per track and the UI shows it).
+    def self.control_map(value, key)
+      unless value.is_a?(Hash)
+        raise ArgumentError, "#{key} needs a control pattern; wrap the source with a light control such as pan() or dimmer()"
+      end
+      value.dup
+    end
+
     def with_control(key, other)
       unless other.is_a?(Pattern)
         return with_value do |value|
-          merged = value.dup
+          merged = Pattern.control_map(value, key)
           merged[key] = other
           merged
         end
@@ -557,7 +569,7 @@ module Johakyu
             result << hap
           else
             result << hap.with_value do |value|
-              merged = value.dup
+              merged = Pattern.control_map(value, key)
               merged[key] = sampled
               merged
             end

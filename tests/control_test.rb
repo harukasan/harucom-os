@@ -61,6 +61,18 @@ class ControlTest < Picotest::Test
   # the chain to one event per cycle, which silently freezes signal
   # motion (the kanrk09 ellipse shipped that way once). Pin both
   # directions so a structure-rule change is a conscious decision.
+  def test_on_without_a_control_names_the_mistake
+    pattern = Johakyu.sine.slow(8).on(:s1)
+    raised = nil
+    begin
+      pattern.query_arc(0, 1)
+    rescue ArgumentError => e
+      raised = e
+    end
+    assert_equal true, raised != nil
+    assert_equal true, raised.message.include?("light control")
+  end
+
   def test_chain_structure_comes_from_the_first_control
     signal_first = Johakyu.dmx_builder(:s1).pan(Johakyu.sine.slow(8)).speed(0.15)
     assert_equal Johakyu::SEGMENT_DEFAULT, onsets(signal_first).length

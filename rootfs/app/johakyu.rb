@@ -114,6 +114,7 @@ class JohakyuApp
     @highlight_stale = false
     @eval_compile_ms = 0
     @shown_light_error = nil
+    @shown_track_error = nil
     @preedit_width = 0
     @dmx_running = false
   end
@@ -221,12 +222,36 @@ class JohakyuApp
         @message = light_error
         draw_status
       end
+      track_error = first_track_error
+      if track_error != @shown_track_error
+        @shown_track_error = track_error
+        if track_error
+          @message = track_error
+          draw_status
+        end
+      end
 
       @view.draw
       @console.commit
       @view.note_loop_ms(Machine.board_millis - @loop_started_ms)
       sleep_ms 5
     end
+  end
+
+  # A statement that raises during staging is silenced per track and
+  # its error recorded; without this readback the performer only sees
+  # a dead track.
+  def first_track_error
+    scheduler = @session.scheduler
+    names = scheduler.track_names
+    i = 0
+    while i < names.length
+      name = names[i]
+      i += 1
+      error = scheduler.last_error(name)
+      return "#{name}: #{error}" if error
+    end
+    nil
   end
 
   # -- Live eval --
