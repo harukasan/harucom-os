@@ -32,9 +32,13 @@ pt_speed = 0.15
 # tick), so pan and tilt live in separate tracks: two short stalls
 # with event pumps between them instead of one long stall that
 # delays the flash writes.
+# ORDER MATTERS: the first control in a dmx() chain provides the
+# event structure and later controls are sampled onto it. A constant
+# like speed() first collapses the whole chain to one event per
+# cycle, so the signal always comes first and speed rides last.
 _track(:left_pan) do
-  dmx(:s1).speed(pt_speed)
-          .pan(sine.range(C1 - pan_swing, C1 + pan_swing).slow(8))
+  dmx(:s1).pan(sine.range(C1 - pan_swing, C1 + pan_swing).slow(8))
+          .speed(pt_speed)
 end
 
 _track(:left_tilt) do
@@ -42,8 +46,8 @@ _track(:left_tilt) do
 end
 
 _track(:right_pan) do
-  dmx(:s2).speed(pt_speed)
-          .pan(sine.range(C2 + pan_swing, C2 - pan_swing).slow(8))
+  dmx(:s2).pan(sine.range(C2 + pan_swing, C2 - pan_swing).slow(8))
+          .speed(pt_speed)
 end
 
 _track(:right_tilt) do

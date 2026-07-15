@@ -56,6 +56,18 @@ class ControlTest < Picotest::Test
     assert_equal({ pan: 0.0625 }, haps[0].value)
   end
 
+  # The first control in a dmx() chain provides the event structure;
+  # later controls are sampled onto it. A constant first collapses
+  # the chain to one event per cycle, which silently freezes signal
+  # motion (the kanrk09 ellipse shipped that way once). Pin both
+  # directions so a structure-rule change is a conscious decision.
+  def test_chain_structure_comes_from_the_first_control
+    signal_first = Johakyu.dmx_builder(:s1).pan(Johakyu.sine.slow(8)).speed(0.15)
+    assert_equal Johakyu::SEGMENT_DEFAULT, onsets(signal_first).length
+    constant_first = Johakyu.dmx_builder(:s1).speed(0.15).pan(Johakyu.sine.slow(8))
+    assert_equal 1, onsets(constant_first).length
+  end
+
   def test_on_resolves_target_at_build_time
     haps = onsets(Johakyu.dimmer("1").on(:s1))
     target = haps[0].value[:target]
