@@ -25,6 +25,7 @@ class LineEditor
     @prompt_cont = "> "
     @prompt_width = 2
     @input_start_row = 0
+    @scroll_left = 0
     @highlight_proc = nil
   end
 
@@ -42,6 +43,7 @@ class LineEditor
     @prompt_cont = prompt_cont || prompt
     @prompt_width = Editor.display_width(@prompt)
     @input_start_row = @console.row
+    @scroll_left = 0
     @buffer.clear
     @needs_refresh = true
 
@@ -188,8 +190,13 @@ class LineEditor
       @input_start_row = 0 if @input_start_row < 0
     end
 
-    # Try custom highlight first, fall back to syntax highlighting
-    custom = @highlight_proc && line_count == 1 && @highlight_proc.call(lines[0])
+    # Horizontal scroll to keep the cursor on the current line visible.
+    @scroll_left = adjust_horizontal_scroll
+
+    # Try custom highlight first, fall back to syntax highlighting. The app-name
+    # highlight slices from the start of the line, so it is only used at the
+    # left edge; a scrolled line falls through to the plain path below.
+    custom = @highlight_proc && line_count == 1 && @scroll_left == 0 && @highlight_proc.call(lines[0])
 
     unless custom
       source = lines.join("\n")
@@ -214,9 +221,9 @@ class LineEditor
       if custom && i == 0
         draw_command_line(@prompt_width, row, lines[0], custom, max_line_width)
       elsif highlight_map && hl_offsets
-        RubySyntax.draw_line(@prompt_width, row, lines[i], highlight_map, hl_offsets[i] || 0, 0, max_line_width, @console.attr)
+        RubySyntax.draw_line(@prompt_width, row, lines[i], highlight_map, hl_offsets[i] || 0, @scroll_left, max_line_width, @console.attr)
       else
-        visible_text = Editor.display_slice(lines[i], 0, max_line_width)
+        visible_text = Editor.display_slice(lines[i], @scroll_left, max_line_width)
         @console.put_string_at(@prompt_width, row, visible_text, @console.attr) if visible_text
       end
       i += 1
@@ -245,7 +252,7 @@ class LineEditor
     preedit_width = 0
     if @ime && @ime.preedit.bytesize > 0
       cursor_display_col = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x)
-      preedit_col = @prompt_width + cursor_display_col
+      preedit_col = @prompt_width + cursor_display_col - @scroll_left
       preedit_row = @input_start_row + @buffer.cursor_y
       max_preedit = Console.cols - preedit_col
       if max_preedit > 0
@@ -273,7 +280,7 @@ class LineEditor
 
     # Position cursor (after preedit if present)
     cursor_display_col = Editor.byte_to_display_col(@buffer.current_line, @buffer.cursor_x)
-    screen_col = @prompt_width + cursor_display_col + preedit_width
+    screen_col = @prompt_width + cursor_display_col - @scroll_left + preedit_width
     screen_row = @input_start_row + @buffer.cursor_y
 
     # Clamp cursor within screen
@@ -307,6 +314,32 @@ class LineEditor
     DVI::Text.put_string(col, row, app_part, 0xF0)
   end
 
+  # Horizontal scroll offset (in display columns) that keeps the cursor on the
+  # current line visible. The text area is Console.cols - @prompt_width wide;
+  # lines are rendered from @scroll_left. Returns 0 when the current line fits,
+  # so moving onto a short line snaps back to the left edge.
+  def adjust_horizontal_scroll
+    line = @buffer.current_line
+    max_width = Console.cols - @prompt_width
+    # bytesize is a cheap upper bound of display width, so short lines skip the
+    # O(n) width scan.
+    return 0 if line.bytesize <= max_width
+    line_width = Editor.display_width(line)
+    return 0 if line_width <= max_width
+    cursor_col = Editor.byte_to_display_col(line, @buffer.cursor_x)
+    # Cursor still inside the visible window: no scroll.
+    if cursor_col >= @scroll_left && cursor_col < @scroll_left + max_width
+      return @scroll_left
+    end
+    # Cursor left the window: jump-scroll to roughly center it so the next
+    # redraw is deferred for about half a screen of further movement.
+    new_scroll = cursor_col - max_width / 2
+    max_scroll = line_width - max_width + 1
+    new_scroll = max_scroll if new_scroll > max_scroll
+    new_scroll = 0 if new_scroll < 0
+    new_scroll
+  end
+
   def feed
     @console.hide_cursor
     output_row = @input_start_row + @buffer.lines.length
@@ -336,6 +369,7 @@ class LineEditor
     end
     @console.reset
     @input_start_row = 0
+    @scroll_left = 0
   end
 
   # Load a text file into the input buffer as multi-line input. Prompts for a
