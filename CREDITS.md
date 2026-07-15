@@ -170,33 +170,6 @@ Original header:
 ;
 ```
 
-## Adobe 75dpi Fonts
-
-- Repository: https://gitlab.freedesktop.org/xorg/font/adobe-75dpi
-- License: Adobe/DEC permissive
-
-```
-Copyright 1984-1989, 1994 Adobe Systems Incorporated.
-Copyright 1988, 1994 Digital Equipment Corporation.
-
-Adobe is a trademark of Adobe Systems Incorporated which may be
-registered in certain jurisdictions.
-Permission to use these trademarks is hereby granted only in
-association with the images described in this file.
-
-Permission to use, copy, modify, distribute and sell this software
-and its documentation for any purpose and without fee is hereby
-granted, provided that the above copyright notices appear in all
-copies and that both those copyright notices and this permission
-notice appear in supporting documentation, and that the names of
-Adobe Systems and Digital Equipment Corporation not be used in
-advertising or publicity pertaining to distribution of the software
-without specific, written prior permission.  Adobe Systems and
-Digital Equipment Corporation make no representations about the
-suitability of this software for any purpose.  It is provided "as
-is" without express or implied warranty.
-```
-
 ## Misc Fixed Fonts
 
 - Repository: https://gitlab.freedesktop.org/xorg/font/misc-misc
@@ -275,19 +248,13 @@ http://scripts.sil.org/OFL
 This work by RubyKaigi 2026 Team is licensed under CC BY 4.0 Speaker, session, and sponsor information is provided by respective parties and is not covered by this license.
 ```
 
-## x8y12pxDenkiChip
+## SIL Open Font License 1.1
 
-- Repository: https://github.com/hicchicc/x8y12pxDenkiChip
-- License: SIL Open Font License 1.1
-
-```
-Copyright 2026 The x8y12pxDenkiChip Project Authors (https://github.com/hicchicc/x8y12pxDenkiChip)
-
-This Font Software is licensed under the SIL Open Font License, Version 1.1.
-This license is copied below, and is also available with a FAQ at:
+The Inter and Outfit fonts are licensed under the SIL Open Font License,
+Version 1.1, reproduced below. It is also available with a FAQ at
 https://openfontlicense.org
 
-
+```
 -----------------------------------------------------------
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
 -----------------------------------------------------------
