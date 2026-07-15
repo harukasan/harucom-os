@@ -72,6 +72,7 @@ module Johakyu
       @light_pending = []
       @output_late_count = 0
       @output_late_ms_max = 0
+      @light_error = nil
     end
 
     # Events whose fire delay exceeded RESERVE_LEAD_MS, so the overrun
@@ -79,6 +80,13 @@ module Johakyu
     # This is the musically honest late measure; the scheduler's
     # fire_delay_ms_max only covers queue lateness after staging.
     attr_reader :output_late_count, :output_late_ms_max
+
+    # Last per-write light failure (an unknown color name and the
+    # like). Event-time raises must not escape: they would cross the
+    # eval isolation and take the whole show loop down, so the write
+    # is dropped, the rest of the event still lands, and the message
+    # waits here for the UI.
+    attr_reader :light_error
 
     def reset_stats
       @scheduler.reset_stats
@@ -258,7 +266,11 @@ module Johakyu
           writes = event[2]
           j = 0
           while j < writes.length
-            Session.write_dmx(fixture, writes[j], writes[j + 1])
+            begin
+              Session.write_dmx(fixture, writes[j], writes[j + 1])
+            rescue => e
+              @light_error = "#{e.message} (#{e.class})"
+            end
             j += 2
           end
         else

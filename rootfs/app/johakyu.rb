@@ -113,6 +113,7 @@ class JohakyuApp
     @eval_started_ms = 0
     @highlight_stale = false
     @eval_compile_ms = 0
+    @shown_light_error = nil
     @preedit_width = 0
     @dmx_running = false
   end
@@ -212,6 +213,13 @@ class JohakyuApp
         @console.hide_cursor
         draw_all_lines
         place_cursor
+      end
+
+      light_error = @session.light_error
+      if light_error && light_error != @shown_light_error
+        @shown_light_error = light_error
+        @message = light_error
+        draw_status
       end
 
       @view.draw
