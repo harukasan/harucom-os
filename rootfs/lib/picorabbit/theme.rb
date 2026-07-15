@@ -172,7 +172,7 @@ module PicoRabbit
       segments.each do |seg|
         case seg[0]
         when :bold
-          p5.text_font(bold_font, body_wide_font)
+          p5.text_font(bold_font, bold_wide_font)
           p5.text_color(text_color)
           p5.text(seg[1], cx, y)
           cx += p5.text_width(seg[1])
@@ -351,6 +351,9 @@ module PicoRabbit
     # Wide (CJK) fallback font paired with body/bold text. nil = none.
     def body_wide_font; nil; end
     def bold_font; G::FONT_INTER_BOLD_18; end
+    # Wide (CJK) fallback font paired with bold text. Defaults to the body
+    # wide font for themes without a bold-weight Japanese font.
+    def bold_wide_font; body_wide_font; end
     def inline_code_font; G::FONT_SOURCE_CODE_PRO_18; end
     def inline_code_font_ascent; 12; end
     def code_font; G::FONT_SOURCE_CODE_PRO_14; end

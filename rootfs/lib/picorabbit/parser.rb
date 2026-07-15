@@ -18,6 +18,18 @@ module PicoRabbit
       parse(content)
     end
 
+    # Replace <br> markers with newlines. PicoRuby's String#gsub loses the
+    # rest of the string after a match in multibyte receivers, so this uses
+    # character-based index and slicing instead.
+    def self.replace_br(str)
+      out = ""
+      while (i = str.index("<br>"))
+        out << str[0, i] << "\n"
+        str = str[i + 4, str.length - i - 4] || ""
+      end
+      out << str
+    end
+
     def self.parse(content)
       slides = []
       current_title = nil
@@ -46,7 +58,7 @@ module PicoRabbit
 
       # Generate title slide from frontmatter
       if metadata["title"]
-        s = Slide.new(metadata["title"].gsub("<br>", "\n"), [])
+        s = Slide.new(replace_br(metadata["title"]), [])
         s.title_slide = true
         slides << s
       end
@@ -82,7 +94,7 @@ module PicoRabbit
           if current_title
             slides << Slide.new(current_title, current_elements)
           end
-          current_title = line[2, line.length - 2].strip.gsub("<br>", "\n")
+          current_title = replace_br(line[2, line.length - 2].strip)
           current_elements = []
           next
         end

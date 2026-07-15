@@ -84,6 +84,49 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     sh "#{ruby_cmd} #{ttf2c} #{mplus1_eb_ttf} -s 27 --ascent 32 --jis --aa --compress -n mplus_1_extrabold_32 -o #{mplus1_eb_dst}"
   end
 
+  # Kanrk09 theme fonts: M PLUS 1 at 32px (body) and 48px (title), for both
+  # Latin and Japanese glyphs. Full JIS X 0208 coverage at these sizes does
+  # not fit the 6 MB firmware flash window, so the Japanese fonts are
+  # subsetted to the symbol/alnum/kana rows (1-5) plus the characters used in
+  # the kanrk09 slide deck. Editing the deck regenerates the fonts on the
+  # next build. The LATIN/JAPANESE pairs share the point size and baseline;
+  # the legacy MEDIUM_22/EXTRABOLD_32 fonts are ascent-named instead (they
+  # baseline-match Outfit), which is why these carry an explicit suffix.
+  mplus1_medium_ttf = "#{mplus1_dir}/MPLUS1-Medium.ttf"
+  kanrk09_deck = "#{project_root}/rootfs/slides/kanrk09.md"
+  kanrk09_subset = "--jis-rows 1-5 --chars #{kanrk09_deck}"
+  kanrk09_fonts = [
+    { src: mplus1_medium_ttf,
+      dst: "#{include_dir}/font_mplus_1_medium_32_latin.h",
+      args: "-s 32 --aa -n mplus_1_medium_32_latin" },
+    { src: mplus1_medium_ttf,
+      dst: "#{include_dir}/font_mplus_1_medium_32_japanese.h",
+      args: "-s 32 --jis --aa --compress #{kanrk09_subset} -n mplus_1_medium_32_japanese",
+      deck: true },
+    { src: mplus1_eb_ttf,
+      dst: "#{include_dir}/font_mplus_1_extrabold_32_latin.h",
+      args: "-s 32 --aa -n mplus_1_extrabold_32_latin" },
+    { src: mplus1_eb_ttf,
+      dst: "#{include_dir}/font_mplus_1_extrabold_32_japanese.h",
+      args: "-s 32 --jis --aa --compress #{kanrk09_subset} -n mplus_1_extrabold_32_japanese",
+      deck: true },
+    { src: mplus1_eb_ttf,
+      dst: "#{include_dir}/font_mplus_1_extrabold_48_latin.h",
+      args: "-s 48 --aa -n mplus_1_extrabold_48_latin" },
+    { src: mplus1_eb_ttf,
+      dst: "#{include_dir}/font_mplus_1_extrabold_48_japanese.h",
+      args: "-s 48 --jis --aa --compress #{kanrk09_subset} -n mplus_1_extrabold_48_japanese",
+      deck: true },
+  ]
+
+  kanrk09_fonts.each do |font|
+    deps = [font[:src], ttf2c, include_dir]
+    deps << kanrk09_deck if font[:deck]
+    file font[:dst] => deps do
+      sh "#{ruby_cmd} #{ttf2c} #{font[:src]} #{font[:args]} -o #{font[:dst]}"
+    end
+  end
+
   # Inter anti-aliased fonts (4bpp)
   inter_fonts = [
     { src: "#{inter_dir}/Inter-Regular.ttf",
@@ -151,6 +194,9 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { src: "#{source_code_pro_dir}/SourceCodePro-Bold.ttf",
       dst: "#{include_dir}/font_source_code_pro_bold_18.h",
       args: ["-s", "18", "-n", "source_code_pro_bold_18", "--aa"] },
+    { src: "#{source_code_pro_dir}/SourceCodePro-Regular.ttf",
+      dst: "#{include_dir}/font_source_code_pro_20.h",
+      args: ["-s", "20", "-n", "source_code_pro_20", "--aa"] },
   ]
 
   source_code_pro_fonts.each do |font|
@@ -191,6 +237,12 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { header: "font_mplus_j12_combined.h",    var: "font_mplus_j12_wide",       sym: "FONT_MPLUS_J12" },
     { header: "font_mplus_1_medium_22.h",     var: "font_mplus_1_medium_22",    sym: "FONT_MPLUS_1_MEDIUM_22" },
     { header: "font_mplus_1_extrabold_32.h",  var: "font_mplus_1_extrabold_32", sym: "FONT_MPLUS_1_EXTRABOLD_32" },
+    { header: "font_mplus_1_medium_32_latin.h",       var: "font_mplus_1_medium_32_latin",       sym: "FONT_MPLUS_1_MEDIUM_32_LATIN" },
+    { header: "font_mplus_1_medium_32_japanese.h",    var: "font_mplus_1_medium_32_japanese",    sym: "FONT_MPLUS_1_MEDIUM_32_JAPANESE" },
+    { header: "font_mplus_1_extrabold_32_latin.h",    var: "font_mplus_1_extrabold_32_latin",    sym: "FONT_MPLUS_1_EXTRABOLD_32_LATIN" },
+    { header: "font_mplus_1_extrabold_32_japanese.h", var: "font_mplus_1_extrabold_32_japanese", sym: "FONT_MPLUS_1_EXTRABOLD_32_JAPANESE" },
+    { header: "font_mplus_1_extrabold_48_latin.h",    var: "font_mplus_1_extrabold_48_latin",    sym: "FONT_MPLUS_1_EXTRABOLD_48_LATIN" },
+    { header: "font_mplus_1_extrabold_48_japanese.h", var: "font_mplus_1_extrabold_48_japanese", sym: "FONT_MPLUS_1_EXTRABOLD_48_JAPANESE" },
     { header: "font_inter_18.h",              var: "font_inter_18",             sym: "FONT_INTER_18" },
     { header: "font_inter_bold_18.h",         var: "font_inter_bold_18",        sym: "FONT_INTER_BOLD_18" },
     { header: "font_inter_24.h",              var: "font_inter_24",             sym: "FONT_INTER_24" },
@@ -206,6 +258,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { header: "font_source_code_pro_bold_14.h", var: "font_source_code_pro_bold_14", sym: "FONT_SOURCE_CODE_PRO_BOLD_14" },
     { header: "font_source_code_pro_18.h",    var: "font_source_code_pro_18",   sym: "FONT_SOURCE_CODE_PRO_18" },
     { header: "font_source_code_pro_bold_18.h", var: "font_source_code_pro_bold_18", sym: "FONT_SOURCE_CODE_PRO_BOLD_18" },
+    { header: "font_source_code_pro_20.h",    var: "font_source_code_pro_20",   sym: "FONT_SOURCE_CODE_PRO_20" },
   ]
 
   # Generate dvi_font_registry.h from the registry above.
@@ -266,6 +319,7 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     Rake::Task[font8x8_dst].invoke
     Rake::Task[mplus1_dst].invoke
     Rake::Task[mplus1_eb_dst].invoke
+    kanrk09_fonts.each { |font| Rake::Task[font[:dst]].invoke }
     inter_fonts.each { |font| Rake::Task[font[:dst]].invoke }
     outfit_fonts.each { |font| Rake::Task[font[:dst]].invoke }
     source_code_pro_fonts.each { |font| Rake::Task[font[:dst]].invoke }
