@@ -13,7 +13,8 @@
 # Row layout, relative to `top`, sized from the running rig (rows):
 #   0      johakyu |cycle bar| cyc/bpm and scheduler stats
 #   1..    one attribute readback row per fixture (capped)
-#   next.. universe channel grid rows (capped to the first channels)
+#   next.. universe channel grid rows: one hex byte per channel, 16
+#          per row, channel 1 at the top left (capped)
 # Without a rig only the clock row is shown, so the app doubles as an
 # audio-only sequencer with the editor taking the rest of the screen.
 
@@ -56,11 +57,13 @@ module Johakyu
       @session = session
       @top = top
 
-      # "000".."255" built once; index by channel value.
+      # "00".."FF" built once; index by channel value. Hex keeps a
+      # channel cell two columns wide so the whole universe fits the
+      # zoomed grid.
       @value_strings = []
       i = 0
       while i < 256
-        @value_strings << format_3(i)
+        @value_strings << format_hex(i)
         i += 1
       end
 
@@ -101,9 +104,12 @@ module Johakyu
       # more cells per row.
       cap = Console.rows >= 30 ? 4 : 2
       grid_cap = 4
-      @label_width = Johakyu.patch.max_channel < 100 ? 2 : 3
-      @cell_width = @label_width + 5
+      # Each cell is one hex byte plus a space; sixteen per row (as in
+      # a hex dump) unless the width cannot hold them, so a channel's
+      # position is easy to count.
+      @cell_width = 3
       @cells_per_row = Console.cols / @cell_width
+      @cells_per_row = 16 if @cells_per_row > 16
 
       # Fixture rows: [name, [[attribute, channel, label_x, value_x,
       # last_drawn], ...]]
@@ -172,13 +178,6 @@ module Johakyu
         end
         i += 1
       end
-      # Channel grid labels ("001:") drawn once.
-      ch = 1
-      while ch <= @channel_display_count
-        x, y = channel_cell(ch)
-        DVI::Text.put_string(x, y, format_channel(ch) + ":", ATTR_NORMAL)
-        ch += 1
-      end
       # Paint the current values directly instead of arming the
       # changed-flash for every cell: a reset used to invert the whole
       # grid on the next draw, which read as "everything lit" after
@@ -194,7 +193,7 @@ module Johakyu
         value = ::DMX.get(ch)
         @prev_values[ch] = value
         x, y = channel_cell(ch)
-        DVI::Text.put_string(x + @label_width + 1, y, @value_strings[value], ATTR_NORMAL)
+        DVI::Text.put_string(x, y, @value_strings[value], ATTR_NORMAL)
         ch += 1
       end
       i = 0
@@ -288,11 +287,11 @@ module Johakyu
           @prev_values[ch] = value
           @changed_ms[ch] = now
           x, y = channel_cell(ch)
-          DVI::Text.put_string(x + @label_width + 1, y, @value_strings[value], ATTR_CHANGED)
+          DVI::Text.put_string(x, y, @value_strings[value], ATTR_CHANGED)
         elsif @changed_ms[ch] != 0 && now - @changed_ms[ch] >= HIGHLIGHT_MS
           @changed_ms[ch] = 0
           x, y = channel_cell(ch)
-          DVI::Text.put_string(x + @label_width + 1, y, @value_strings[value], ATTR_NORMAL)
+          DVI::Text.put_string(x, y, @value_strings[value], ATTR_NORMAL)
         end
         ch += 1
       end
@@ -305,22 +304,10 @@ module Johakyu
       [col * @cell_width, @grid_top + row]
     end
 
-    def format_channel(ch)
-      if @label_width == 2
-        ch < 10 ? "0#{ch}" : "#{ch}"
-      else
-        format_3(ch)
-      end
-    end
+    HEX_DIGITS = "0123456789ABCDEF"
 
-    def format_3(value)
-      if value < 10
-        "00#{value}"
-      elsif value < 100
-        "0#{value}"
-      else
-        "#{value}"
-      end
+    def format_hex(value)
+      HEX_DIGITS[value >> 4] + HEX_DIGITS[value & 0x0F]
     end
   end
 end

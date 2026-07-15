@@ -19,8 +19,8 @@ class UniverseViewTest < Picotest::Test
 
   def test_rig_adds_fixture_and_grid_rows
     Johakyu.patch = johakyu_test_patch
-    # clock + two fixtures + two grid rows (26 channels, 15 cells per
-    # row at the 106-column test width)
+    # clock + two fixtures + two grid rows (26 channels, 16 hex cells per
+    # row)
     assert_equal 5, view.rows
   end
 
