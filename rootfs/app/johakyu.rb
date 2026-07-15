@@ -51,6 +51,15 @@ class JohakyuApp
   SYNTAX_MARGIN      = 40
   SYNTAX_ANCHOR_SCAN = 60
   SYNTAX_MAX_BYTES   = 8100
+  SYNTAX_PREFETCH_MARGIN = 10 # rebuild ahead when the viewport nears the window edge
+
+  # The syntax parse is an atomic prism call that stalls the show
+  # loop, so unlike a standalone editor johakyu cannot afford to run
+  # it every idle frame between key repeats. Hold the reparse until
+  # the keyboard has been quiet this long; during an active edit the
+  # colors stay stale (the text is always correct) and the beat keeps
+  # its cadence, then one recolor lands when the hands pause.
+  SYNTAX_DEBOUNCE_MS = 140
 
   # The untitled session is seeded from this show-owned template, so
   # the rig lines live under /data with the rest of the show, not in
@@ -112,6 +121,9 @@ class JohakyuApp
     @evaling = false
     @eval_started_ms = 0
     @highlight_stale = false
+    @stale_syntax = nil       # bundle the screen was drawn with while stale
+    @last_key_ms = 0          # for the reparse debounce
+    @prefetched_scroll_top = -1
     @split_line = -1
     @join_line = -1
     @eval_compile_ms = 0
@@ -207,15 +219,10 @@ class JohakyuApp
 
       c = @keyboard.read_char
       if c
+        @last_key_ms = Machine.board_millis
         handle_key(c)
-      elsif @highlight_stale && (!$ime || $ime.preedit.bytesize == 0)
-        # Idle frame: catch up on the deferred reparse and recolor.
-        @highlight_stale = false
-        analyze_viewport
-        @session.pump_outputs
-        @console.hide_cursor
-        draw_all_lines
-        place_cursor
+      elsif !$ime || $ime.preedit.bytesize == 0
+        idle_syntax_catchup
       end
 
       light_error = @session.light_error
@@ -625,11 +632,72 @@ class JohakyuApp
   # Rebuild the render highlight window for the current viewport and
   # store it in the cached bundle. Returns the raw result.
   def analyze_viewport
+    t0 = Machine.board_millis
     result, bundle, ws, we = analyze_window(@scroll_top, @scroll_top + @edit_rows - 1)
     @syntax = bundle
     @win_start = ws
     @win_end = we
+    @view.note_parse_ms(Machine.board_millis - t0) if @view
     result
+  end
+
+  # Byte slice of a bundle's highlight map covering one line, or nil
+  # when the line is outside the bundle's window.
+  def highlight_slice(bundle, line_index, line)
+    return nil unless bundle
+    rel = line_index - bundle[2]
+    offsets = bundle[1]
+    return nil if rel < 0 || rel >= offsets.length
+    bundle[0].byteslice(offsets[rel], line.bytesize)
+  end
+
+  # Redraw only the visible lines whose highlight bytes differ between
+  # the old and current bundle, so a recolor after a rebuild touches
+  # the few lines that actually changed color instead of the whole
+  # viewport. Returns true if anything was drawn.
+  def sync_highlight_changes(first_row, last_row, skip_row, old_bundle)
+    drawn = false
+    row = first_row
+    while row < last_row
+      if row != skip_row
+        line_index = @scroll_top + row
+        line = @buffer.lines[line_index]
+        if line && highlight_slice(old_bundle, line_index, line) != highlight_slice(@syntax, line_index, line)
+          draw_line(row)
+          drawn = true
+        end
+      end
+      row += 1
+    end
+    drawn
+  end
+
+  # Deferred syntax work while the keyboard is idle. The reparse is
+  # debounced (see SYNTAX_DEBOUNCE_MS) so an active edit never pays
+  # the prism parse on the show loop, and the window is also rebuilt
+  # ahead of time when the viewport nears its edge so a scroll does
+  # not stall on a parse. Only the lines whose colors changed are
+  # redrawn.
+  def idle_syntax_catchup
+    return unless @highlight_stale || near_window_edge?
+    return if Machine.board_millis - @last_key_ms < SYNTAX_DEBOUNCE_MS
+    sync_base = @highlight_stale ? @stale_syntax : @syntax
+    @highlight_stale = false
+    @prefetched_scroll_top = @scroll_top
+    analyze_viewport
+    @session.pump_outputs
+    @console.hide_cursor
+    redrawn = sync_highlight_changes(0, @edit_rows, -1, sync_base)
+    place_cursor
+    @console.commit if redrawn
+  end
+
+  def near_window_edge?
+    return false if @scroll_top == @prefetched_scroll_top
+    vis_bottom = @scroll_top + @edit_rows
+    vis_bottom = @buffer.lines.length if vis_bottom > @buffer.lines.length
+    (@win_start > 0 && @scroll_top - @win_start < SYNTAX_PREFETCH_MARGIN) ||
+      (@win_end < @buffer.lines.length && @win_end - vis_bottom < SYNTAX_PREFETCH_MARGIN)
   end
 
   # -- Drawing --
@@ -1061,16 +1129,20 @@ class JohakyuApp
                 (@split_line >= 0 || @join_line >= 0) &&
                 @scroll_top >= @win_start && vis_bottom <= @win_end
 
-    # A content edit inside the window defers its reparse to an idle
-    # frame, the same as edit.rb: the parse is an atomic prism call
+    # A content edit or a shift-eligible split/join defers its reparse
+    # to a debounced idle catch-up: the parse is an atomic prism call
     # that would stall the show loop on every keystroke otherwise. A
-    # structure edit that scrolled or left the window still parses now,
-    # then pumps what came due.
+    # structure edit that scrolled or left the window must parse now
+    # (offsets shifted and the viewport moved), then pump what came due.
+    sync_base = nil
     if (structure_changed && !can_shift) || @scroll_top < @win_start || vis_bottom > @win_end
+      sync_base = @highlight_stale ? @stale_syntax : @syntax
       analyze_viewport
       @session.pump_outputs
       window_rebuilt = true
+      @highlight_stale = false
     elsif content_changed
+      @stale_syntax = @syntax unless @highlight_stale
       @highlight_stale = true
     end
 
@@ -1101,13 +1173,18 @@ class JohakyuApp
       draw_all_lines
     elsif hscrolled
       draw_hscroll(@old_scroll_left)
-    elsif vdelta != 0
-      scroll_view(vdelta)
-      if dirty == :content
-        draw_line(@buffer.cursor_y - @scroll_top)
+    else
+      cursor_row = dirty == :content ? @buffer.cursor_y - @scroll_top : -1
+      scroll_view(vdelta) if vdelta != 0
+      # After a synchronous rebuild, redraw only the lines whose colors
+      # changed. Rows exposed by scroll_view and the cursor row are
+      # drawn separately below.
+      if window_rebuilt
+        first_row = vdelta < 0 ? -vdelta : 0
+        last_row = vdelta > 0 ? @edit_rows - vdelta : @edit_rows
+        sync_highlight_changes(first_row, last_row, cursor_row, sync_base)
       end
-    elsif dirty == :content
-      draw_line(@buffer.cursor_y - @scroll_top)
+      draw_line(cursor_row) if cursor_row >= 0
     end
 
     draw_status
