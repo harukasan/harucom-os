@@ -195,6 +195,7 @@ class JohakyuApp
 
   def main_loop
     while @running
+      loop_t0 = Machine.board_millis
       @session.update
       DMX.keepalive
       poll_eval
@@ -206,6 +207,7 @@ class JohakyuApp
 
       @view.draw
       @console.commit
+      @view.note_loop_ms(Machine.board_millis - loop_t0)
       sleep_ms 5
     end
   end

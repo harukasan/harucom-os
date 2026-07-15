@@ -26,6 +26,14 @@ module Johakyu
     # below this.
     attr_reader :rows
 
+    # Worst loop iteration since the last stats refresh, reported by
+    # the app (the scheduler only times itself; a slow draw or commit
+    # delays event fires just the same). Shown as "lp" and reset with
+    # each stats interval so it reads as a rolling maximum.
+    def note_loop_ms(elapsed)
+      @loop_ms_max = elapsed if elapsed > (@loop_ms_max || 0)
+    end
+
     ATTR_NORMAL  = 0xF0
     ATTR_TITLE   = 0x1F
     ATTR_CHANGED = 0x0F
@@ -225,8 +233,9 @@ module Johakyu
         scheduler = @session.scheduler
         tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
         DVI::Text.put_string(44, @top,
-          "tick #{tick_avg_us}us mx #{scheduler.tick_ms_max} st #{scheduler.stage_ms_max} lt #{scheduler.fire_delay_ms_max}ms   ",
+          "tick #{tick_avg_us}us mx #{scheduler.tick_ms_max} st #{scheduler.stage_ms_max} lt #{scheduler.fire_delay_ms_max}ms lp #{@loop_ms_max || 0}   ",
           ATTR_NORMAL)
+        @loop_ms_max = 0
       end
     end
 
