@@ -190,18 +190,34 @@ module Johakyu
         DVI::Text.put_string(0, @top + @rows - 1, separator, ATTR_NORMAL)
       end
 
+      # Paint the current values directly instead of arming the
+      # changed-flash for every cell: a reset used to invert the whole
+      # grid on the next draw, which read as "everything lit" after
+      # any full repaint.
       i = 0
       while i < @prev_values.length
         @prev_values[i] = -1
         @changed_ms[i] = 0
         i += 1
       end
+      ch = 1
+      while ch <= @channel_display_count
+        value = ::DMX.get(ch)
+        @prev_values[ch] = value
+        x, y = channel_cell(ch)
+        DVI::Text.put_string(x + @label_width + 1, y, @value_strings[value], ATTR_NORMAL)
+        ch += 1
+      end
       i = 0
       while i < @fixture_rows.length
+        y = @top + 1 + i
         fields = @fixture_rows[i][1]
         j = 0
         while j < fields.length
-          fields[j][4] = -1
+          field = fields[j]
+          value = ::DMX.get(field[1])
+          field[4] = value
+          DVI::Text.put_string(field[3], y, @value_strings[value], ATTR_NORMAL)
           j += 1
         end
         i += 1

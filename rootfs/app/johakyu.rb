@@ -748,9 +748,18 @@ class JohakyuApp
   # scroll (O(1)) and draw only the newly exposed lines. The ring
   # scroll moves the whole screen, so the universe view, status row,
   # and command bar are repainted in the same frame.
+  # Scroll the editor pane by copying its own rows. The global ring
+  # scroll would shift the universe view rows along with the editor,
+  # forcing a full view repaint per keystroke (every channel cell
+  # flashed as changed, and the churn stalled the show loop).
   def scroll_view(vdelta)
     if vdelta > 0
-      DVI::Text.scroll_up(vdelta, EDIT_ATTR)
+      row = 0
+      while row < @edit_rows - vdelta
+        DVI::Text.write_line(@edit_top + row,
+                             DVI::Text.read_line(@edit_top + row + vdelta))
+        row += 1
+      end
       row = @edit_rows - vdelta
       while row < @edit_rows
         draw_line(row)
@@ -758,15 +767,18 @@ class JohakyuApp
       end
     else
       n = -vdelta
-      DVI::Text.scroll_down(n, EDIT_ATTR)
+      row = @edit_rows - 1
+      while row >= n
+        DVI::Text.write_line(@edit_top + row,
+                             DVI::Text.read_line(@edit_top + row - n))
+        row -= 1
+      end
       row = 0
       while row < n
         draw_line(row)
         row += 1
       end
     end
-    @view.reset
-    draw_command_bar
   end
 
   # Horizontal scroll has no ring-buffer shortcut; redraw the visible
