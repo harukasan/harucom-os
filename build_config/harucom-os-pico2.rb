@@ -9,8 +9,21 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
 
   conf.cc.defines << "MRB_UTF8_STRING"
   conf.cc.defines << "MRB_INT64"
+  # MRB_NO_BOXING is forced by the tree for MRB_INT64 on 32-bit: the
+  # boxed RInteger of word and NaN boxing needs an 8-aligned int64,
+  # which does not fit the 5-word GC slot (static assert in gc.c).
+  # The old pin's 4 byte word boxing would need a packed RInteger
+  # upstream, mirroring the MRB_WORDBOX_NO_INLINE_FLOAT mechanism.
   conf.cc.defines << "MRB_NO_BOXING"
   conf.cc.defines << "MRB_32BIT"
+  # The constrained baseline profile (picoruby-mruby default for
+  # cross builds) turns the method cache off, making every call a
+  # class-chain hash walk in PSRAM: measured ~126 us per Rational
+  # operation, which doubled the Johakyu staging cost. Defining a
+  # cache size overrides the profile (mruby.h undefs
+  # MRB_NO_METHOD_CACHE) and matches the host test VM, whose baseline
+  # profile keeps the cache at this same default size.
+  conf.cc.defines << "MRB_METHOD_CACHE_SIZE=256"
   conf.cc.defines << "PICORB_ALLOC_ESTALLOC"
   conf.cc.defines << "PICORB_ALLOC_ALIGN=8"
   conf.cc.defines << "MRB_USE_CUSTOM_RO_DATA_P"
@@ -53,6 +66,17 @@ MRuby::CrossBuild.new("harucom-os-pico2") do |conf|
   conf.gem core: 'picoruby-io-console'
   conf.gem core: 'picoruby-editor'
   conf.gem core: 'picoruby-sandbox'
+
+  # Exact rational time arithmetic for the Johakyu pattern core
+  # (rootfs/lib/johakyu/); C-backed Rational keeps pattern queries off
+  # the allocation-heavy pure Ruby fraction path. mruby-bigint comes
+  # along because mruby-rational does not compile without
+  # MRB_USE_BIGINT; it also changes integer overflow from RangeError
+  # to Bignum promotion.
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-bigint', __FILE__)
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-rational', __FILE__)
+
+  conf.gem File.expand_path('../../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-metaprog', __FILE__)
 
   conf.gem File.expand_path('../../mrbgems/picoruby-pwm-audio', __FILE__)
   conf.gem File.expand_path('../../mrbgems/picoruby-synth-native', __FILE__)

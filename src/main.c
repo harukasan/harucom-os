@@ -220,7 +220,12 @@ static void run_mruby(void) {
     }
 }
 
-static void harucom_main(void);
+/* Must not be inlined into main: main switches MSP to the BSS stack
+ * between its own prologue and this call, so an inlined body would
+ * allocate its locals frame before the switch and then address them
+ * above the new stack top, aliasing whatever bss follows (the default
+ * alarm pool entries, observed by disassembly). */
+static void __attribute__((noinline)) harucom_main(void);
 
 int main(void) {
     /* Switch Core 0 stack from SCRATCH_Y (2 KB) to BSS (32 KB).
@@ -270,9 +275,10 @@ static void harucom_main(void) {
      * At 320x240, the SRAM framebuf is used for double buffering instead. */
     size_t fb_size = DVI_GRAPHICS_MAX_WIDTH * DVI_GRAPHICS_MAX_HEIGHT;
     dvi_graphics_set_back_buffer((uint8_t *)heap_pool);
+    printf("Graphics back buffer: %u bytes at %p\n", (unsigned)fb_size, heap_pool);
+
     heap_pool_g = (void *)((uintptr_t)heap_pool + fb_size);
     heap_size_g = heap_size - fb_size;
-    printf("Graphics back buffer: %u bytes at %p\n", (unsigned)fb_size, heap_pool);
     printf("mruby heap: %u bytes at %p\n", (unsigned)heap_size_g, heap_pool_g);
 
     /* Set up text mode fonts before launching DVI on core 1.

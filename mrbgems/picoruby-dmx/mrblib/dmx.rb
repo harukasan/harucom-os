@@ -11,4 +11,17 @@ module DMX
   def self.init(unit: nil, txd_pin: -1)
     _init(unit ? unit.to_s : "", txd_pin)
   end
+
+  # Engine teardown: darken the rig, keep the dead-man switch fed
+  # while the zero frames reach the fixtures, then stop transmission.
+  # Stopping without this leaves the rig lit: fixtures hold their
+  # last values when the signal disappears.
+  def self.shutdown
+    blackout
+    8.times do
+      keepalive
+      sleep_ms 25
+    end
+    stop
+  end
 end

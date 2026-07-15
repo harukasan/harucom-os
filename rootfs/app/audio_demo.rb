@@ -149,17 +149,12 @@ DRUM_KEYCODES.each_value do |name|
   drum_samples[name] = PWMAudio::Sample.new(data)
 end
 
-octave = 4
-transpose = 0
-waveform = Board::PWMAudio::SQUARE
-waveform_idx = 1
-
-draw_title = lambda do
+def draw_title(cols, octave, transpose, waveform_idx)
   title = " audio demo  octave #{octave}  transpose #{sprintf("%+d", transpose)}  #{WAVEFORM_NAMES[waveform_idx].downcase}"
   DVI::Text.put_string(0, 0, title.ljust(cols)[0, cols], BAR_ATTR)
 end
 
-draw_cap = lambda do |keycode, held|
+def draw_cap(key_cells, keycode, held)
   cell = key_cells[keycode]
   cap = nil
   WHITE_KEYS.each { |k| cap = k[0] if k[1] == keycode }
@@ -168,39 +163,44 @@ draw_cap = lambda do |keycode, held|
   DVI::Text.put_string(cell[0], cell[1], "[#{cap}]", held ? BAR_ATTR : TEXT_ATTR)
 end
 
-draw_keyboard = lambda do
-  i2 = 0
-  while i2 < BLACK_KEYS.length
-    keycode = BLACK_KEYS[i2][1]
+def draw_keyboard(key_cells, transpose)
+  i = 0
+  while i < BLACK_KEYS.length
+    keycode = BLACK_KEYS[i][1]
     x = key_cells[keycode][0]
-    draw_cap.call(keycode, false)
+    draw_cap(key_cells, keycode, false)
     DVI::Text.put_string(x, BLACK_LABEL_ROW,
                          NOTE_NAMES[(NOTE_KEYCODES[keycode] + transpose) % 12].rjust(2), TEXT_ATTR)
-    i2 += 1
+    i += 1
   end
-  i2 = 0
-  while i2 < WHITE_KEYS.length
-    keycode = WHITE_KEYS[i2][1]
+  i = 0
+  while i < WHITE_KEYS.length
+    keycode = WHITE_KEYS[i][1]
     x = key_cells[keycode][0]
-    draw_cap.call(keycode, false)
+    draw_cap(key_cells, keycode, false)
     DVI::Text.put_string(x + 1, WHITE_LABEL_ROW,
                          NOTE_NAMES[(NOTE_KEYCODES[keycode] + transpose) % 12].ljust(2), TEXT_ATTR)
-    i2 += 1
+    i += 1
   end
-  i2 = 0
-  while i2 < DRUM_KEYS.length
-    keycode = DRUM_KEYS[i2][1]
+  i = 0
+  while i < DRUM_KEYS.length
+    keycode = DRUM_KEYS[i][1]
     x = key_cells[keycode][0]
-    draw_cap.call(keycode, false)
+    draw_cap(key_cells, keycode, false)
     DVI::Text.put_string(x, DRUM_LABEL_ROW, DRUM_KEYCODES[keycode].rjust(3), TEXT_ATTR)
-    i2 += 1
+    i += 1
   end
 end
 
+octave = 4
+transpose = 0
+waveform = Board::PWMAudio::SQUARE
+waveform_idx = 1
+
 DVI.set_mode(DVI::TEXT_MODE)
 DVI::Text.clear(TEXT_ATTR)
-draw_title.call
-draw_keyboard.call
+draw_title(cols, octave, transpose, waveform_idx)
+draw_keyboard(key_cells, transpose)
 help = " 1-4 wave   ^v octave   <> transpose   Esc quit"
 DVI::Text.put_string(0, command_row, help.ljust(cols)[0, cols], BAR_ATTR)
 DVI::Text.commit
@@ -275,11 +275,11 @@ loop do
   if octave != octave_before || transpose != transpose_before ||
      waveform != waveform_before
     prev_note_keycodes = nil
-    draw_title.call
+    draw_title(cols, octave, transpose, waveform_idx)
     dirty = true
     if transpose != transpose_before
-      draw_keyboard.call
-      keycodes.each { |kc| draw_cap.call(kc, true) if key_cells[kc] }
+      draw_keyboard(key_cells, transpose)
+      keycodes.each { |kc| draw_cap(key_cells, kc, true) if key_cells[kc] }
     end
   end
 
@@ -300,7 +300,7 @@ loop do
       next unless key_cells[kc]
       held = keycodes.include?(kc)
       if held != prev_keycodes.include?(kc)
-        draw_cap.call(kc, held)
+        draw_cap(key_cells, kc, held)
         dirty = true
       end
     end

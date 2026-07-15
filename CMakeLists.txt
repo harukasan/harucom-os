@@ -178,6 +178,7 @@ add_executable(harucom_os
     src/hal_task.c
     src/hal_machine.c
     src/psram.c
+    src/alloc_diagnostics.c
     src/init_rootfs.c
     ports/picoruby-littlefs/flash_hal.c
     src/platform.c
@@ -280,6 +281,18 @@ target_link_libraries(harucom_os
 # Core 0 needs 32 KB stack for mruby compiler (mrc_load_string_cxt).
 # Default __STACK_SIZE is 0x800 (2 KB), which is insufficient.
 target_link_options(harucom_os PRIVATE -Wl,--defsym=__STACK_SIZE=0x8000)
+
+# Print the failing request size when the mruby heap allocator returns
+# NULL (see src/alloc_diagnostics.c).
+target_link_options(harucom_os PRIVATE -Wl,--wrap=est_realloc)
+
+# Custom linker script: keeps the mruby interpreter core (vm.o, gc.o)
+# and the synth kernels in RAM instead of flash. Running the VM from
+# XIP shares the 16 KB XIP cache between hot code and the PSRAM heap,
+# so every method dispatch could thrash the cache depending on where
+# the flash layout landed; pinning the interpreter in SRAM removes
+# both the contention and the build-to-build placement lottery.
+pico_set_linker_script(harucom_os ${CMAKE_CURRENT_LIST_DIR}/src/memmap_harucom.ld)
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS "-Wl,--print-memory-usage")
 
