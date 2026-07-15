@@ -161,7 +161,28 @@ module DMX
           when 116 then result << "\t"
           when 117 # 'u'
             hex = slice.byteslice(pos + 2, 4).to_s
-            result << utf8_encode(hex.to_i(16))
+            unless hex.bytesize == 4 && hex_digits?(hex)
+              raise ArgumentError, "JSON: bad unicode escape"
+            end
+            codepoint = hex.to_i(16)
+            if codepoint >= 0xD800 && codepoint <= 0xDBFF
+              # Surrogate pair: the low half must follow as \uXXXX.
+              low_hex = slice.byteslice(pos + 8, 4).to_s
+              unless slice.getbyte(pos + 6) == BACKSLASH &&
+                     slice.getbyte(pos + 7) == 117 &&
+                     low_hex.bytesize == 4 && hex_digits?(low_hex)
+                raise ArgumentError, "JSON: unpaired surrogate"
+              end
+              low = low_hex.to_i(16)
+              unless low >= 0xDC00 && low <= 0xDFFF
+                raise ArgumentError, "JSON: unpaired surrogate"
+              end
+              codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low - 0xDC00)
+              pos += 6
+            elsif codepoint >= 0xDC00 && codepoint <= 0xDFFF
+              raise ArgumentError, "JSON: unpaired surrogate"
+            end
+            result << utf8_encode(codepoint)
             pos += 4
           else
             raise ArgumentError, "JSON: bad escape \\#{code}"
@@ -176,13 +197,29 @@ module DMX
       result
     end
 
+    def self.hex_digits?(text)
+      i = 0
+      while i < text.bytesize
+        b = text.getbyte(i)
+        ok = (b >= 48 && b <= 57) || (b >= 65 && b <= 70) || (b >= 97 && b <= 102)
+        return false unless ok
+        i += 1
+      end
+      true
+    end
+
     def self.utf8_encode(codepoint)
       if codepoint < 0x80
         codepoint.chr
       elsif codepoint < 0x800
         (0xC0 | (codepoint >> 6)).chr + (0x80 | (codepoint & 0x3F)).chr
-      else
+      elsif codepoint < 0x10000
         (0xE0 | (codepoint >> 12)).chr +
+          (0x80 | ((codepoint >> 6) & 0x3F)).chr +
+          (0x80 | (codepoint & 0x3F)).chr
+      else
+        (0xF0 | (codepoint >> 18)).chr +
+          (0x80 | ((codepoint >> 12) & 0x3F)).chr +
           (0x80 | ((codepoint >> 6) & 0x3F)).chr +
           (0x80 | (codepoint & 0x3F)).chr
       end
@@ -193,18 +230,37 @@ module DMX
       start = state[1]
       pos = start
       float = false
-      while (b = text.getbyte(pos))
-        if (b >= 48 && b <= 57) || b == 45 || b == 43 # 0-9 - +
-          pos += 1
-        elsif b == 46 || b == 101 || b == 69 # . e E
-          float = true
-          pos += 1
-        else
-          break
-        end
+      pos += 1 if text.getbyte(pos) == 45 # '-'
+      digits = pos
+      while (b = text.getbyte(pos)) && b >= 48 && b <= 57
+        pos += 1
       end
-      if pos == start
+      if pos == digits
         raise ArgumentError, "JSON: unexpected byte at #{start}"
+      end
+      if text.getbyte(digits) == 48 && pos - digits > 1 # leading zero
+        raise ArgumentError, "JSON: leading zero at #{start}"
+      end
+      if text.getbyte(pos) == 46 # '.'
+        float = true
+        pos += 1
+        digits = pos
+        while (b = text.getbyte(pos)) && b >= 48 && b <= 57
+          pos += 1
+        end
+        raise ArgumentError, "JSON: digits expected at #{pos}" if pos == digits
+      end
+      b = text.getbyte(pos)
+      if b == 101 || b == 69 # e E
+        float = true
+        pos += 1
+        b = text.getbyte(pos)
+        pos += 1 if b == 43 || b == 45
+        digits = pos
+        while (b = text.getbyte(pos)) && b >= 48 && b <= 57
+          pos += 1
+        end
+        raise ArgumentError, "JSON: digits expected at #{pos}" if pos == digits
       end
       state[1] = pos
       literal = text.byteslice(start, pos - start).to_s

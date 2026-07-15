@@ -53,6 +53,31 @@ class JsonParserTest < Picotest::Test
     assert_matches_stdlib text
   end
 
+  def test_strict_numbers
+    ["-", "--5", "1.2.3", "01", "1e", "1.", "+5", "1e+"].each do |bad|
+      raised = false
+      begin
+        DMX::JSONParser.parse(bad)
+      rescue ArgumentError
+        raised = true
+      end
+      assert_equal true, raised
+    end
+  end
+
+  def test_surrogate_pairs
+    assert_equal "\u{1F600}", DMX::JSONParser.parse('"\\uD83D\\uDE00"')
+    ["\"\\uD83D\"", "\"\\uDE00\"", "\"\\uD83Dx\"", "\"\\u12\""].each do |bad|
+      raised = false
+      begin
+        DMX::JSONParser.parse(bad)
+      rescue ArgumentError
+        raised = true
+      end
+      assert_equal true, raised
+    end
+  end
+
   def test_malformed_raises
     ["", "{", '{"a"', '{"a":1', "[1,", '"open', "tru", "{1: 2}", "[1] x"].each do |bad|
       raised = false
