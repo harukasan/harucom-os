@@ -17,6 +17,7 @@ class IRB
     @sandbox.execute
     @sandbox.wait(timeout: nil)
     @sandbox.suspend
+    @stopped = nil # Single job-control slot for a suspended app
 
     # Highlight proc: returns app name byte length if line starts with an app name
     @editor.highlight_proc = ->(line) {
@@ -58,6 +59,18 @@ class IRB
       next if script.empty?
       break if script == "exit" || script == "quit"
 
+      # Job control: resume or list a suspended app
+      if script == "fg"
+        resume_job
+        @console.commit
+        next
+      end
+      if script == "jobs"
+        puts @stopped ? "[stopped] #{@stopped[:name]}" : "no stopped jobs"
+        @console.commit
+        next
+      end
+
       # Check for /app/ command before eval
       words = script.split
       if app_path = find_app(words[0])
@@ -79,6 +92,7 @@ class IRB
     end
   ensure
     @sandbox.terminate if @sandbox
+    @stopped[:sandbox].terminate if @stopped
   end
 
   private
@@ -95,17 +109,47 @@ class IRB
     name = path.split("/")[-1].sub(".rb", "")
     sandbox = Sandbox.new(name)
     sandbox.load_file(path, join: false)
-    wait_app(sandbox)
-    if error = sandbox.error
-      return if error.is_a?(SystemExit)
-      puts "#{path}: #{error.message} (#{error.class})"
-      if error.respond_to?(:backtrace) && (bt = error.backtrace)
-        bt.each { |line| puts "  #{line}" }
-      end
+    supervise(sandbox, name, path)
+  end
+
+  # Resume the stopped app (the `fg` command).
+  def resume_job
+    unless @stopped
+      puts "fg: no stopped job"
+      return
     end
-  ensure
+    job = @stopped
+    job[:sandbox].resume
+    supervise(job[:sandbox], job[:name], job[:path])
+  end
+
+  # Wait for an app to finish or suspend, then dispose of it.
+  # On Ctrl-Z the app suspends itself (state :SUSPENDED): keep its VM alive
+  # as a stopped job and hand control back to the shell in text mode.
+  # Otherwise the app finished or was interrupted: report any error and
+  # terminate it.
+  def supervise(sandbox, name, path)
+    status = wait_app(sandbox)
+    while @keyboard.read_char; end # Drop keys the app left unread in the queue
     DVI.set_mode(DVI::TEXT_MODE)
-    sandbox.terminate if sandbox
+    if status == :suspended
+      if @stopped && @stopped[:sandbox] != sandbox
+        puts "[replaced] #{@stopped[:name]}" # Only one stopped job is tracked
+        @stopped[:sandbox].terminate
+      end
+      @stopped = { sandbox: sandbox, name: name, path: path }
+      puts "[stopped] #{name}"
+    else
+      if (error = sandbox.error) && !error.is_a?(SystemExit)
+        puts "#{path}: #{error.message} (#{error.class})"
+        if error.respond_to?(:backtrace) && (bt = error.backtrace)
+          bt.each { |line| puts "  #{line}" }
+        end
+      end
+      sandbox.terminate
+      @stopped = nil if @stopped && @stopped[:sandbox] == sandbox
+    end
+    @console.commit
   end
 
   def wait_sandbox(sandbox = @sandbox)
@@ -122,19 +166,24 @@ class IRB
     end
   end
 
-  # Wait for an app sandbox to finish.
+  # Wait for an app sandbox to finish or suspend.
   # Uses Keyboard#ctrl_c_pressed? flag instead of reading from the queue,
   # so the app can still receive all key events including Ctrl-C.
+  # Returns :interrupted on Ctrl-C, :suspended when the app suspended
+  # itself (Ctrl-Z), or :done when it ran to completion.
   def wait_app(sandbox)
+    @keyboard.ctrl_c_pressed? # Drop any Ctrl-C latched at the prompt so it
+                              # does not interrupt the app we are about to watch
     sleep_ms 5
     while sandbox.state != :DORMANT && sandbox.state != :SUSPENDED
       if @keyboard.ctrl_c_pressed?
         sandbox.stop
         puts "^C"
         @console.commit
-        return
+        return :interrupted
       end
       sleep_ms 5
     end
+    sandbox.state == :SUSPENDED ? :suspended : :done
   end
 end
