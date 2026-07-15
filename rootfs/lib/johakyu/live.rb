@@ -390,6 +390,10 @@ def cosine
   Johakyu.cosine
 end
 
+def square_signal
+  Johakyu.square_signal
+end
+
 def euclid(pulses, steps, rotation = 0)
   Johakyu.euclid(pulses, steps, rotation)
 end

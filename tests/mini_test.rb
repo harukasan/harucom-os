@@ -24,6 +24,28 @@ class MiniTest < Picotest::Test
                  hap_sigs(parse("bd*2 sn").query_arc(0, 1))
   end
 
+  def test_elongate_weights_the_whole_previous_step
+    # "_" gives the previous step a second slot: a two-step line where
+    # the group owns the whole cycle, identical to the group alone.
+    assert_equal hap_sigs(parse("[bd sn]").query_arc(0, 1)),
+                 hap_sigs(parse("[bd sn] _").query_arc(0, 1))
+    # Three slots split 2:1.
+    assert_equal ["0/1..2/3|0/1..2/3|\"bd\"", "2/3..1/1|2/3..1/1|\"sn\""],
+                 hap_sigs(parse("bd _ sn").query_arc(0, 1))
+  end
+
+  def test_fractional_rates_raise
+    ["bd*2.5", "bd/1.5", "bd!1.5", "bd:1.9"].each do |bad|
+      raised = false
+      begin
+        parse(bad)
+      rescue ArgumentError
+        raised = true
+      end
+      assert_equal true, raised
+    end
+  end
+
   def test_replicate_on_groups_and_angles
     assert_equal hap_sigs(parse("[bd sd] [bd sd]").query_arc(0, 2)),
                  hap_sigs(parse("[bd sd]!2").query_arc(0, 2))

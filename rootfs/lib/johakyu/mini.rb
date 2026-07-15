@@ -157,8 +157,7 @@ module Johakyu
         return :_elongate if name == "_"
         if peek == ":"
           @pos += 1
-          number = read_number
-          return { s: name, n: number.to_i }
+          return { s: name, n: read_integer }
         end
         name
       end
@@ -167,13 +166,13 @@ module Johakyu
         ch = peek
         if ch == "*"
           @pos += 1
-          wrap_modifier(node, :mult, read_number)
+          wrap_modifier(node, :mult, read_integer)
         elsif ch == "/"
           @pos += 1
-          wrap_modifier(node, :div, read_number)
+          wrap_modifier(node, :div, read_integer)
         elsif ch == "!"
           @pos += 1
-          wrap_modifier(node, :rep, read_number.to_i)
+          wrap_modifier(node, :rep, read_integer)
         else
           node
         end
@@ -199,6 +198,18 @@ module Johakyu
           raise ArgumentError, "mini notation: number expected at #{@pos}"
         end
         @input[start, @pos - start].to_f
+      end
+
+      # The interpreter only supports whole-number rates, replicates,
+      # and sample numbers; truncating silently played subtly wrong
+      # timing, so a fractional value is a loud parse error instead.
+      def read_integer
+        value = read_number
+        int = value.to_i
+        if value != int
+          raise ArgumentError, "mini notation: whole number expected at #{@pos}"
+        end
+        int
       end
 
       def atom_char?(ch)
@@ -357,32 +368,46 @@ module Johakyu
       end
 
       def self.sequence_fn(steps)
-        count = steps.length
-        count = 1 if count <= 0
+        # Elongates fold into step weights (strudel semantics: "_"
+        # gives the previous step another slot of time), so a group
+        # step stretches as a whole instead of only its last event.
         fns = []
+        weights = []
         i = 0
         while i < steps.length
-          fns << compile(steps[i])
+          if steps[i] == :_elongate && weights.length > 0
+            weights[weights.length - 1] += 1
+          else
+            # A leading elongate has nothing to extend; it holds a
+            # slot of silence like a rest, matching the old layout.
+            fns << compile(steps[i] == :_elongate ? nil : steps[i])
+            weights << 1
+          end
           i += 1
         end
+        total = 0
+        starts = []
+        i = 0
+        while i < weights.length
+          starts << total
+          total += weights[i]
+          i += 1
+        end
+        total = 1 if total <= 0
         lambda do |cycle|
           events = []
           i = 0
-          while i < steps.length
-            step_start = Fraction.new(i, count)
-            if steps[i] == :_elongate
-              last = events[events.length - 1]
-              events[events.length - 1] = [last[0], Fraction.new(i + 1, count), last[2]] if last
-            else
-              inner = fns[i].call(cycle)
-              j = 0
-              while j < inner.length
-                event = inner[j]
-                j += 1
-                events << [step_start + event[0] / count,
-                           step_start + event[1] / count,
-                           event[2]]
-              end
+          while i < fns.length
+            step_start = Fraction.new(starts[i], total)
+            weight = weights[i]
+            inner = fns[i].call(cycle)
+            j = 0
+            while j < inner.length
+              event = inner[j]
+              j += 1
+              events << [step_start + event[0] * weight / total,
+                         step_start + event[1] * weight / total,
+                         event[2]]
             end
             i += 1
           end
