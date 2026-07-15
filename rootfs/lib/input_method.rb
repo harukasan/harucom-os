@@ -137,8 +137,8 @@ class InputMethod
       # Engine reset flushes pending input as committed text; that
       # flush is exactly what a discard throws away.
       @engine.reset(self)
-      @committed = ""
     end
+    @committed = ""
     @preedit = ""
     @candidates = nil
     @candidate_index = 0
