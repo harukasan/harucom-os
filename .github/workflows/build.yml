@@ -36,7 +36,8 @@ jobs:
     - name: Apply vendored mruby patches
       run: |
         for p in patches/mruby/*.patch; do
-          git -C lib/picoruby/mrbgems/picoruby-mruby/lib/mruby apply "$p"
+          [ -e "$p" ] || continue
+          git -C lib/picoruby/mrbgems/picoruby-mruby/lib/mruby apply "$PWD/$p"
         done
 
     - name: Configure CMake

@@ -99,7 +99,7 @@ file HOST_TEST_VM => HOST_TEST_CONFIG do
 end
 
 desc "Run host tests for rootfs scripts (tests/, never flashed)"
-task :test, [:filter] => HOST_TEST_VM do |_t, args|
+task :test, [:filter] => [:mruby_patches, HOST_TEST_VM] do |_t, args|
   runner = File.join(PROJECT_DIR, "tests", "runner.rb")
   sh({ "RUBY" => HOST_TEST_VM }, "ruby #{runner} #{args[:filter]}".strip)
 end
