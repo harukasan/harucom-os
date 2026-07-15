@@ -36,6 +36,9 @@ MRuby::Build.new('harucom-host-test') do |conf|
   conf.gembox "stdlib"
   conf.gem core: 'picoruby-picotest'
   conf.gem File.expand_path('../../mrbgems/picoruby-synth-native', __FILE__)
+  # Board pin constants (integer only, no hardware) so rootfs code that
+  # references Board::* pins resolves the same as on the board.
+  conf.gem File.expand_path('../../mrbgems/picoruby-harucom-board', __FILE__)
   # Prism-based syntax analysis, shared with the board editor. Kept in
   # the host VM so editor behavior is testable off the board.
   conf.gem File.expand_path('../../mrbgems/picoruby-ruby-syntax', __FILE__)
