@@ -283,10 +283,8 @@ target_link_libraries(harucom_os
 target_link_options(harucom_os PRIVATE -Wl,--defsym=__STACK_SIZE=0x8000)
 
 # Print the failing request size when the mruby heap allocator returns
-# NULL, and the C call site when a wrapped-around negative size comes
-# through (see src/alloc_diagnostics.c).
+# NULL (see src/alloc_diagnostics.c).
 target_link_options(harucom_os PRIVATE -Wl,--wrap=est_realloc)
-target_link_options(harucom_os PRIVATE -Wl,--wrap=mrb_realloc -Wl,--wrap=mrb_malloc)
 
 # Custom linker script: keeps the mruby interpreter core (vm.o, gc.o)
 # and the synth kernels in RAM instead of flash. Running the VM from
@@ -295,17 +293,6 @@ target_link_options(harucom_os PRIVATE -Wl,--wrap=mrb_realloc -Wl,--wrap=mrb_mal
 # the flash layout landed; pinning the interpreter in SRAM removes
 # both the contention and the build-to-build placement lottery.
 pico_set_linker_script(harucom_os ${CMAKE_CURRENT_LIST_DIR}/src/memmap_harucom.ld)
-
-# Tunable flash shift for XIP cache alignment experiments, in bytes.
-# Hardcoded for the pad A/B debugger runs; the environment variable
-# overrides it (HARUCOM_TEXT_PAD=0 rake restores the unshifted layout).
-set(HARUCOM_TEXT_PAD 4096)
-if(DEFINED ENV{HARUCOM_TEXT_PAD})
-    set(HARUCOM_TEXT_PAD $ENV{HARUCOM_TEXT_PAD})
-endif()
-if(HARUCOM_TEXT_PAD GREATER 0)
-    target_link_options(harucom_os PRIVATE -Wl,--defsym=__harucom_text_pad=${HARUCOM_TEXT_PAD})
-endif()
 
 string(APPEND CMAKE_EXE_LINKER_FLAGS "-Wl,--print-memory-usage")
 

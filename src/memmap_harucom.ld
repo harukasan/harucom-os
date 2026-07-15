@@ -32,7 +32,6 @@ MEMORY
 ENTRY(_entry_point)
 
 /* harucom-os: default for the tunable flash shift (see .text). */
-PROVIDE(__harucom_text_pad = 0);
 
 SECTIONS
 {
@@ -63,11 +62,6 @@ SECTIONS
          * FLASH ... we will include any thing excluded here in .data below by default */
         *(.init)
         *libgcc.a:cmse_nonsecure_call.o
-        /* harucom-os: tunable flash shift. The XIP cache sets are
-         * indexed by address, so shifting the remaining flash code
-         * adjusts how it aliases against the PSRAM heap. Set from
-         * the build with HARUCOM_TEXT_PAD (bytes, via --defsym). */
-        . = . + __harucom_text_pad;
         /* harucom-os: exception unwinding never runs outside a crash
          * path, so it stays in flash even though the rest of libgcc
          * (division, double conversions) is RAM-resident. Placed
