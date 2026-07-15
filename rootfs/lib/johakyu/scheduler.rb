@@ -161,8 +161,11 @@ module Johakyu
     end
 
     # Fire pending events that are due. Returns the number fired.
-    # fire_delay_ms_max records how late events fire relative to their
-    # target time; large values point at loop stalls (GC, slow drawing).
+    # fire_delay_ms_max records how long due events sat in the queue
+    # (measured from the later of due time and staging birth); large
+    # values point at loop stalls (GC, slow drawing). A stall that
+    # covers the staging turn itself is not visible here; it shows up
+    # in output_late_count once the musical target is overrun.
     def pump
       now = Machine.board_millis
       fired = 0

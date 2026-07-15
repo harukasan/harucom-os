@@ -196,7 +196,7 @@ class JohakyuApp
 
   def main_loop
     while @running
-      loop_t0 = Machine.board_millis
+      @loop_started_ms = Machine.board_millis
       @session.update
       DMX.keepalive
       poll_eval
@@ -216,7 +216,7 @@ class JohakyuApp
 
       @view.draw
       @console.commit
-      @view.note_loop_ms(Machine.board_millis - loop_t0)
+      @view.note_loop_ms(Machine.board_millis - @loop_started_ms)
       sleep_ms 5
     end
   end
@@ -650,6 +650,9 @@ class JohakyuApp
 
       c = @keyboard.read_char
       unless c
+        # The prompt keeps the show alive; restarting the loop clock
+        # here keeps the wait out of the lp stat (it is not a stall).
+        @loop_started_ms = Machine.board_millis
         @session.update
         DMX.keepalive
         poll_eval
@@ -827,18 +830,6 @@ class JohakyuApp
       # empty buffer to silence for good.
       DMX.blackout
       @message = "Blackout (running tracks relight)"
-      redraw_after_key(old_dirty)
-      return
-    end
-    if c.match?(:g, ctrl: true)
-      # Live-heap probe: press twice some cycles apart and compare.
-      # A climbing type count names what a slowdown is accumulating
-      # (GC marking cost grows with the live set).
-      counts = ObjectSpace.count_objects
-      @message = "obj total #{counts[:TOTAL]} free #{counts[:FREE]}" \
-                 " O#{counts[:T_OBJECT]} A#{counts[:T_ARRAY]}" \
-                 " S#{counts[:T_STRING]} H#{counts[:T_HASH]}" \
-                 " P#{counts[:T_PROC]} E#{counts[:T_ENV]} D#{counts[:T_DATA]}"
       redraw_after_key(old_dirty)
       return
     end

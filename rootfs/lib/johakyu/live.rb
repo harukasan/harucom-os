@@ -173,6 +173,10 @@ module Johakyu
         pattern = entry[2] ? Pattern.silence : entry[1]
         @session.bind_statement(name, pattern)
         bound[name] = true
+        # Each fresh bind stages its first chunk synchronously; fire
+        # anything that came due so N tracks cannot chain N chunk
+        # queries into one pump gap longer than the reserve lead.
+        @session.pump_outputs
       end
 
       # Replace semantics: tracks from the previous apply that this

@@ -77,7 +77,7 @@ module Johakyu
     # Events whose fire delay exceeded RESERVE_LEAD_MS, so the overrun
     # reached the output (sound clamped to now, light written late).
     # This is the musically honest late measure; the scheduler's
-    # fire_delay_ms_max includes delays the lead absorbed.
+    # fire_delay_ms_max only covers queue lateness after staging.
     attr_reader :output_late_count, :output_late_ms_max
 
     def reset_stats
