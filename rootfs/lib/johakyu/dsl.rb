@@ -257,11 +257,12 @@ module Johakyu
 
     def pump_lights
       now = Machine.board_millis
+      kept = 0
       i = 0
       while i < @light_pending.length
         event = @light_pending[i]
+        i += 1
         if event[0] <= now
-          @light_pending.delete_at(i)
           fixture = event[1]
           writes = event[2]
           j = 0
@@ -274,9 +275,11 @@ module Johakyu
             j += 2
           end
         else
-          i += 1
+          @light_pending[kept] = event
+          kept += 1
         end
       end
+      @light_pending.pop while @light_pending.length > kept
     end
   end
 end

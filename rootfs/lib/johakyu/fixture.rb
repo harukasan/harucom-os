@@ -94,7 +94,10 @@ module Johakyu
       if mode_label
         i = 0
         while i < modes.length
-          mode = modes[i] if modes[i][:label] == mode_label
+          if modes[i][:label] == mode_label
+            mode = modes[i]
+            break
+          end
           i += 1
         end
         unless mode
@@ -269,6 +272,8 @@ module Johakyu
     # Write a raw 0-255 value to an attribute channel, bypassing
     # normalization and tables.
     def raw(attribute, value)
+      value = 0 if value < 0
+      value = 255 if value > 255
       ::DMX.set(channel(attribute), value)
       self
     end

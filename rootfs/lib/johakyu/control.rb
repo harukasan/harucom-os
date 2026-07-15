@@ -30,7 +30,7 @@ module Johakyu
   # (auto-segmented), or a plain value, with values wrapped into
   # control maps under key.
   def self.control_source(key, source)
-    pattern = source.is_a?(String) ? Johakyu.mini(source) : Pattern.reify(source)
+    pattern = Pattern.reify(source)
     pattern = pattern.segment(SEGMENT_DEFAULT) if pattern.is_a?(Signal)
     pattern.fmap do |value|
       value.is_a?(Hash) ? value : { key => value }
