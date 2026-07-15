@@ -97,9 +97,14 @@ module Johakyu
     # reallocate the layout.
     def repatch
       # Caps keep a large rig from squeezing the editor out; the grid
-      # shows the first rows worth of channels.
+      # shows the first rows worth of channels. Small rigs use short
+      # channel labels ("07:255") so the zoomed 53-column grid fits
+      # more cells per row.
       cap = Console.rows >= 30 ? 4 : 2
-      @cells_per_row = Console.cols / 8
+      grid_cap = 4
+      @label_width = Johakyu.patch.max_channel < 100 ? 2 : 3
+      @cell_width = @label_width + 5
+      @cells_per_row = Console.cols / @cell_width
 
       # Fixture rows: [name, [[attribute, channel, label_x, value_x,
       # last_drawn], ...]]
@@ -134,7 +139,7 @@ module Johakyu
 
       @channel_count = Johakyu.patch.max_channel
       grid_rows = (@channel_count + @cells_per_row - 1) / @cells_per_row
-      grid_rows = cap if grid_rows > cap
+      grid_rows = grid_cap if grid_rows > grid_cap
       @grid_rows = grid_rows
       @channel_display_count = @channel_count
       limit = @grid_rows * @cells_per_row
@@ -172,7 +177,7 @@ module Johakyu
       ch = 1
       while ch <= @channel_display_count
         x, y = channel_cell(ch)
-        DVI::Text.put_string(x, y, format_3(ch) + ":", ATTR_NORMAL)
+        DVI::Text.put_string(x, y, format_channel(ch) + ":", ATTR_NORMAL)
         ch += 1
       end
       if @channel_count > 0
@@ -278,11 +283,11 @@ module Johakyu
           @prev_values[ch] = value
           @changed_ms[ch] = now
           x, y = channel_cell(ch)
-          DVI::Text.put_string(x + 4, y, @value_strings[value], ATTR_CHANGED)
+          DVI::Text.put_string(x + @label_width + 1, y, @value_strings[value], ATTR_CHANGED)
         elsif @changed_ms[ch] != 0 && now - @changed_ms[ch] >= HIGHLIGHT_MS
           @changed_ms[ch] = 0
           x, y = channel_cell(ch)
-          DVI::Text.put_string(x + 4, y, @value_strings[value], ATTR_NORMAL)
+          DVI::Text.put_string(x + @label_width + 1, y, @value_strings[value], ATTR_NORMAL)
         end
         ch += 1
       end
@@ -292,7 +297,15 @@ module Johakyu
       index = ch - 1
       row = index / @cells_per_row
       col = index % @cells_per_row
-      [col * 8, @grid_top + row]
+      [col * @cell_width, @grid_top + row]
+    end
+
+    def format_channel(ch)
+      if @label_width == 2
+        ch < 10 ? "0#{ch}" : "#{ch}"
+      else
+        format_3(ch)
+      end
     end
 
     def format_3(value)
