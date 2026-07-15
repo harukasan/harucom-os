@@ -544,8 +544,11 @@ module Johakyu
           personality(base, modes[j][:label])
           j += 1
         end
-      rescue ArgumentError
-        # skip unusable definitions
+      rescue => e
+        # Skip unusable definitions whatever the failure class: a
+        # matrix-template OFL file parses but explodes deep inside the
+        # personality build, and a startup crash would brick the app
+        # for every fixture over one bad file in /data.
       end
     end
     count
