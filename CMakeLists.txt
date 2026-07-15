@@ -186,6 +186,8 @@ add_executable(harucom_os
     ${PICORUBY_ROOT}/mrbgems/picoruby-rng/ports/rp2040/rng.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-adc/ports/rp2040/adc.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-uart/ports/rp2040/uart.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-pwm/ports/rp2040/pwm.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/ports/rp2040/io-console.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
@@ -245,6 +247,8 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/mrbgems/picoruby-littlefs/lib/littlefs
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems
     ${PICORUBY_ROOT}/mrbgems/picoruby-adc/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-uart/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-pwm/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/harucom-os-dict/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-pwm-audio/include
@@ -266,6 +270,7 @@ target_link_libraries(harucom_os
     hardware_adc
     hardware_gpio
     hardware_uart
+    hardware_pwm
     hardware_flash
     pico_rand
     hardware_sync
