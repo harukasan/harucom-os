@@ -220,7 +220,12 @@ static void run_mruby(void) {
     }
 }
 
-static void harucom_main(void);
+/* Must not be inlined into main: main switches MSP to the BSS stack
+ * between its own prologue and this call, so an inlined body would
+ * allocate its locals frame before the switch and then address them
+ * above the new stack top, aliasing whatever bss follows (the default
+ * alarm pool entries, observed by disassembly). */
+static void __attribute__((noinline)) harucom_main(void);
 
 int main(void) {
     /* Switch Core 0 stack from SCRATCH_Y (2 KB) to BSS (32 KB).
