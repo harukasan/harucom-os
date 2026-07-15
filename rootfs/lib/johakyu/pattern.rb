@@ -548,7 +548,10 @@ module Johakyu
         i = 0
         while i < haps.length
           hap = haps[i]
-          at = (hap.whole ? hap.whole.begin_time : hap.part.begin_time).to_f
+          # Exact rational onset: a Float round trip quantizes onto the
+          # 1/3840 grid and picks the neighbor cell for onsets whose
+          # denominator does not divide it (euclid(5,7) and friends).
+          at = hap.whole ? hap.whole.begin_time : hap.part.begin_time
           sampled = other.sample(at)
           if sampled.nil?
             result << hap
