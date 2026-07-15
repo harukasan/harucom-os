@@ -24,6 +24,13 @@ class MiniTest < Picotest::Test
                  hap_sigs(parse("bd*2 sn").query_arc(0, 1))
   end
 
+  def test_replicate_on_groups_and_angles
+    assert_equal hap_sigs(parse("[bd sd] [bd sd]").query_arc(0, 2)),
+                 hap_sigs(parse("[bd sd]!2").query_arc(0, 2))
+    assert_equal hap_sigs(parse("<a b> <a b>").query_arc(0, 2)),
+                 hap_sigs(parse("<a b>!2").query_arc(0, 2))
+  end
+
   def test_replicate
     assert_equal ["0/1..1/4|0/1..1/4|\"bd\"", "1/4..1/2|1/4..1/2|\"bd\"",
                   "1/2..3/4|1/2..3/4|\"bd\"", "3/4..1/1|3/4..1/1|\"sn\""],

@@ -248,7 +248,7 @@ module Johakyu
       end
 
       def self.compile_hash(ast)
-        if ast[:rep] && !ast[:sequence] && !ast[:stack] && !ast[:slowcat]
+        if ast[:rep]
           # Replicated single element becomes an n-step sequence.
           repeat = ast[:rep].to_i
           repeat = 1 if repeat <= 0
@@ -340,7 +340,7 @@ module Johakyu
         while i < items.length
           item = items[i]
           i += 1
-          if item.is_a?(Hash) && item[:rep] && !item[:sequence] && !item[:stack] && !item[:slowcat]
+          if item.is_a?(Hash) && item[:rep]
             repeat = item[:rep].to_i
             repeat = 1 if repeat <= 0
             base = strip(item, :rep)
