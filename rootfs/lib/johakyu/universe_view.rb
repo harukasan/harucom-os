@@ -41,6 +41,15 @@ module Johakyu
       @parse_ms_max = elapsed if elapsed > (@parse_ms_max || 0)
     end
 
+    # Zero the loop and parse peaks. The app calls this on each apply so
+    # lp and sp read as the worst since the current binding started,
+    # the same lifetime as output_late (which reset_stats clears), so a
+    # late fire can be matched to a loop stall.
+    def reset_peaks
+      @loop_ms_max = 0
+      @parse_ms_max = 0
+    end
+
     ATTR_NORMAL  = 0xF0
     ATTR_TITLE   = 0x1F
     ATTR_CHANGED = 0x0F
@@ -262,8 +271,6 @@ module Johakyu
         DVI::Text.put_string(44, @top,
           "tick #{tick_avg_us}us mx #{scheduler.tick_ms_max} st #{scheduler.stage_ms_max} lt #{scheduler.fire_delay_ms_max} lp #{@loop_ms_max || 0} sp #{@parse_ms_max || 0} ol #{@session.output_late_count}/#{@session.output_late_ms_max}ms   ",
           ATTR_NORMAL)
-        @loop_ms_max = 0
-        @parse_ms_max = 0
       end
     end
 

@@ -372,6 +372,7 @@ class JohakyuApp
         # cumulative average spanning an unmute keeps climbing toward
         # the new mean for minutes and reads like a slowdown.
         @session.reset_stats
+        @view.reset_peaks
         @message = "Applied (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms)"
         unless Johakyu.patch.equal?(patch_before)
           # The rig changed: resize the universe view, re-lay the
