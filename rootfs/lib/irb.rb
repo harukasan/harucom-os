@@ -129,14 +129,16 @@ class IRB
   # Otherwise the app finished or was interrupted: report any error and
   # terminate it.
   def supervise(sandbox, name, path)
-    if wait_app(sandbox) == :suspended
+    status = wait_app(sandbox)
+    while @keyboard.read_char; end # Drop keys the app left unread in the queue
+    DVI.set_mode(DVI::TEXT_MODE)
+    if status == :suspended
       if @stopped && @stopped[:sandbox] != sandbox
-        @stopped[:sandbox].terminate # Only one stopped job is tracked
+        puts "[replaced] #{@stopped[:name]}" # Only one stopped job is tracked
+        @stopped[:sandbox].terminate
       end
       @stopped = { sandbox: sandbox, name: name, path: path }
-      DVI.set_mode(DVI::TEXT_MODE)
       puts "[stopped] #{name}"
-      @console.commit
     else
       if (error = sandbox.error) && !error.is_a?(SystemExit)
         puts "#{path}: #{error.message} (#{error.class})"
@@ -144,10 +146,10 @@ class IRB
           bt.each { |line| puts "  #{line}" }
         end
       end
-      DVI.set_mode(DVI::TEXT_MODE)
       sandbox.terminate
       @stopped = nil if @stopped && @stopped[:sandbox] == sandbox
     end
+    @console.commit
   end
 
   def wait_sandbox(sandbox = @sandbox)
@@ -170,6 +172,8 @@ class IRB
   # Returns :interrupted on Ctrl-C, :suspended when the app suspended
   # itself (Ctrl-Z), or :done when it ran to completion.
   def wait_app(sandbox)
+    @keyboard.ctrl_c_pressed? # Drop any Ctrl-C latched at the prompt so it
+                              # does not interrupt the app we are about to watch
     sleep_ms 5
     while sandbox.state != :DORMANT && sandbox.state != :SUSPENDED
       if @keyboard.ctrl_c_pressed?

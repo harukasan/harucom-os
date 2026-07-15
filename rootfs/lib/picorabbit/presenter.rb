@@ -44,6 +44,7 @@ module PicoRabbit
     def suspend_to_shell
       Task.current.suspend
       DVI.set_mode(DVI::GRAPHICS_MODE)
+      DVI.wait_vsync # Let the switch take effect before drawing into the buffer
       render_current
       DVI::Graphics.commit
     end
