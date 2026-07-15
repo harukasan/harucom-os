@@ -233,7 +233,7 @@ module Johakyu
         scheduler = @session.scheduler
         tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
         DVI::Text.put_string(44, @top,
-          "tick #{tick_avg_us}us mx #{scheduler.tick_ms_max} st #{scheduler.stage_ms_max} lt #{scheduler.fire_delay_ms_max}ms lp #{@loop_ms_max || 0}   ",
+          "tick #{tick_avg_us}us mx #{scheduler.tick_ms_max} st #{scheduler.stage_ms_max} lt #{scheduler.fire_delay_ms_max} lp #{@loop_ms_max || 0} ol #{@session.output_late_count}/#{@session.output_late_ms_max}ms   ",
           ATTR_NORMAL)
         @loop_ms_max = 0
       end

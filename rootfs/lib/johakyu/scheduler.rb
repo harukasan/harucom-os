@@ -171,7 +171,8 @@ module Johakyu
         event = @pending[i]
         if event[0] <= now
           @pending.delete_at(i)
-          delay = now - event[0]
+          reference = event[0] > event[4] ? event[0] : event[4]
+          delay = now - reference
           @fire_delay_ms_max = delay if delay > @fire_delay_ms_max
           event[1].call(event[2], event[0])
           fired += 1
@@ -265,7 +266,13 @@ module Johakyu
         i += 1
         next unless hap.has_onset?
         at_ms = @clock.position_to_ms(hap.whole.begin_time).to_i - latency_ms
-        @pending << [at_ms, sink, hap.value, name]
+        # The birth time rides along for the fire delay stat: a fresh
+        # bind stages from the current position, so its first lead's
+        # worth of events is born past at_ms while the musical target
+        # (at_ms + lead, reconstructed by the sink) is still on time.
+        # Measuring delay against birth keeps that benign case out of
+        # the stat, which otherwise reads up to a full lead too high.
+        @pending << [at_ms, sink, hap.value, name, Machine.board_millis]
       end
       track[:staged_until] = to
       track[:last_good] = track[:pattern]
