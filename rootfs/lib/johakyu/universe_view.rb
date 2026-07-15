@@ -45,6 +45,14 @@ module Johakyu
 
     FIXTURE_ATTRIBUTES = [:pan, :tilt, :dimmer, :strobe, :color, :gobo, :prism]
 
+    # One-letter attribute labels keep a full fixture row inside the
+    # 53-column zoomed grid (the show runs zoomed for legibility).
+    # Prism is capitalized to stay distinct from pan.
+    ATTRIBUTE_LABELS = {
+      pan: "p", tilt: "t", dimmer: "d", strobe: "s",
+      color: "c", gobo: "g", prism: "P",
+    }
+
     def initialize(session, top: 0)
       @session = session
       @top = top
@@ -114,10 +122,10 @@ module Johakyu
             nil
           end
           next unless channel
-          # "pan:255 " label + value; value_x points at the digits.
+          # "p:255 " label + value; value_x points at the digits.
           # The trailing slot caches the last drawn value.
           label_x = x
-          value_x = x + attribute.to_s.length + 1
+          value_x = x + 2
           fields << [attribute, channel, label_x, value_x, -1]
           x = value_x + 4
         end
@@ -156,7 +164,7 @@ module Johakyu
         while j < fields.length
           field = fields[j]
           j += 1
-          DVI::Text.put_string(field[2], y, field[0].to_s + ":", ATTR_NORMAL)
+          DVI::Text.put_string(field[2], y, ATTRIBUTE_LABELS[field[0]].to_s + ":", ATTR_NORMAL)
         end
         i += 1
       end
@@ -228,7 +236,10 @@ module Johakyu
         @prev_bpm = @session.clock.bpm
         DVI::Text.put_string(27, @top, "cyc #{cycle} bpm #{@prev_bpm.to_i}   ", ATTR_NORMAL)
       end
-      if now - @last_stats_ms >= STATS_INTERVAL_MS
+      # The stats read starts at column 44 and only fits the full
+      # 106-column grid; the zoomed 53-column mode drops it instead of
+      # wrapping into the fixture rows.
+      if Console.cols >= 80 && now - @last_stats_ms >= STATS_INTERVAL_MS
         @last_stats_ms = now
         scheduler = @session.scheduler
         tick_avg_us = (scheduler.tick_ms_average * 1000).to_i
