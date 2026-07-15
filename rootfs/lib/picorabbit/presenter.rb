@@ -17,6 +17,8 @@ module PicoRabbit
           case key
           when Keyboard::ESCAPE, Keyboard::CTRL_Q
             break
+          when Keyboard::CTRL_Z
+            suspend_to_shell
           when Keyboard::UP
             @timer.jump if @timer
           when Keyboard::RIGHT, Keyboard::PAGEDOWN, Keyboard::ENTER, " "
@@ -35,6 +37,16 @@ module PicoRabbit
     end
 
     private
+
+    # Hand control back to the shell (Ctrl-Z). The shell switches to text
+    # mode and shows its prompt. On `fg` it resumes this task, so restore
+    # graphics mode and repaint, since text output clobbered the framebuffer.
+    def suspend_to_shell
+      Task.current.suspend
+      DVI.set_mode(DVI::GRAPHICS_MODE)
+      render_current
+      DVI::Graphics.commit
+    end
 
     def render_current
       @renderer.render(@slides[@current], @current, @slides.length, @step)
