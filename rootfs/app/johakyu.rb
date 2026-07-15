@@ -572,23 +572,23 @@ class JohakyuApp
   end
 
   # Parse a window covering [top, bottom] plus margins, capped to the
-  # analyzer byte budget. Returns the raw result and updates the
-  # cached bundle (@syntax = [highlight_map, offsets, win_start]).
-  def analyze_window(top, bottom)
+  # analyzer byte budget. Pure: it does not touch the render window
+  # state, so a small indent-only parse can run without clobbering the
+  # cached highlight bundle. Returns [result, bundle, win_start,
+  # win_end] where bundle is [highlight_map, offsets, win_start] (or
+  # nil when parsing failed). margin_below can be 0 when only the
+  # indent of a line is needed, since indentation depends only on the
+  # lines above.
+  def analyze_window(top, bottom, margin_below = SYNTAX_MARGIN)
     lines = @buffer.lines
     n = lines.length
-    if n == 0
-      @syntax = nil
-      @win_start = 0
-      @win_end = 0
-      return nil
-    end
+    return [nil, nil, 0, 0] if n == 0
     top = 0 if top < 0
     bottom = n - 1 if bottom > n - 1
     bottom = top if bottom < top
 
     ws = syntax_anchor_line(top - SYNTAX_MARGIN)
-    we = bottom + SYNTAX_MARGIN + 1
+    we = bottom + margin_below + 1
     we = n if we > n
 
     total = 0
@@ -606,14 +606,9 @@ class JohakyuApp
       ws += 1
     end
 
-    @win_start = ws
-    @win_end = we
     source = lines[ws...we].join("\n")
     result = RubySyntax.analyze(source)
-    unless result
-      @syntax = nil
-      return nil
-    end
+    return [nil, nil, ws, we] unless result
     offsets = []
     off = 0
     i = ws
@@ -622,12 +617,17 @@ class JohakyuApp
       off += lines[i].bytesize + 1
       i += 1
     end
-    @syntax = [result.highlight_map, offsets, ws]
-    result
+    [result, [result.highlight_map, offsets, ws], ws, we]
   end
 
+  # Rebuild the render highlight window for the current viewport and
+  # store it in the cached bundle. Returns the raw result.
   def analyze_viewport
-    analyze_window(@scroll_top, @scroll_top + @edit_rows - 1)
+    result, bundle, ws, we = analyze_window(@scroll_top, @scroll_top + @edit_rows - 1)
+    @syntax = bundle
+    @win_start = ws
+    @win_end = we
+    result
   end
 
   # -- Drawing --
@@ -983,11 +983,11 @@ class JohakyuApp
           undo_record([:insert, @buffer.cursor_y, @buffer.cursor_x, c.to_s])
           @buffer.put(c.to_s)
           if c.to_s == " " && RubySyntax.should_dedent_on_space?(@buffer.current_line)
-            result = analyze_window(@buffer.cursor_y, @buffer.cursor_y)
+            result, _bundle, ws, _we = analyze_window(@buffer.cursor_y, @buffer.cursor_y, 0)
             @session.pump_outputs
             if result
               old_line = @buffer.current_line
-              if RubySyntax.reindent_line(@buffer, @buffer.cursor_y, result.indent_level(@buffer.cursor_y - @win_start))
+              if RubySyntax.reindent_line(@buffer, @buffer.cursor_y, result.indent_level(@buffer.cursor_y - ws))
                 undo_record([:replace_line, @buffer.cursor_y, old_line])
                 @buffer.mark_dirty(:content)
               end
@@ -1004,17 +1004,19 @@ class JohakyuApp
   end
 
   def auto_indent
-    result = analyze_window(@buffer.cursor_y - 1, @buffer.cursor_y)
+    # Indentation depends only on the lines above, so parse with no
+    # margin below the cursor (two lines, not the full window).
+    result, _bundle, ws, _we = analyze_window(@buffer.cursor_y - 1, @buffer.cursor_y, 0)
     @session.pump_outputs
     return unless result
     prev_y = @buffer.cursor_y - 1
     if prev_y >= 0
       old_line = @buffer.lines[prev_y]
-      if RubySyntax.reindent_line(@buffer, prev_y, result.indent_level(prev_y - @win_start))
+      if RubySyntax.reindent_line(@buffer, prev_y, result.indent_level(prev_y - ws))
         undo_record([:replace_line, prev_y, old_line])
       end
     end
-    level = result.indent_level(@buffer.cursor_y - @win_start)
+    level = result.indent_level(@buffer.cursor_y - ws)
     if level > 0
       spaces = "  " * level
       undo_record([:insert, @buffer.cursor_y, 0, spaces])
