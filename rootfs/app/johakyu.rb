@@ -814,6 +814,18 @@ class JohakyuApp
       redraw_after_key(old_dirty)
       return
     end
+    if c.match?(:g, ctrl: true)
+      # Live-heap probe: press twice some cycles apart and compare.
+      # A climbing type count names what a slowdown is accumulating
+      # (GC marking cost grows with the live set).
+      counts = ObjectSpace.count_objects
+      @message = "obj total #{counts[:TOTAL]} free #{counts[:FREE]}" \
+                 " O#{counts[:T_OBJECT]} A#{counts[:T_ARRAY]}" \
+                 " S#{counts[:T_STRING]} H#{counts[:T_HASH]}" \
+                 " P#{counts[:T_PROC]} E#{counts[:T_ENV]} D#{counts[:T_DATA]}"
+      redraw_after_key(old_dirty)
+      return
+    end
 
     ime_handled = false
     if $ime
