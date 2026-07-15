@@ -314,6 +314,11 @@ class JohakyuApp
         @live.apply
         apply_ms = Machine.board_millis - apply_t0
         run_ms = apply_t0 - @eval_started_ms
+        # Restart the stats so tick/st/lt read as steady-state numbers
+        # for the new binding, the same as the demo does per preset. A
+        # cumulative average spanning an unmute keeps climbing toward
+        # the new mean for minutes and reads like a slowdown.
+        @session.reset_stats
         @message = "Applied (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms)"
         unless Johakyu.patch.equal?(patch_before)
           # The rig changed: resize the universe view, re-lay the
