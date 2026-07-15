@@ -34,17 +34,13 @@ module Johakyu
     STAGE_AHEAD_MIN = 0.25
     STAGE_CHUNK = Fraction.new(1, 4)
 
-    # When the loop stalls (a slow editor frame, a busy background
-    # task) its update interval can exceed a chunk of music, and one
+    # Most a single tick will stage when it has fallen behind. One
+    # chunk per tick keeps up only while the show loop runs faster than
+    # a chunk of music; when the loop stalls (a slow editor frame, a
+    # busy task) the loop's update interval can exceed a chunk, and one
     # chunk per tick then loses ground every tick until events fire
-    # seconds late. A tick that is behind stages extra chunks to get
-    # back ahead. The catch-up is bounded by a time budget so one tick
-    # cannot itself stall the loop (each signal chunk query costs real
-    # time on the board); a track deep behind recovers over several
-    # ticks instead of one spike. The chunk cap is a host-side safety
-    # (board_millis does not advance within a tick under the test
-    # clock, so the budget never trips there).
-    STAGE_CATCHUP_BUDGET_MS = 30
+    # seconds late. A catch-up tick stages several chunks at once to
+    # get back ahead, capped here so the catch-up cost stays bounded.
     STAGE_CATCHUP_MAX = 8
 
     # Staging yields to imminent events: when a pending event fires
@@ -172,7 +168,6 @@ module Johakyu
               staged += 1
               break if urgent[:staged_until].to_f >= target
               break if staged >= STAGE_CATCHUP_MAX
-              break if Machine.board_millis - started_ms >= STAGE_CATCHUP_BUDGET_MS
             end
           rescue => e
             track_failed(urgent, e)
