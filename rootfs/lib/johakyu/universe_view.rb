@@ -11,10 +11,9 @@
 # would turn into GC pauses there).
 #
 # Row layout, relative to `top`, sized from the running rig (rows):
-#   0      [johakyu] |cycle bar| cyc/bpm and scheduler stats
+#   0      johakyu |cycle bar| cyc/bpm and scheduler stats
 #   1..    one attribute readback row per fixture (capped)
 #   next.. universe channel grid rows (capped to the first channels)
-#   last   separator line
 # Without a rig only the clock row is shown, so the app doubles as an
 # audio-only sequencer with the editor taking the rest of the screen.
 
@@ -146,10 +145,10 @@ module Johakyu
       @channel_display_count = limit if @channel_display_count > limit
       @grid_top = @top + 1 + @fixture_rows.length
 
-      # Clock row, fixture rows, grid rows, and a closing separator
-      # when a rig is patched; the clock row alone without one.
+      # Clock row, fixture rows, and grid rows when a rig is patched;
+      # the clock row alone without one.
       if @channel_count > 0
-        @rows = 1 + @fixture_rows.length + @grid_rows + 1
+        @rows = 1 + @fixture_rows.length + @grid_rows
       else
         @rows = 1
       end
@@ -158,7 +157,7 @@ module Johakyu
     # Draw the static furniture and force every cell to repaint on the
     # next draw. Call once after the screen is cleared.
     def reset
-      DVI::Text.put_string(0, @top, "[johakyu]", ATTR_TITLE)
+      DVI::Text.put_string(0, @top, "johakyu", ATTR_TITLE)
       i = 0
       while i < @fixture_rows.length
         row = @fixture_rows[i]
@@ -180,16 +179,6 @@ module Johakyu
         DVI::Text.put_string(x, y, format_channel(ch) + ":", ATTR_NORMAL)
         ch += 1
       end
-      if @channel_count > 0
-        separator = ""
-        i = 0
-        while i < Console.cols
-          separator = separator + "-"
-          i += 1
-        end
-        DVI::Text.put_string(0, @top + @rows - 1, separator, ATTR_NORMAL)
-      end
-
       # Paint the current values directly instead of arming the
       # changed-flash for every cell: a reset used to invert the whole
       # grid on the next draw, which read as "everything lit" after
