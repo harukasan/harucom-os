@@ -6,6 +6,16 @@
 class LineEditor
   attr_accessor :highlight_proc
 
+  # Key bindings local to the line editor. Defined here instead of in the
+  # keyboard gem so adding them does not force a presym rebuild (this file is
+  # loaded from the rootfs and compiled on device, so the symbols intern at
+  # runtime).
+  CTRL_A = Keyboard.key(:a, ctrl: true)
+  CTRL_E = Keyboard.key(:e, ctrl: true)
+  CTRL_O = Keyboard.key(:o, ctrl: true)
+
+  STATUS_ATTR = 0x0F # black on white (inverted), for the status row prompt
+
   def initialize(console:, keyboard:, ime: nil)
     @console = console
     @keyboard = keyboard
@@ -91,6 +101,12 @@ class LineEditor
       when Keyboard::CTRL_L
         @console.clear
         @input_start_row = 0
+      when CTRL_A
+        @buffer.head
+      when CTRL_E
+        @buffer.tail
+      when CTRL_O
+        load_file_into_buffer
       when Keyboard::ENTER
         script = @buffer.dump.chomp
         if check.call(script)
@@ -320,5 +336,92 @@ class LineEditor
     end
     @console.reset
     @input_start_row = 0
+  end
+
+  # Load a text file into the input buffer as multi-line input. Prompts for a
+  # path on the status row, then replaces the current buffer with the file's
+  # contents so the user can edit it in place and run it with Enter.
+  def load_file_into_buffer
+    path = prompt_status_line("Open file: ")
+    return if path.nil? || path.bytesize == 0
+
+    unless File.file?(path)
+      show_status_message("File not found: #{path}")
+      return
+    end
+
+    content = File.open(path, "r") { |f| f.read }
+    unless content
+      show_status_message("Cannot read: #{path}")
+      return
+    end
+
+    lines = content.split("\n")
+    # Strip a trailing CR so a file with CRLF line endings does not leave a
+    # stray control character at the end of every line.
+    i = 0
+    while i < lines.length
+      line = lines[i]
+      if line.bytesize > 0 && line.getbyte(line.bytesize - 1) == 0x0D
+        lines[i] = line.byteslice(0, line.bytesize - 1).to_s
+      end
+      i += 1
+    end
+    lines = [""] if lines.empty?
+
+    # Discard any half-typed IME composition so it does not leak into the
+    # loaded buffer.
+    @ime.reset if @ime
+    # @buffer.clear leaves the cursor at the top. Keep it there rather than
+    # moving to the end: a file taller than the screen would otherwise put the
+    # cursor off-screen, since the input area is rendered from the top.
+    @buffer.clear
+    @buffer.lines = lines
+    @needs_refresh = true
+  end
+
+  # Read a single line of text on the status row (bottom of the screen).
+  # Returns the entered string, or nil if cancelled with Escape.
+  def prompt_status_line(label)
+    input = ""
+    row = Console.rows - 1
+    @console.hide_cursor
+    loop do
+      display = " #{label}#{input}"
+      padding = Console.cols - Editor.display_width(display)
+      display += " " * padding if padding > 0
+      @console.put_string_at(0, row, Editor.display_slice(display, 0, Console.cols), STATUS_ATTR)
+      @console.commit
+
+      c = @keyboard.read_char
+      unless c
+        DVI.wait_vsync
+        next
+      end
+
+      case c
+      when Keyboard::ENTER
+        return input
+      when Keyboard::ESCAPE
+        return nil
+      when Keyboard::BSPACE
+        if input.bytesize > 0
+          input = input.byteslice(0, Editor.prev_char_byte_pos(input, input.bytesize)).to_s
+        end
+      else
+        input += c.to_s if c.printable?
+      end
+    end
+  end
+
+  # Draw a one-line message on the status row. Clearing @needs_refresh keeps the
+  # message on screen until the next keystroke (which sets @needs_refresh again
+  # and redraws over it), instead of the loop erasing it on the next frame.
+  def show_status_message(msg)
+    row = Console.rows - 1
+    @console.clear_line(row)
+    @console.put_string_at(0, row, Editor.display_slice(" #{msg}", 0, Console.cols), STATUS_ATTR)
+    @console.commit
+    @needs_refresh = false
   end
 end
