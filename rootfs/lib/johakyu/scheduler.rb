@@ -206,10 +206,20 @@ module Johakyu
       @errors.delete(name)
       track = @tracks[name]
       if track
-        # Quantize the swap to the next integer cycle boundary. Events
-        # already staged past the boundary belong to the old pattern;
-        # drop them so the new pattern fills that range instead.
+        # Quantize the swap to the next integer cycle boundary, but
+        # never earlier than the fired horizon: events with targets up
+        # to now + latency have already fired (sound reserved, light
+        # queued) and cannot be recalled, so a rebind inside that lead
+        # window must not restage them or every quick Ctrl-Enter near
+        # a boundary double-triggers the boundary events (the old
+        # pattern audibly leaks up to one lead here by design).
         swap_at = Fraction.of(@clock.position).next_sam
+        # One extra ms makes the horizon exclusive: an event whose
+        # target sits exactly at now + latency has already fired.
+        horizon = Fraction.of(@clock.position) +
+                  Rational((track[:latency_ms] + 1) * @clock.bpm,
+                           60_000 * @clock.beats_per_cycle)
+        swap_at = horizon if horizon > swap_at
         if track[:staged_until] > swap_at
           drop_pending(name, @clock.position_to_ms(swap_at).to_i - track[:latency_ms])
           track[:staged_until] = swap_at

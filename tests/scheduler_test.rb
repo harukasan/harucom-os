@@ -240,6 +240,21 @@ class SchedulerTest < Picotest::Test
     assert_equal [0, 1000, 2000, 2500, 3000, 3500, 4000], times
   end
 
+  # A rebind inside the lead window must not restage events the old
+  # binding already fired: the sound reservation cannot be recalled,
+  # so restaging double-triggers the boundary beat (heard as a flam
+  # on every quick re-eval near a cycle boundary).
+  def test_rebind_inside_the_lead_window_does_not_double_fire
+    session, audio = new_session
+    session.bind_statement(:drums, Johakyu.sound("bd ~ ~ ~"))
+    run_until(session, 1750)
+    session.bind_statement(:drums, Johakyu.sound("bd ~ ~ ~"))
+    run_until(session, 2600)
+    times = play_times(audio)
+    assert_equal times.uniq.length, times.length
+    assert_equal [0, 100_000], times[0, 2]
+  end
+
   def test_statement_swap_is_quantized
     session, audio = new_session
     session.bind_statement(:drums, Johakyu.sound("bd ~ ~ ~"))
