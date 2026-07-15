@@ -112,6 +112,8 @@ class JohakyuApp
     @evaling = false
     @eval_started_ms = 0
     @highlight_stale = false
+    @split_line = -1
+    @join_line = -1
     @eval_compile_ms = 0
     @shown_light_error = nil
     @shown_track_error = nil
@@ -841,6 +843,11 @@ class JohakyuApp
     old_dirty = @buffer.dirty
     @old_scroll_top = @scroll_top
     @old_scroll_left = @scroll_left
+    # Line index of a fresh split (Enter) or join (Backspace/Delete);
+    # redraw_after_key shifts the rows below on screen instead of
+    # repainting them all. Reset every key.
+    @split_line = -1
+    @join_line = -1
     @buffer.clear_dirty
 
     # Editor commands checked before the IME: an Alt+digit would
@@ -947,6 +954,7 @@ class JohakyuApp
           @buffer.lines.delete_at(@buffer.cursor_y + 1)
           @buffer.changed = true
           @buffer.mark_dirty(:structure)
+          @join_line = @buffer.cursor_y
         else
           if @buffer.cursor_x < @buffer.current_line.bytesize
             deleted = Editor.char_at_bytepos(@buffer.current_line, @buffer.cursor_x)
@@ -961,6 +969,7 @@ class JohakyuApp
         undo_record_break
         @buffer.put(c.to_buffer_input)
         auto_indent
+        @split_line = @buffer.cursor_y
       when Keyboard::BSPACE
         @redo_stack.clear
         if @buffer.cursor_x > 0
@@ -970,6 +979,7 @@ class JohakyuApp
         elsif @buffer.cursor_y > 0
           undo_record_break
           undo_record([:join, @buffer.cursor_y - 1, @buffer.lines[@buffer.cursor_y - 1].bytesize])
+          @join_line = @buffer.cursor_y - 1
         end
         @buffer.put(c.to_buffer_input)
       when Keyboard::UP, Keyboard::DOWN, Keyboard::LEFT, Keyboard::RIGHT
@@ -1032,29 +1042,62 @@ class JohakyuApp
     @scroll_left = adjust_horizontal_scroll
 
     dirty = @buffer.dirty
+    structure_changed = dirty == :structure
+    content_changed = structure_changed || dirty == :content
     dirty = old_dirty if dirty == :none && old_dirty != :none
     vdelta = @scroll_top - @old_scroll_top
     hscrolled = @scroll_left != @old_scroll_left
 
-    content_changed = dirty == :content || dirty == :structure
     window_rebuilt = false
     vis_bottom = @scroll_top + @edit_rows
     vis_bottom = @buffer.lines.length if vis_bottom > @buffer.lines.length
+
+    # A single-line split (Enter) or join (Backspace/Delete) that did
+    # not scroll the viewport shifts the rows below on screen and
+    # redraws only the touched lines, so its reparse is deferred to an
+    # idle frame like a content edit: the shift keeps every other line
+    # correct and only two lines briefly carry stale colors.
+    can_shift = !hscrolled && vdelta == 0 &&
+                (@split_line >= 0 || @join_line >= 0) &&
+                @scroll_top >= @win_start && vis_bottom <= @win_end
+
     # A content edit inside the window defers its reparse to an idle
-    # frame (the edited line briefly keeps the stale colors), the same
-    # as edit.rb: the parse is an atomic prism call that would stall
-    # the show loop on every keystroke otherwise. Structure changes
-    # and window moves still parse now, then pump what came due.
-    if dirty == :structure || @scroll_top < @win_start || vis_bottom > @win_end
+    # frame, the same as edit.rb: the parse is an atomic prism call
+    # that would stall the show loop on every keystroke otherwise. A
+    # structure edit that scrolled or left the window still parses now,
+    # then pumps what came due.
+    if (structure_changed && !can_shift) || @scroll_top < @win_start || vis_bottom > @win_end
       analyze_viewport
       @session.pump_outputs
       window_rebuilt = true
-    elsif dirty == :content
+    elsif content_changed
       @highlight_stale = true
     end
 
-    if dirty == :structure || vdelta.abs >= @edit_rows ||
-       (hscrolled && vdelta != 0) || (window_rebuilt && !content_changed)
+    if @split_line >= 0 && can_shift
+      # Shift the rows below the split down one, then draw the
+      # truncated original line and the new line.
+      split_row = @split_line - @scroll_top
+      row = @edit_rows - 1
+      while row > split_row
+        DVI::Text.write_line(@edit_top + row, DVI::Text.read_line(@edit_top + row - 1))
+        row -= 1
+      end
+      draw_line(split_row - 1) if split_row > 0
+      draw_line(split_row)
+    elsif @join_line >= 0 && can_shift
+      # Shift the rows below the join up one, draw the newly exposed
+      # bottom row and the merged line.
+      join_row = @join_line - @scroll_top
+      row = join_row + 1
+      while row < @edit_rows - 1
+        DVI::Text.write_line(@edit_top + row, DVI::Text.read_line(@edit_top + row + 1))
+        row += 1
+      end
+      draw_line(@edit_rows - 1) if join_row < @edit_rows - 1
+      draw_line(join_row)
+    elsif dirty == :structure || vdelta.abs >= @edit_rows ||
+          (hscrolled && vdelta != 0) || (window_rebuilt && !content_changed)
       draw_all_lines
     elsif hscrolled
       draw_hscroll(@old_scroll_left)
