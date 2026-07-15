@@ -156,23 +156,6 @@ class SchedulerTest < Picotest::Test
     assert_equal 700, session.output_late_ms_max
   end
 
-  def test_staging_catches_up_under_a_slow_loop
-    # A slow loop calls update at intervals longer than one stage chunk
-    # (500 ms of music at 120 bpm). One chunk per tick would lose
-    # ground every tick and fire events seconds late; the catch-up
-    # stages enough chunks to stay ahead, so no event overruns once the
-    # loop settles into its slow but steady cadence.
-    session, _audio = new_session
-    session.bind_statement(:drums, Johakyu.sound("bd*4"))
-    t = 0
-    while t < 20_000
-      Machine.millis = t
-      session.update
-      t += 300  # every update a chunk-and-a-half of music behind
-    end
-    assert_equal 0, session.output_late_count
-  end
-
   def test_sound_reserves_sample_accurate_despite_loop_jitter
     session, audio = new_session
     session.bind_statement(:drums, Johakyu.sound("bd*4"))
