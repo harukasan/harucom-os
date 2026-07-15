@@ -122,7 +122,9 @@ blend_aa_pixel(uint8_t bg, uint8_t fg, uint8_t alpha4)
 // These constants must match ttf2c.rb.
 #define HUFF_ALPHABET 32
 #define HUFF_MAXBITS  24
-#define GLYPH_SCRATCH_MAX (48 * 48)
+// Must hold the largest decoded ink bounding box. The 48px JIS fonts have
+// cells up to about 64x70 pixels, so 96x96 leaves headroom.
+#define GLYPH_SCRATCH_MAX (96 * 96)
 
 typedef struct {
   uint16_t count[HUFF_MAXBITS + 1];

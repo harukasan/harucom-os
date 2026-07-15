@@ -261,7 +261,9 @@ options = {
   jis: false,
   aa: false,
   compress: false,
-  ascent: nil
+  ascent: nil,
+  chars_files: [],
+  jis_rows: nil
 }
 
 OptionParser.new do |opts|
@@ -274,6 +276,8 @@ OptionParser.new do |opts|
   opts.on("--aa", "Anti-aliased 4bpp rendering") { options[:aa] = true }
   opts.on("--compress", "Compress glyphs (Huffman + zero-run, JIS+AA only)") { options[:compress] = true }
   opts.on("--ascent N", Integer, "Force baseline row (align with another font)") { |n| options[:ascent] = n }
+  opts.on("--chars FILE", "Subset JIS glyphs to characters used in FILE (repeatable)") { |f| options[:chars_files] << f }
+  opts.on("--jis-rows LIST", "Always include these JIS rows (e.g. \"1-5\" or \"1,2,4\")") { |l| options[:jis_rows] = l }
 end.parse!
 
 input_path = ARGV[0] or abort "Error: no input TTF file specified"
@@ -421,6 +425,39 @@ def pack_pixels_4bpp(pixels, glyph_width)
   end
 end
 
+# Parse a row list like "1-5" or "1,2,4-8" into an array of row numbers.
+def parse_jis_rows(list)
+  list.split(",").flat_map do |part|
+    if part.include?("-")
+      first, last = part.split("-").map { |n| Integer(n) }
+      (first..last).to_a
+    else
+      [Integer(part)]
+    end
+  end
+end
+
+# Build the set of JIS linear indices to render, or nil for full coverage.
+# The subset is the union of whole JIS rows (jis_rows) and every character
+# found in the given files (chars_files) that maps to JIS X 0208.
+def build_jis_subset(uni2jis, chars_files, jis_rows)
+  return nil if chars_files.empty? && jis_rows.nil?
+  subset = {}
+  if jis_rows
+    parse_jis_rows(jis_rows).each do |ku|
+      abort "Error: JIS row #{ku} out of range 1..94" unless (1..94).cover?(ku)
+      94.times { |ten| subset[(ku - 1) * 94 + ten] = true }
+    end
+  end
+  chars_files.each do |file|
+    File.read(file, encoding: "UTF-8").each_char do |ch|
+      idx = uni2jis[ch.ord]
+      subset[idx] = true if idx
+    end
+  end
+  subset
+end
+
 # Build Unicode -> JIS linear index mapping
 def build_unicode_to_jis_map
   map = {}
@@ -486,6 +523,9 @@ if options[:jis]
   # JIS mode: generate JIS-indexed font from Unicode TTF
   uni2jis = build_unicode_to_jis_map
   num_chars = 94 * 94
+
+  subset = build_jis_subset(uni2jis, options[:chars_files], options[:jis_rows])
+  uni2jis = uni2jis.select { |_cp, idx| subset[idx] } if subset
 
   jis_codepoints = uni2jis.keys
   glyph_width, glyph_height, ascender, min_left = scan_dimensions(font, jis_codepoints, options[:size], mono: !options[:aa])
