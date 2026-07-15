@@ -111,6 +111,7 @@ class JohakyuApp
 
     @evaling = false
     @eval_started_ms = 0
+    @highlight_stale = false
     @eval_compile_ms = 0
     @preedit_width = 0
     @dmx_running = false
@@ -203,6 +204,14 @@ class JohakyuApp
       c = @keyboard.read_char
       if c
         handle_key(c)
+      elsif @highlight_stale && (!$ime || $ime.preedit.bytesize == 0)
+        # Idle frame: catch up on the deferred reparse and recolor.
+        @highlight_stale = false
+        analyze_viewport
+        @session.pump_outputs
+        @console.hide_cursor
+        draw_all_lines
+        place_cursor
       end
 
       @view.draw
@@ -939,6 +948,7 @@ class JohakyuApp
           @buffer.put(c.to_s)
           if c.to_s == " " && RubySyntax.should_dedent_on_space?(@buffer.current_line)
             result = analyze_window(@buffer.cursor_y, @buffer.cursor_y)
+            @session.pump_outputs
             if result
               old_line = @buffer.current_line
               if RubySyntax.reindent_line(@buffer, @buffer.cursor_y, result.indent_level(@buffer.cursor_y - @win_start))
@@ -959,6 +969,7 @@ class JohakyuApp
 
   def auto_indent
     result = analyze_window(@buffer.cursor_y - 1, @buffer.cursor_y)
+    @session.pump_outputs
     return unless result
     prev_y = @buffer.cursor_y - 1
     if prev_y >= 0
@@ -991,9 +1002,17 @@ class JohakyuApp
     window_rebuilt = false
     vis_bottom = @scroll_top + @edit_rows
     vis_bottom = @buffer.lines.length if vis_bottom > @buffer.lines.length
-    if content_changed || @scroll_top < @win_start || vis_bottom > @win_end
+    # A content edit inside the window defers its reparse to an idle
+    # frame (the edited line briefly keeps the stale colors), the same
+    # as edit.rb: the parse is an atomic prism call that would stall
+    # the show loop on every keystroke otherwise. Structure changes
+    # and window moves still parse now, then pump what came due.
+    if dirty == :structure || @scroll_top < @win_start || vis_bottom > @win_end
       analyze_viewport
+      @session.pump_outputs
       window_rebuilt = true
+    elsif dirty == :content
+      @highlight_stale = true
     end
 
     if dirty == :structure || vdelta.abs >= @edit_rows ||

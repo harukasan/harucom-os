@@ -146,6 +146,14 @@ module Johakyu
       pump_lights
     end
 
+    # Fire due sinks without staging. Call between two heavy blocking
+    # operations in the app loop (a syntax parse, a full redraw), so
+    # their costs never chain into one pump gap longer than the lead.
+    def pump_outputs
+      @scheduler.pump
+      pump_lights
+    end
+
     # Silence all voices (does not touch DMX).
     def stop_sounds
       @audio.stop_all if @audio
