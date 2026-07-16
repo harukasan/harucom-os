@@ -367,13 +367,18 @@ class JohakyuApp
         @live.apply
         apply_ms = Machine.board_millis - apply_t0
         run_ms = apply_t0 - @eval_started_ms
+        # Capture the lateness accumulated since the previous reset
+        # before reset_stats wipes it: it covers this eval's compile
+        # and run window, so it measures the eval stall at the output.
+        late_count = @session.output_late_count
+        late_ms = @session.output_late_ms_max
         # Restart the stats so tick/st/lt read as steady-state numbers
         # for the new binding, the same as the demo does per preset. A
         # cumulative average spanning an unmute keeps climbing toward
         # the new mean for minutes and reads like a slowdown.
         @session.reset_stats
         @view.reset_peaks
-        @message = "Applied (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms)"
+        @message = "Applied (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms, late #{late_count}/#{late_ms}ms)"
         unless Johakyu.patch.equal?(patch_before)
           # The rig changed: resize the universe view, re-lay the
           # editor out below it, and repaint everything.
