@@ -23,7 +23,11 @@ class BenchAudio
     Machine.board_millis * 50
   end
 
-  def play_at(sample, channel, volume = 15)
+  def load_sample(slot, data)
+    true
+  end
+
+  def play_at(sample, channel, volume = 15, slot = nil)
     true
   end
 

@@ -165,8 +165,14 @@ class FakeAudio
     Machine.board_millis * 50
   end
 
-  def play_at(sample, channel, volume = 15)
-    @events << [:play_at, sample, channel, volume]
+  def load_sample(slot, data)
+    @loaded_samples ||= {}
+    @loaded_samples[slot] = data
+    true
+  end
+
+  def play_at(sample, channel, volume = 15, slot = nil)
+    @events << [:play_at, sample, channel, volume, slot]
     true
   end
 

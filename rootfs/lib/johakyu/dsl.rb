@@ -33,17 +33,23 @@ module Johakyu
   class Session
     attr_reader :clock, :scheduler
 
-    # Drum kit channel map, matching audio_demo: tones would use 0-2,
-    # drums one-shot on 3-7. Pairs sharing a channel cut each other
-    # off (hh/oh is the hihat choke). :sn aliases :sd so mini patterns
-    # written either way play.
-    KIT_CHANNELS = {
-      bd: 3, sd: 4, sn: 4, hh: 5, oh: 5,
-      cp: 6, rim: 6, lt: 7, ht: 7,
-    }
-    KIT_SOURCES = {
-      bd: "bd", sd: "sd", sn: "sd", hh: "hh", oh: "oh",
-      cp: "cp", rim: "rim", lt: "lt", ht: "ht",
+    # One entry per drum voice: mixer channel, bank slot, and sample
+    # source. Tones use channels 0-2; drums one-shot on 3-7. Pairs share
+    # a channel to choke each other (hh/oh, cp/rim, lt/ht) but keep
+    # their own bank slot, so the shared channel plays the right sample
+    # and the retrigger cuts the previous one. :sn aliases :sd (same
+    # slot and source). The mini ":n" suffix is a sample-variation
+    # number, unrelated to :slot; play_sound still ignores it.
+    KIT = {
+      bd:  { channel: 3, slot: 0, source: "bd" },
+      sd:  { channel: 4, slot: 1, source: "sd" },
+      sn:  { channel: 4, slot: 1, source: "sd" },
+      hh:  { channel: 5, slot: 2, source: "hh" },
+      oh:  { channel: 5, slot: 3, source: "oh" },
+      cp:  { channel: 6, slot: 4, source: "cp" },
+      rim: { channel: 6, slot: 5, source: "rim" },
+      lt:  { channel: 7, slot: 6, source: "lt" },
+      ht:  { channel: 7, slot: 7, source: "ht" },
     }
     KIT_VOLUME = 14
 
@@ -100,29 +106,38 @@ module Johakyu
     # fixture response). Tune per venue.
     attr_accessor :audio_latency_ms
 
-    # Attach the drum samples to their channels on the real engine.
-    # Loads /data/drums WAVs; a missing or unreadable file falls back
-    # to rendering the same Synth definition on the board (File.open
-    # returns nil for missing files instead of raising).
+    # Preload the drum samples into their bank slots on the real engine.
+    # Loads /data/drums WAVs; a missing or unreadable file falls back to
+    # rendering the same Synth definition on the board. Each distinct
+    # source loads once; @sample_bank_pin holds the bytes so the engine
+    # pointer stays valid for the Session's life.
     def load_kit
       return unless @audio
-      attached = {}
-      KIT_SOURCES.each do |name, source|
-        next if attached[source]
-        data = nil
-        begin
-          data = File.open("/data/drums/#{source}.wav", "r") { |f| f.read }
-        rescue
-          data = nil
-        end
-        if data.nil? || data.bytesize < 44
-          require "synth/drum_kit"
-          data = Synth::DrumKit.render(source)
-        end
-        channel = @audio.channel(KIT_CHANNELS[name])
-        channel.source = ::PWMAudio::Sample.new(data)
-        attached[source] = true
+      @sample_bank_pin ||= []
+      KIT.each_value do |entry|
+        slot = entry[:slot]
+        next if @sample_bank_pin[slot]
+        data = load_drum_data(entry[:source])
+        @audio.load_sample(slot, data)
+        @sample_bank_pin[slot] = data
       end
+    end
+
+    # Read a drum WAV from /data/drums, or synthesize it on the board
+    # when the file is missing or unreadable (File.open returns nil for
+    # missing files instead of raising).
+    def load_drum_data(source)
+      data = nil
+      begin
+        data = File.open("/data/drums/#{source}.wav", "r") { |f| f.read }
+      rescue
+        data = nil
+      end
+      if data.nil? || data.bytesize < 44
+        require "synth/drum_kit"
+        data = Synth::DrumKit.render(source)
+      end
+      data
     end
 
     def tempo(bpm)
@@ -240,19 +255,23 @@ module Johakyu
 
     # Reserve one drum hit in the C engine at the target time,
     # converted through a board_millis/sample_clock anchor pair read
-    # together. Unknown names are ignored, Tidal style.
+    # together. The bank slot rides on the reservation so a shared
+    # channel plays the right sample even when a neighbor is reserved
+    # first. Unknown names are ignored, Tidal style. The ":n" suffix is
+    # a sample-variation number, unrelated to the bank slot, so it is
+    # dropped here.
     def play_sound(name, target_ms)
       return unless @audio
       name = name.to_s
       colon = name.index(":")
       name = name[0, colon] if colon
-      channel = KIT_CHANNELS[name.to_sym]
-      return unless channel
+      entry = KIT[name.to_sym]
+      return unless entry
       target = target_ms - @audio_latency_ms
       now_ms = Machine.board_millis
       at_sample = @audio.sample_clock + (target - now_ms) * SAMPLES_PER_MS
       at_sample = @audio.sample_clock if at_sample < @audio.sample_clock
-      @audio.play_at(at_sample, channel, KIT_VOLUME)
+      @audio.play_at(at_sample, entry[:channel], KIT_VOLUME, entry[:slot])
     end
 
     def pump_lights

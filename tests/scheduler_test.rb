@@ -179,8 +179,10 @@ class SchedulerTest < Picotest::Test
     session.bind_statement(:drums, Johakyu.sound("bd ~ sn ~"))
     run_until(session, 1990)
     plays = audio.plays
-    assert_equal [0, 3, 14], [plays[0][1], plays[0][2], plays[0][3]]
-    assert_equal [50_000, 4, 14], [plays[1][1], plays[1][2], plays[1][3]]
+    # [sample, channel, volume, bank slot]. bd -> ch3 slot0, sn (an
+    # alias of sd) -> ch4 slot1.
+    assert_equal [0, 3, 14, 0], [plays[0][1], plays[0][2], plays[0][3], plays[0][4]]
+    assert_equal [50_000, 4, 14, 1], [plays[1][1], plays[1][2], plays[1][3], plays[1][4]]
   end
 
   def test_unknown_voice_is_ignored
