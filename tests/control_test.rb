@@ -127,4 +127,41 @@ class ControlTest < Picotest::Test
     assert_equal true, starts.include?([:s1, 1.0])
     assert_equal true, starts.include?([:s2, 1.5])
   end
+
+  def test_note_wraps_names_into_note_numbers
+    haps = onsets(Johakyu.note("c5 e5 g5"))
+    assert_equal({ note: 60 }, haps[0].value)
+    assert_equal({ note: 64 }, haps[1].value)
+    assert_equal({ note: 67 }, haps[2].value)
+  end
+
+  def test_note_name_grammar
+    assert_equal 49, Johakyu.note_number("c#4")
+    assert_equal 49, Johakyu.note_number("cs4")
+    assert_equal 63, Johakyu.note_number("eb5")
+    assert_equal 59, Johakyu.note_number("b4")
+    assert_equal 60, Johakyu.note_number("c")
+    assert_equal 60, Johakyu.note_number("C5")
+    assert_equal 60, Johakyu.note_number("60")
+    assert_equal 60, Johakyu.note_number(60)
+    assert_equal 69, Johakyu.note_number("a5")
+  end
+
+  def test_note_chord_yields_three_onsets
+    haps = onsets(Johakyu.note("[c5,e5,g5]"))
+    assert_equal 3, haps.length
+    notes = haps.map { |h| h.value[:note] }.sort
+    assert_equal [60, 64, 67], notes
+  end
+
+  def test_note_chains_waveform_and_gain
+    haps = onsets(Johakyu.note("c5").sound("saw").gain(0.5))
+    assert_equal 60, haps[0].value[:note]
+    assert_equal "saw", haps[0].value[:s]
+    assert_equal 0.5, haps[0].value[:gain]
+  end
+
+  def test_unknown_note_name_raises_at_query
+    assert_raise(ArgumentError) { onsets(Johakyu.note("brr")) }
+  end
 end

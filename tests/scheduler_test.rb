@@ -284,4 +284,16 @@ class SchedulerTest < Picotest::Test
     run_until(session, 3000)
     assert_equal count, audio.plays.length
   end
+
+  # The sink's third argument carries the event's whole duration, so
+  # pitched sinks can schedule the note-off. Two-argument sinks keep
+  # working (blocks ignore extra arguments).
+  def test_sink_receives_event_duration
+    clock = Johakyu::Clock.new(bpm: 120)
+    scheduler = Johakyu::Scheduler.new(clock)
+    durations = []
+    scheduler.bind(:t, Johakyu::Mini.parse("a b")) { |v, at, dur| durations << dur }
+    run_until(scheduler, 1100)
+    assert_equal [1000, 1000], durations
+  end
 end

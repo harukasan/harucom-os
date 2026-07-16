@@ -314,4 +314,65 @@ class LiveTest < Picotest::Test
       t += step_ms
     end
   end
+
+  # note(): sample-accurate tone reservations with the note-off at
+  # each event's whole end, voices round-robin over channels 0-2.
+  def test_note_track_plays_tones_with_duration
+    @live.begin_recording
+    track(:lead) { note("c5 e5 g5 b5") }
+    @live.apply
+    run_until(1600)
+    tones = @audio.tone_ats
+    assert_equal [0, 25000, 50000, 75000], tones.map { |e| e[1] }
+    assert_equal [0, 1, 2, 0], tones.map { |e| e[2] }
+    assert_equal [262, 330, 392, 494], tones.map { |e| e[3] }
+    assert_equal [1, 1, 1, 1], tones.map { |e| e[4] }
+    assert_equal [12, 12, 12, 12], tones.map { |e| e[5] }
+    assert_equal [25000, 50000, 75000, 100000], @audio.stop_ats.map { |e| e[1] }
+    assert_equal 0, @session.note_drop_count
+  end
+
+  def test_note_chord_uses_three_voices
+    @live.begin_recording
+    track(:chord) { note("[c5,e5,g5]") }
+    @live.apply
+    run_until(200)
+    tones = @audio.tone_ats
+    assert_equal [0, 0, 0], tones.map { |e| e[1] }
+    assert_equal [0, 1, 2], tones.map { |e| e[2] }.sort
+    assert_equal [100000, 100000, 100000], @audio.stop_ats.map { |e| e[1] }
+    assert_equal 0, @audio.cancels.length
+  end
+
+  def test_four_note_chord_steals_the_oldest_voice
+    @live.begin_recording
+    track(:chord) { note("[c5,e5,g5,c6]") }
+    @live.apply
+    run_until(200)
+    assert_equal 4, @audio.tone_ats.length
+    cancels = @audio.cancels
+    assert_equal 1, cancels.length
+    assert_equal 0, cancels[0][2]
+  end
+
+  def test_note_waveform_and_gain_chain
+    @live.begin_recording
+    track(:lead) { note("c5").sound("saw").gain(1.0) }
+    @live.apply
+    run_until(200)
+    tone = @audio.tone_ats[0]
+    assert_equal 3, tone[4]
+    assert_equal 15, tone[5]
+  end
+
+  def test_note_and_drums_share_the_session
+    @live.begin_recording
+    track(:drums) { sound("bd*2") }
+    track(:lead) { note("c5 g5") }
+    @live.apply
+    run_until(900)
+    # drums stay on the kit channels, notes on the tone pool
+    assert_equal true, @audio.plays.all? { |e| e[2] >= 3 }
+    assert_equal true, @audio.tone_ats.all? { |e| e[2] <= 2 }
+  end
 end

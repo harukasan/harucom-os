@@ -47,6 +47,23 @@ module Johakyu
     }
     KIT_VOLUME = 14
 
+    # Tone voices for pitched notes; drums own channels 3-7. Notes
+    # round-robin across the pool and steal the channel's previous
+    # reservation when they overlap it.
+    TONE_CHANNELS = [0, 1, 2]
+    NOTE_VOLUME = 12
+
+    # Equal temperament for octave 9 (c9..b9 in the c5 = 60 naming).
+    # Lower octaves derive by integer halving with rounding, so pitch
+    # never touches Float.
+    NOTE_BASE_HZ = [4186, 4435, 4699, 4978, 5274, 5588, 5920, 6272,
+                    6645, 7040, 7459, 7902]
+
+    # Waveform names accepted from .sound() on note tracks live in
+    # @waveforms, built in initialize: referencing ::PWMAudio at file
+    # load would break the CRuby test discovery pass, which requires
+    # this file without the board modules.
+
     # Sinks fire this many ms before their musical target. Sound is
     # reserved in C for the target sample and light writes wait in the
     # due list until the target, so a fire delayed by up to this lead
@@ -73,7 +90,22 @@ module Johakyu
       @output_late_count = 0
       @output_late_ms_max = 0
       @light_error = nil
+      @next_voice = 0
+      @voice_busy_until = Array.new(TONE_CHANNELS.length, 0)
+      @note_drop_count = 0
+      @waveforms = {
+        "sine" => ::PWMAudio::SINE, :sine => ::PWMAudio::SINE,
+        "square" => ::PWMAudio::SQUARE, :square => ::PWMAudio::SQUARE,
+        "tri" => ::PWMAudio::TRIANGLE, :tri => ::PWMAudio::TRIANGLE,
+        "triangle" => ::PWMAudio::TRIANGLE, :triangle => ::PWMAudio::TRIANGLE,
+        "saw" => ::PWMAudio::SAWTOOTH, :saw => ::PWMAudio::SAWTOOTH,
+        "sawtooth" => ::PWMAudio::SAWTOOTH, :sawtooth => ::PWMAudio::SAWTOOTH,
+      }
     end
+
+    # Notes whose C-engine reservation was refused (the shared
+    # scheduled-event queue holds 32 slots across all channels).
+    attr_reader :note_drop_count
 
     # Events whose fire delay exceeded RESERVE_LEAD_MS, so the overrun
     # reached the output (sound clamped to now, light written late).
@@ -92,6 +124,7 @@ module Johakyu
       @scheduler.reset_stats
       @output_late_count = 0
       @output_late_ms_max = 0
+      @note_drop_count = 0
     end
 
     # Fine alignment trim between sound and light, in ms; positive
@@ -136,8 +169,8 @@ module Johakyu
     # Rebinding swaps at the next cycle boundary (scheduler rule).
     def bind_statement(name, pattern)
       lead = RESERVE_LEAD_MS
-      @scheduler.bind(name, pattern, latency_ms: lead) do |value, early_ms|
-        dispatch_event(value, early_ms + lead)
+      @scheduler.bind(name, pattern, latency_ms: lead) do |value, early_ms, duration_ms|
+        dispatch_event(value, early_ms + lead, duration_ms)
       end
     end
 
@@ -178,14 +211,20 @@ module Johakyu
 
     # Split one control map into the two sinks. Sound reserves now for
     # the target; light waits in the due list until the target.
-    def dispatch_event(value, target_ms)
+    def dispatch_event(value, target_ms, duration_ms = nil)
       overrun = Machine.board_millis - target_ms
       if overrun > 0
         @output_late_count += 1
         @output_late_ms_max = overrun if overrun > @output_late_ms_max
       end
       map = value.is_a?(Hash) ? value : { s: value }
-      play_sound(map[:s], target_ms) if map[:s]
+      if map[:note]
+        # A note map may carry :s as its waveform name; the pitched
+        # path consumes it, so it never reaches the drum kit.
+        play_note(map, target_ms, duration_ms)
+      elsif map[:s]
+        play_sound(map[:s], target_ms)
+      end
 
       writes = nil
       i = 0
@@ -262,6 +301,58 @@ module Johakyu
       at_sample = @audio.sample_clock + (target - now_ms) * SAMPLES_PER_MS
       at_sample = @audio.sample_clock if at_sample < @audio.sample_clock
       @audio.play_at(at_sample, channel, KIT_VOLUME)
+    end
+
+    # Reserve one pitched note: a tone at the target sample and a
+    # stop at the note's end (the hap whole duration threaded through
+    # the scheduler). Voices round-robin over TONE_CHANNELS; a note
+    # overlapping the channel's previous reservation steals it, which
+    # drops the stale stop and, if the old note had not sounded yet,
+    # its start.
+    def play_note(map, target_ms, duration_ms)
+      return unless @audio
+      number = map[:note]
+      return unless number.is_a?(Integer)
+      duration_ms = 125 if duration_ms.nil? || duration_ms <= 0
+      target = target_ms - @audio_latency_ms
+      now_ms = Machine.board_millis
+      base = @audio.sample_clock
+      at_sample = base + (target - now_ms) * SAMPLES_PER_MS
+      at_sample = base if at_sample < base
+      stop_sample = at_sample + duration_ms * SAMPLES_PER_MS
+
+      index = @next_voice
+      @next_voice = index + 1 >= TONE_CHANNELS.length ? 0 : index + 1
+      channel = TONE_CHANNELS[index]
+      @audio.cancel_scheduled(channel) if at_sample < @voice_busy_until[index]
+
+      waveform = @waveforms[map[:s]]
+      waveform = ::PWMAudio::SQUARE if waveform.nil?
+      gain = map[:gain]
+      if gain
+        volume = (gain.to_f * 15).to_i
+        volume = 0 if volume < 0
+        volume = 15 if volume > 15
+      else
+        volume = NOTE_VOLUME
+      end
+      ok = @audio.tone_at(at_sample, channel, note_hz(number),
+                          waveform: waveform, volume: volume)
+      ok = @audio.stop_at(stop_sample, channel) && ok
+      @note_drop_count += 1 unless ok
+      @voice_busy_until[index] = stop_sample
+    end
+
+    # Integer Hz for a note number: shift the octave-9 table down
+    # with rounding. Note that this naming sits one octave above the
+    # Board::PWMAudio constants (c5 = 60 = 262 Hz = Board's C4).
+    def note_hz(number)
+      number = 0 if number < 0
+      number = 119 if number > 119
+      pitch = number % 12
+      shift = 9 - number / 12
+      return NOTE_BASE_HZ[pitch] if shift <= 0
+      (NOTE_BASE_HZ[pitch] + (1 << (shift - 1))) >> shift
     end
 
     def pump_lights

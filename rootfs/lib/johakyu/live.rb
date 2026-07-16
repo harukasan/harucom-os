@@ -310,6 +310,15 @@ module Johakyu
       define_method(key) { |source| replace(@pattern.send(key, source)) }
     end
 
+    # Sound control mirrors for note chains.
+    def sound(source)
+      replace(@pattern.sound(source))
+    end
+
+    def gain(source)
+      replace(@pattern.gain(source))
+    end
+
     private
 
     def replace(pattern)
@@ -374,6 +383,11 @@ end
 
 def sound(source)
   pattern = Johakyu.sound(source)
+  $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
+end
+
+def note(source)
+  pattern = Johakyu.note(source)
   $johakyu_live.capturing? ? pattern : $johakyu_live.record_bare(pattern)
 end
 
