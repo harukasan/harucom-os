@@ -190,6 +190,11 @@ module Johakyu
         @session.remove_statement(name) unless bound[name]
       end
       @applied = bound
+      # Every rebound track restarts staging at its swap boundary;
+      # build the post-swap runway now, pumping between chunks,
+      # instead of paying one chunk per app-loop iteration right when
+      # the new patterns land.
+      @session.prestage(1.0, 200)
       true
     end
 

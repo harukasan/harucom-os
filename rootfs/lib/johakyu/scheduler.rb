@@ -198,6 +198,37 @@ module Johakyu
       @tick_ms_total.to_f / @tick_count
     end
 
+    # Stage every track to at least the given runway ahead of now, one
+    # chunk at a time within a real-time budget. Yields between chunks
+    # so the caller can pump due events; a long prestage then cannot
+    # hold back firing. Called before a known stall (an eval compile
+    # is one atomic C call, no tick can run inside it) and after an
+    # apply rebinds tracks, so the stall or burst is paid from
+    # pre-staged runway instead of starving the outputs.
+    def stage_ahead(cycles, budget_ms)
+      deadline = Machine.board_millis + budget_ms
+      target = @clock.position + cycles
+      while Machine.board_millis < deadline
+        urgent = nil
+        i = 0
+        while i < @order.length
+          track = @tracks[@order[i]]
+          i += 1
+          next unless track
+          if urgent.nil? || track[:staged_until] < urgent[:staged_until]
+            urgent = track
+          end
+        end
+        break if urgent.nil? || urgent[:staged_until].to_f >= target
+        begin
+          stage_chunk(urgent)
+        rescue => e
+          track_failed(urgent, e)
+        end
+        yield if block_given?
+      end
+    end
+
     private
 
     def add_track(name, pattern, sink, latency_ms)

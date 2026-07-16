@@ -162,6 +162,15 @@ module Johakyu
       pump_lights
     end
 
+    # Build extra staged runway across all tracks, pumping due events
+    # between chunks. Call right before a known blocking stall (the
+    # eval compile) and right after an apply rebinds tracks, so the
+    # stall or burst is paid from pre-staged events instead of firing
+    # late.
+    def prestage(cycles = 0.75, budget_ms = 250)
+      @scheduler.stage_ahead(cycles, budget_ms) { pump_outputs }
+    end
+
     # Silence all voices (does not touch DMX).
     def stop_sounds
       @audio.stop_all if @audio

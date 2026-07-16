@@ -325,6 +325,11 @@ class JohakyuApp
   def start_eval
     return if @evaling
     source = @buffer.lines.join("\n")
+    # Build staged runway before the compile: mrc compile is one
+    # atomic C call, so no tick can run inside it, and the sandbox
+    # run that follows shares the CPU with the show loop. Pre-staged
+    # pending events plus the reserve lead absorb both.
+    @session.prestage
     @live.begin_recording
     compile_t0 = Machine.board_millis
     @sandbox.terminate if @sandbox
