@@ -193,12 +193,21 @@ class JohakyuApp
     Johakyu.preload_personalities
     @live = Johakyu::Live.new(@session)
     $johakyu_live = @live
+    # Idle-driven GC: steps run while every task sleeps (this loop
+    # sleeps 5 ms per iteration) instead of inside allocation bursts
+    # mid chunk query or mid eval. step_limit bounds one step's work
+    # (objects processed) and the debt valve forces synchronous
+    # progress when the loop never goes idle, bounding heap growth.
+    GC.scheduler_driven = true
+    GC.step_limit = 400
+    GC.debt_limit = 4096
   end
 
   # Runs from the ensure in run, so setup may have failed at any
   # point; only tear down what actually came up, and do not let a
   # teardown error mask the original exception.
   def shutdown
+    GC.scheduler_driven = false
     @sandbox.terminate if @sandbox
     @session.stop_sounds if @session
     @audio.deinit if @audio
