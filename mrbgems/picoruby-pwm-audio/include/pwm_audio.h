@@ -95,9 +95,10 @@ bool pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length)
  * playing it: the old bytes may be freed under the running stream. */
 bool pwm_audio_load_sample(uint8_t slot, const uint8_t *data, uint32_t length);
 
-/* One-shot playback of the channel's sample from the beginning (a
- * retrigger restarts it). No-op when the channel has no sample. */
-void pwm_audio_play(uint8_t channel, uint8_t volume);
+/* One-shot playback from the beginning (a retrigger restarts it). slot
+ * installs a preloaded bank sample first; PWM_AUDIO_BANK_NONE plays the
+ * channel's attached sample (a no-op when it has none). */
+void pwm_audio_play(uint8_t channel, uint8_t slot, uint8_t volume);
 
 /* Parse a QOA or WAV header without touching any channel; used to
  * validate sample data up front. frames counts per channel. */

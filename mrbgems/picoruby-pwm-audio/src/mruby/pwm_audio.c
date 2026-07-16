@@ -195,6 +195,18 @@ mrb_pwm_audio_load_sample(mrb_state *mrb, mrb_value self)
   return mrb_true_value();
 }
 
+/* BANK_NONE means "use the channel's attached sample"; any other slot
+ * must be in range. Rejecting a bad slot here matches load_sample and
+ * stops the uint8_t cast from silently folding it (256 to 0, -1 to
+ * BANK_NONE). */
+static void
+check_slot(mrb_state *mrb, mrb_int slot)
+{
+  if (slot != PWM_AUDIO_BANK_NONE && (slot < 0 || slot >= PWM_AUDIO_NUM_BANKS)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid slot");
+  }
+}
+
 /* PWMAudio.play(channel, volume, slot=BANK_NONE): play a sample from
  * the start. slot selects a preloaded bank sample; omitted, it plays
  * whatever is attached to the channel. */
@@ -206,14 +218,8 @@ mrb_pwm_audio_play(mrb_state *mrb, mrb_value self)
   if (channel < 0 || channel >= PWM_AUDIO_NUM_CHANNELS) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid channel");
   }
-  if (slot == PWM_AUDIO_BANK_NONE) {
-    pwm_audio_play((uint8_t)channel, (uint8_t)volume);
-  } else {
-    /* Route through the scheduler at the current clock so the bank
-     * copy runs in the render path, matching play_at. */
-    pwm_audio_play_schedule(pwm_audio_sample_clock(), (uint8_t)channel, (uint8_t)volume,
-                            (uint8_t)slot);
-  }
+  check_slot(mrb, slot);
+  pwm_audio_play((uint8_t)channel, (uint8_t)slot, (uint8_t)volume);
   return mrb_nil_value();
 }
 
@@ -228,6 +234,7 @@ mrb_pwm_audio_play_at(mrb_state *mrb, mrb_value self)
   if (channel < 0 || channel >= PWM_AUDIO_NUM_CHANNELS) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid channel");
   }
+  check_slot(mrb, slot);
   bool ok = pwm_audio_play_schedule((uint64_t)sample, (uint8_t)channel, (uint8_t)volume,
                                     (uint8_t)slot);
   return mrb_bool_value(ok);

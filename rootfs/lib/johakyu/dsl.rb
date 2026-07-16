@@ -33,27 +33,23 @@ module Johakyu
   class Session
     attr_reader :clock, :scheduler
 
-    # Drum kit channel map: tones use 0-2, drums one-shot on 3-7. Pairs
-    # sharing a channel cut each other off (hh/oh is the hihat choke).
-    # :sn aliases :sd so mini patterns written either way play.
-    KIT_CHANNELS = {
-      bd: 3, sd: 4, sn: 4, hh: 5, oh: 5,
-      cp: 6, rim: 6, lt: 7, ht: 7,
-    }
-    KIT_SOURCES = {
-      bd: "bd", sd: "sd", sn: "sd", hh: "hh", oh: "oh",
-      cp: "cp", rim: "rim", lt: "lt", ht: "ht",
-    }
-    # Bank slot per distinct drum. Choke lives in KIT_CHANNELS: hh/oh
-    # (slots 2/3) share channel 5, cp/rim (4/5) share 6, lt/ht (6/7)
-    # share 7. The engine holds one sample per bank slot, so a play
-    # carries its slot and the shared channel retrigger cuts the
-    # previous sound while each drum keeps its own sample. :sn reuses
-    # :sd's slot (same sample). This is unrelated to the mini ":n"
-    # sample-variation number, which play_sound still ignores.
-    KIT_SLOTS = {
-      bd: 0, sd: 1, sn: 1, hh: 2, oh: 3,
-      cp: 4, rim: 5, lt: 6, ht: 7,
+    # One entry per drum voice: mixer channel, bank slot, and sample
+    # source. Tones use channels 0-2; drums one-shot on 3-7. Pairs share
+    # a channel to choke each other (hh/oh, cp/rim, lt/ht) but keep
+    # their own bank slot, so the shared channel plays the right sample
+    # and the retrigger cuts the previous one. :sn aliases :sd (same
+    # slot and source). The mini ":n" suffix is a sample-variation
+    # number, unrelated to :slot; play_sound still ignores it.
+    KIT = {
+      bd:  { channel: 3, slot: 0, source: "bd" },
+      sd:  { channel: 4, slot: 1, source: "sd" },
+      sn:  { channel: 4, slot: 1, source: "sd" },
+      hh:  { channel: 5, slot: 2, source: "hh" },
+      oh:  { channel: 5, slot: 3, source: "oh" },
+      cp:  { channel: 6, slot: 4, source: "cp" },
+      rim: { channel: 6, slot: 5, source: "rim" },
+      lt:  { channel: 7, slot: 6, source: "lt" },
+      ht:  { channel: 7, slot: 7, source: "ht" },
     }
     KIT_VOLUME = 14
 
@@ -118,14 +114,12 @@ module Johakyu
     def load_kit
       return unless @audio
       @sample_bank_pin ||= []
-      loaded = {}
-      KIT_SLOTS.each do |name, slot|
-        source = KIT_SOURCES[name]
-        next if loaded[source]
-        data = load_drum_data(source)
+      KIT.each_value do |entry|
+        slot = entry[:slot]
+        next if @sample_bank_pin[slot]
+        data = load_drum_data(entry[:source])
         @audio.load_sample(slot, data)
         @sample_bank_pin[slot] = data
-        loaded[source] = true
       end
     end
 
@@ -271,15 +265,13 @@ module Johakyu
       name = name.to_s
       colon = name.index(":")
       name = name[0, colon] if colon
-      sym = name.to_sym
-      channel = KIT_CHANNELS[sym]
-      slot = KIT_SLOTS[sym]
-      return unless channel && slot
+      entry = KIT[name.to_sym]
+      return unless entry
       target = target_ms - @audio_latency_ms
       now_ms = Machine.board_millis
       at_sample = @audio.sample_clock + (target - now_ms) * SAMPLES_PER_MS
       at_sample = @audio.sample_clock if at_sample < @audio.sample_clock
-      @audio.play_at(at_sample, channel, KIT_VOLUME, slot)
+      @audio.play_at(at_sample, entry[:channel], KIT_VOLUME, entry[:slot])
     end
 
     def pump_lights

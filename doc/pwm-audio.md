@@ -322,7 +322,7 @@ positions. Called from the render pump.
 bool pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length);
 bool pwm_audio_set_stream(uint8_t channel, const uint8_t *extent_pairs,
                           uint32_t extent_count, uint32_t total_length);
-void pwm_audio_play(uint8_t channel, uint8_t volume);
+void pwm_audio_play(uint8_t channel, uint8_t slot, uint8_t volume);
 ```
 
 Switch a channel's source to a QOA or WAV sample and play it
@@ -330,7 +330,8 @@ one-shot. `set_sample` takes one contiguous buffer; `set_stream`
 takes packed little-endian `(u32 address, u32 length)` extent pairs
 covering the file in order (see FlashFile.extents). The backing
 memory must stay valid while attached (the mruby binding pins the
-String).
+String). `pwm_audio_play`'s `slot` installs a preloaded bank sample
+before playing, or `PWM_AUDIO_BANK_NONE` plays the attached one.
 
 ### pwm_audio_load_sample / pwm_audio_load_stream
 
