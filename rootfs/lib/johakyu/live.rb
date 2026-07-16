@@ -151,13 +151,17 @@ module Johakyu
       # Swap the rig first so the engine frame length follows before
       # any rebound track fires. A recording without fixture
       # statements keeps the current patch.
+      patch_changed = false
       if recording[:patch]
         Johakyu.patch = recording[:patch]
         ::DMX.active_slots = recording[:patch].max_channel
+        patch_changed = true
       end
 
+      tempo_changed = false
       if recording[:tempo] && recording[:tempo] != @session.clock.bpm
         @session.tempo(recording[:tempo])
+        tempo_changed = true
       end
       if recording[:latency] && recording[:latency] != @session.audio_latency_ms
         @session.audio_latency_ms = recording[:latency]
@@ -171,8 +175,19 @@ module Johakyu
         i += 1
         name = entry[0] || entry[3]
         pattern = entry[2] ? Pattern.silence : entry[1]
+        # Differential apply: a statement whose change signature
+        # matches the currently bound one keeps its binding and its
+        # staged events, so an eval that edits one track disturbs
+        # only that track. nil signatures always rebind (fail open);
+        # a patch swap invalidates fixture targets and a tempo change
+        # already restaged everything, so both disable the skip.
+        signature = pattern.sig
+        if signature && !patch_changed && !tempo_changed && @applied[name] == signature
+          bound[name] = signature
+          next
+        end
         @session.bind_statement(name, pattern)
-        bound[name] = true
+        bound[name] = signature || true
         # Each fresh bind stages its first chunk synchronously; fire
         # anything that came due so N tracks cannot chain N chunk
         # queries into one pump gap longer than the reserve lead.

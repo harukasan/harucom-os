@@ -32,9 +32,11 @@ module Johakyu
   def self.control_source(key, source)
     pattern = Pattern.reify(source)
     return SignalControl.new(pattern, SEGMENT_DEFAULT, key) if pattern.is_a?(Signal)
-    pattern.fmap do |value|
+    result = pattern.fmap do |value|
       value.is_a?(Hash) ? value : { key => value }
     end
+    result.sig = pattern.sig && "ctl:#{key}(#{pattern.sig})"
+    result
   end
 
   # Folded statement for a bare Signal: the segment discretization,
@@ -48,6 +50,20 @@ module Johakyu
       @key = key
       # Flat [key, value, ...] pairs merged into every control map.
       @statics = statics
+      base = signal.sig
+      if base
+        s = "ctl:#{key}(seg:#{n}(#{base}))"
+        if statics
+          i = 0
+          while i < statics.length
+            s = s + ";" + statics[i].to_s + "=" + Pattern.sig_value(statics[i + 1])
+            i += 2
+          end
+        end
+        self.sig = s
+      else
+        self.sig = nil
+      end
     end
 
     # Constants fold into the statics; pattern controls fall back to

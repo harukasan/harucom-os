@@ -40,7 +40,7 @@ module Johakyu
       # last cycle's event list halves the interpreter work.
       memo_cycle = nil
       memo_events = nil
-      @parsed[input] = Pattern.new do |span|
+      pattern = Pattern.new do |span|
         spans = span.span_cycles
         haps = []
         i = 0
@@ -67,6 +67,10 @@ module Johakyu
         end
         haps
       end
+      # The source text fully determines a mini pattern, so it is the
+      # change signature (see Pattern#sig).
+      pattern.sig = "m:" + input
+      @parsed[input] = pattern
     end
 
     # Tokenizer and recursive descent parser. Produces the same AST

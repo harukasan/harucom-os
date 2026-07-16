@@ -1,6 +1,19 @@
 require "picotest"
 require "johakyu/live"
 
+# Session that records every bind_statement call, so tests can assert
+# which tracks the differential apply actually rebinds.
+class LiveBindSpySession < Johakyu::Session
+  def bind_names
+    @bind_names ||= []
+  end
+
+  def bind_statement(name, pattern)
+    bind_names << name
+    super
+  end
+end
+
 # Live coding layer: eval scripts record tracks through the top-level
 # DSL, apply replays onto the running session with replace semantics.
 # track(:name) blocks are the primary form (strudel-rb compatible);
@@ -221,6 +234,84 @@ class LiveTest < Picotest::Test
     @live.begin_recording
     assert_raise(ArgumentError) do
       track(:bad) { 42 }
+    end
+  end
+
+  def spy_live
+    session = LiveBindSpySession.new(audio: @audio, bpm: 120, audio_latency_ms: 0)
+    live = Johakyu::Live.new(session)
+    $johakyu_live = live
+    [session, live]
+  end
+
+  def record_two_tracks(live, drums)
+    live.begin_recording
+    track(:drums) { sound(drums) }
+    track(:wash) { dimmer(sine.slow(4)).on(:s1) }
+    live.apply
+  end
+
+  # Differential apply: re-evaling an unchanged buffer rebinds
+  # nothing, editing one track rebinds only that track.
+  def test_unchanged_tracks_skip_rebinding
+    session, live = spy_live
+    record_two_tracks(live, "bd*4")
+    assert_equal [:drums, :wash], session.bind_names
+    record_two_tracks(live, "bd*4")
+    assert_equal [:drums, :wash], session.bind_names
+    record_two_tracks(live, "bd*2 sd")
+    assert_equal [:drums, :wash, :drums], session.bind_names
+  end
+
+  def test_tempo_change_rebinds_everything
+    session, live = spy_live
+    record_two_tracks(live, "bd*4")
+    live.begin_recording
+    tempo(240)
+    track(:drums) { sound("bd*4") }
+    track(:wash) { dimmer(sine.slow(4)).on(:s1) }
+    live.apply
+    assert_equal [:drums, :wash, :drums, :wash], session.bind_names
+  end
+
+  # A block transform leaves the signature nil, so it rebinds on
+  # every apply (fail open).
+  def test_unsigned_patterns_always_rebind
+    session, live = spy_live
+    2.times do
+      live.begin_recording
+      track(:x) { sound("bd*4").fmap { |m| m } }
+      live.apply
+    end
+    assert_equal [:x, :x], session.bind_names
+  end
+
+  # Unchanged tracks keep their staged events across an eval: the
+  # skip must not drop or double the track's output.
+  def test_skipped_track_output_stays_continuous
+    session, live = spy_live
+    audio = @audio
+    live.begin_recording
+    track(:drums) { sound("bd*2") }
+    live.apply
+    run_for(session, 900)
+    count_before = audio.plays.length
+    live.begin_recording
+    track(:drums) { sound("bd*2") }
+    live.apply
+    run_for(session, 2900)
+    # bd*2 at bpm 120: one hit every 1000 ms, reserved one lead
+    # early. No hit is lost or doubled across the no-op eval.
+    assert_equal [0, 1000, 2000, 3000], play_ms(audio).uniq
+    assert_equal true, audio.plays.length > count_before
+  end
+
+  def run_for(session, until_ms, step_ms = 10)
+    t = Machine.board_millis
+    while t <= until_ms
+      Machine.millis = t
+      session.update
+      t += step_ms
     end
   end
 end
