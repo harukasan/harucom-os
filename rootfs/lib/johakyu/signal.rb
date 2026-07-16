@@ -85,6 +85,54 @@ module Johakyu
       source = self
       Signal.new { |t| block.call(source.sample(t)) }
     end
+
+    # Signals discretize through the fast path below instead of the
+    # generic Pattern#segment.
+    def segment(n)
+      SegmentedSignal.new(self, n)
+    end
+  end
+
+  # Discrete segment fast path for signals: n Haps per cycle valued
+  # directly through Signal#sample, skipping the generic segment
+  # machinery (span_cycles split, one inner query and intersection per
+  # step). Values match the generic path exactly: the sample at each
+  # whole's midpoint.
+  class SegmentedSignal < Pattern
+    def initialize(signal, n)
+      @signal = signal
+      @n = n
+    end
+
+    def query(span)
+      b = span.begin_time
+      e = span.end_time
+      return [] if e <= b
+      n = @n
+      haps = []
+      # First segment index overlapping the span: floor(b * n) in
+      # integer math, no Rational temporaries.
+      j = (b.numerator * n).div(b.denominator)
+      ws = Rational(j, n)
+      while ws < e
+        we = Rational(j + 1, n)
+        part_b = ws > b ? ws : b
+        part_e = we < e ? we : e
+        haps << Hap.new(TimeSpan.new(ws, we), TimeSpan.new(part_b, part_e),
+                        value_at((j + 0.5) / n))
+        ws = we
+        j += 1
+      end
+      haps
+    end
+
+    private
+
+    # Hook for subclasses that wrap the sampled value (see
+    # SignalControl in control.rb).
+    def value_at(position)
+      @signal.sample(position)
+    end
   end
 
   # Build a continuous pattern from a block of cycle position (Float).

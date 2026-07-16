@@ -31,9 +31,47 @@ module Johakyu
   # control maps under key.
   def self.control_source(key, source)
     pattern = Pattern.reify(source)
-    pattern = pattern.segment(SEGMENT_DEFAULT) if pattern.is_a?(Signal)
+    return SignalControl.new(pattern, SEGMENT_DEFAULT, key) if pattern.is_a?(Signal)
     pattern.fmap do |value|
       value.is_a?(Hash) ? value : { key => value }
+    end
+  end
+
+  # Folded statement for a bare Signal: the segment discretization,
+  # the {key => value} control wrap, and any constant controls (the
+  # .on(:s1) target and friends) live in one pattern object, so a
+  # statement like pan(sine.slow(8)).on(:s1) queries as a single
+  # layer instead of stacking segment, fmap, and with_control.
+  class SignalControl < SegmentedSignal
+    def initialize(signal, n, key, statics = nil)
+      super(signal, n)
+      @key = key
+      # Flat [key, value, ...] pairs merged into every control map.
+      @statics = statics
+    end
+
+    # Constants fold into the statics; pattern controls fall back to
+    # the generic per-event sampling layer.
+    def with_control(key, other)
+      return super if other.is_a?(Pattern)
+      statics = @statics ? @statics.dup : []
+      statics << key << other
+      SignalControl.new(@signal, @n, @key, statics)
+    end
+
+    private
+
+    def value_at(position)
+      map = { @key => @signal.sample(position) }
+      statics = @statics
+      if statics
+        i = 0
+        while i < statics.length
+          map[statics[i]] = statics[i + 1]
+          i += 2
+        end
+      end
+      map
     end
   end
 
