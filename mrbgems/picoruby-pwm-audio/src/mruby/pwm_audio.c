@@ -31,6 +31,24 @@ pwm_audio_pin_sample(mrb_state *mrb, mrb_int channel, mrb_value data)
   mrb_ary_set(mrb, samples, channel, data);
 }
 
+/* Pin a bank slot's sample String, like pwm_audio_pin_sample but keyed
+ * by slot in a separate @sample_bank array. The bank is independent of
+ * channels, so it needs its own pin list. Reloading a slot drops the
+ * old String's reference (safe only when no channel is playing it). */
+static void
+pwm_audio_pin_bank(mrb_state *mrb, mrb_int slot, mrb_value data)
+{
+  struct RClass *mod = mrb_module_get_id(mrb, MRB_SYM(PWMAudio));
+  mrb_value obj = mrb_obj_value(mod);
+  mrb_sym iv = mrb_intern_lit(mrb, "@sample_bank");
+  mrb_value banks = mrb_iv_get(mrb, obj, iv);
+  if (!mrb_array_p(banks)) {
+    banks = mrb_ary_new_capa(mrb, PWM_AUDIO_NUM_BANKS);
+    mrb_iv_set(mrb, obj, iv, banks);
+  }
+  mrb_ary_set(mrb, banks, slot, data);
+}
+
 /* PWMAudio.init(l_pin, r_pin) */
 static mrb_value
 mrb_pwm_audio_init(mrb_state *mrb, mrb_value self)
@@ -158,30 +176,60 @@ mrb_pwm_audio_set_sample(mrb_state *mrb, mrb_value self)
   return mrb_true_value();
 }
 
-/* PWMAudio.play(channel, volume): play the channel's sample from the
- * start */
+/* PWMAudio.load_sample(slot, data): preload a QOA or WAV sample into a
+ * bank slot, so a scheduled play can name it (see play_at). */
+static mrb_value
+mrb_pwm_audio_load_sample(mrb_state *mrb, mrb_value self)
+{
+  mrb_int slot;
+  mrb_value data;
+  mrb_get_args(mrb, "iS", &slot, &data);
+  if (slot < 0 || slot >= PWM_AUDIO_NUM_BANKS) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid slot");
+  }
+  if (!pwm_audio_load_sample((uint8_t)slot, (const uint8_t *)RSTRING_PTR(data),
+                             (uint32_t)RSTRING_LEN(data))) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "not a QOA or WAV sample");
+  }
+  pwm_audio_pin_bank(mrb, slot, data);
+  return mrb_true_value();
+}
+
+/* PWMAudio.play(channel, volume, slot=BANK_NONE): play a sample from
+ * the start. slot selects a preloaded bank sample; omitted, it plays
+ * whatever is attached to the channel. */
 static mrb_value
 mrb_pwm_audio_play(mrb_state *mrb, mrb_value self)
 {
-  mrb_int channel, volume;
-  mrb_get_args(mrb, "ii", &channel, &volume);
+  mrb_int channel, volume, slot = PWM_AUDIO_BANK_NONE;
+  mrb_get_args(mrb, "ii|i", &channel, &volume, &slot);
   if (channel < 0 || channel >= PWM_AUDIO_NUM_CHANNELS) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid channel");
   }
-  pwm_audio_play((uint8_t)channel, (uint8_t)volume);
+  if (slot == PWM_AUDIO_BANK_NONE) {
+    pwm_audio_play((uint8_t)channel, (uint8_t)volume);
+  } else {
+    /* Route through the scheduler at the current clock so the bank
+     * copy runs in the render path, matching play_at. */
+    pwm_audio_play_schedule(pwm_audio_sample_clock(), (uint8_t)channel, (uint8_t)volume,
+                            (uint8_t)slot);
+  }
   return mrb_nil_value();
 }
 
-/* PWMAudio.play_at(sample, channel, volume): schedule a sample trigger */
+/* PWMAudio.play_at(sample, channel, volume, slot=BANK_NONE): schedule a
+ * sample trigger. slot names a preloaded bank sample (see
+ * load_sample); omitted, it triggers the channel's attached sample. */
 static mrb_value
 mrb_pwm_audio_play_at(mrb_state *mrb, mrb_value self)
 {
-  mrb_int sample, channel, volume;
-  mrb_get_args(mrb, "iii", &sample, &channel, &volume);
+  mrb_int sample, channel, volume, slot = PWM_AUDIO_BANK_NONE;
+  mrb_get_args(mrb, "iii|i", &sample, &channel, &volume, &slot);
   if (channel < 0 || channel >= PWM_AUDIO_NUM_CHANNELS) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "invalid channel");
   }
-  bool ok = pwm_audio_play_schedule((uint64_t)sample, (uint8_t)channel, (uint8_t)volume);
+  bool ok = pwm_audio_play_schedule((uint64_t)sample, (uint8_t)channel, (uint8_t)volume,
+                                    (uint8_t)slot);
   return mrb_bool_value(ok);
 }
 
@@ -285,6 +333,7 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
 
   mrb_define_const_id(mrb, mod, MRB_SYM(SAMPLE_RATE), mrb_fixnum_value(PWM_AUDIO_SAMPLE_RATE));
   mrb_define_const_id(mrb, mod, MRB_SYM(CHANNELS), mrb_fixnum_value(PWM_AUDIO_NUM_CHANNELS));
+  mrb_define_const_id(mrb, mod, MRB_SYM(NUM_BANKS), mrb_fixnum_value(PWM_AUDIO_NUM_BANKS));
   mrb_define_const_id(mrb, mod, MRB_SYM(SINE), mrb_fixnum_value(PWM_AUDIO_WAVE_SINE));
   mrb_define_const_id(mrb, mod, MRB_SYM(SQUARE), mrb_fixnum_value(PWM_AUDIO_WAVE_SQUARE));
   mrb_define_const_id(mrb, mod, MRB_SYM(TRIANGLE), mrb_fixnum_value(PWM_AUDIO_WAVE_TRIANGLE));
@@ -307,9 +356,11 @@ mrb_picoruby_pwm_audio_gem_init(mrb_state *mrb)
                                 mrb_pwm_audio_cancel_scheduled, MRB_ARGS_REQ(1));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(set_sample), mrb_pwm_audio_set_sample,
                                 MRB_ARGS_REQ(2));
-  mrb_define_module_function_id(mrb, mod, MRB_SYM(play), mrb_pwm_audio_play, MRB_ARGS_REQ(2));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(load_sample), mrb_pwm_audio_load_sample,
+                                MRB_ARGS_REQ(2));
+  mrb_define_module_function_id(mrb, mod, MRB_SYM(play), mrb_pwm_audio_play, MRB_ARGS_ARG(2, 1));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(play_at), mrb_pwm_audio_play_at,
-                                MRB_ARGS_REQ(3));
+                                MRB_ARGS_ARG(3, 1));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(sample_info), mrb_pwm_audio_sample_info,
                                 MRB_ARGS_REQ(1));
   mrb_define_module_function_id(mrb, mod, MRB_SYM(set_stream), mrb_pwm_audio_set_stream,

@@ -228,6 +228,25 @@ typedef struct {
 
 static pwm_audio_sample_stream_t sample_streams[PWM_AUDIO_NUM_CHANNELS];
 
+/* Preloaded sample properties, indexed by slot and independent of any
+ * channel. Loading parses the header once (see load_bank); a scheduled
+ * play names a slot, and play_locked copies the slot's properties into
+ * the target channel's stream before retriggering. This is how several
+ * samples share one channel and choke each other. Holds only the
+ * properties, not a playback cursor: the cursor stays per channel in
+ * sample_streams[]. */
+typedef struct {
+  pwm_audio_byte_source_t source;
+  uint32_t total_samples;   /* per channel */
+  uint32_t phase_increment; /* 16.16 source samples per output sample */
+  uint32_t pcm_offset;      /* PCM16 data chunk position */
+  uint8_t format;           /* pwm_audio_sample_format_t */
+  uint8_t channels;         /* 1 or 2 */
+  bool loaded;
+} pwm_audio_sample_bank_t;
+
+static pwm_audio_sample_bank_t sample_bank[PWM_AUDIO_NUM_BANKS];
+
 static inline uint32_t
 read_u32le(const uint8_t *p)
 {
@@ -396,12 +415,74 @@ pwm_audio_set_stream(uint8_t channel, const uint8_t *extent_pairs, uint32_t exte
   return attach_source(channel, &source);
 }
 
+/* Validate a byte source and store its properties in a bank slot. The
+ * write is under the lock so the render IRQ (which reads the slot in
+ * play_locked) never sees a torn update. No channel is touched, so the
+ * rewind/refill dance around attach_source is not needed. */
+static bool
+load_bank(uint8_t slot, const pwm_audio_byte_source_t *source)
+{
+  if (slot >= PWM_AUDIO_NUM_BANKS) return false;
+  uint32_t samplerate, frames, sample_channels, pcm_offset;
+  uint8_t format;
+  pwm_audio_byte_source_t probe = *source;
+  if (!probe_source(&probe, &samplerate, &frames, &sample_channels, &format, &pcm_offset)) {
+    return false;
+  }
+  uint32_t state = pwm_audio_lock();
+  pwm_audio_sample_bank_t *bank = &sample_bank[slot];
+  bank->source = *source;
+  bank->total_samples = frames;
+  bank->format = format;
+  bank->channels = (uint8_t)sample_channels;
+  bank->pcm_offset = pcm_offset;
+  bank->phase_increment = (uint32_t)(((uint64_t)samplerate << 16) / PWM_AUDIO_SAMPLE_RATE);
+  bank->loaded = true;
+  pwm_audio_unlock(state);
+  return true;
+}
+
+bool
+pwm_audio_load_sample(uint8_t slot, const uint8_t *data, uint32_t length)
+{
+  pwm_audio_byte_source_t source;
+  pwm_audio_byte_source_memory(&source, data, length);
+  return load_bank(slot, &source);
+}
+
+bool
+pwm_audio_load_stream(uint8_t slot, const uint8_t *extent_pairs, uint32_t extent_count,
+                      uint32_t total_length)
+{
+  pwm_audio_byte_source_t source;
+  pwm_audio_byte_source_extents(&source, extent_pairs, extent_count, total_length);
+  return load_bank(slot, &source);
+}
+
 /* Restart the stream from the file start. Runs under the lock; also
- * called by the event queue inside the render IRQ. */
+ * called by the event queue inside the render IRQ. slot selects a
+ * preloaded bank sample to play; PWM_AUDIO_BANK_NONE keeps whatever is
+ * attached (the pre-bank retrigger). */
 static void
-play_locked(uint8_t channel, uint8_t volume)
+play_locked(uint8_t channel, uint8_t slot, uint8_t volume)
 {
   pwm_audio_sample_stream_t *stream = &sample_streams[channel];
+  /* Install the bank slot's sample before retriggering. Copy its
+   * properties into the stream, then reset the cursor below. The QOA
+   * reset just after reads stream->source, so this copy must come
+   * first: the order is load-bearing. */
+  if (slot != PWM_AUDIO_BANK_NONE) {
+    if (slot >= PWM_AUDIO_NUM_BANKS || !sample_bank[slot].loaded) return;
+    pwm_audio_sample_bank_t *bank = &sample_bank[slot];
+    stream->source = bank->source;
+    stream->total_samples = bank->total_samples;
+    stream->phase_increment = bank->phase_increment;
+    stream->pcm_offset = bank->pcm_offset;
+    stream->format = bank->format;
+    stream->channels = bank->channels;
+    channels[channel].source = PWM_AUDIO_SOURCE_SAMPLE;
+    channels[channel].phase_increment = 0; /* silence the oscillator */
+  }
   if (channels[channel].source != PWM_AUDIO_SOURCE_SAMPLE || stream->source.length == 0) return;
   if (stream->format == PWM_AUDIO_SAMPLE_PCM16) {
     stream->pcm_pos = 0;
@@ -431,7 +512,7 @@ pwm_audio_play(uint8_t channel, uint8_t volume)
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return;
   uint32_t state = pwm_audio_lock();
   pwm_audio_rewind_lead();
-  play_locked(channel, volume);
+  play_locked(channel, PWM_AUDIO_BANK_NONE, volume);
   pwm_audio_unlock(state);
   pwm_audio_refill_lead();
 }
@@ -714,6 +795,7 @@ typedef struct {
   uint8_t channel;
   uint8_t waveform;
   uint8_t volume;
+  uint8_t slot; /* PLAY: bank slot, or PWM_AUDIO_BANK_NONE */
   bool used;
 } pwm_audio_event_t;
 
@@ -722,7 +804,7 @@ static uint32_t event_sequence;
 
 static bool
 schedule_event(uint64_t when, uint8_t kind, uint8_t channel, uint32_t frequency,
-               uint8_t waveform, uint8_t volume)
+               uint8_t waveform, uint8_t volume, uint8_t slot)
 {
   uint32_t state = pwm_audio_lock();
   for (int i = 0; i < PWM_AUDIO_EVENT_MAX; i++) {
@@ -734,6 +816,7 @@ schedule_event(uint64_t when, uint8_t kind, uint8_t channel, uint32_t frequency,
     events[i].channel = channel;
     events[i].waveform = waveform;
     events[i].volume = volume;
+    events[i].slot = slot;
     events[i].used = true;
     pwm_audio_unlock(state);
     return true;
@@ -747,14 +830,15 @@ pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
                    uint8_t waveform, uint8_t volume)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
-  return schedule_event(when, PWM_AUDIO_EVENT_TONE, channel, frequency, waveform, volume);
+  return schedule_event(when, PWM_AUDIO_EVENT_TONE, channel, frequency, waveform, volume,
+                        PWM_AUDIO_BANK_NONE);
 }
 
 bool
-pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume)
+pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume, uint8_t slot)
 {
   if (channel >= PWM_AUDIO_NUM_CHANNELS) return false;
-  return schedule_event(when, PWM_AUDIO_EVENT_PLAY, channel, 0, 0, volume);
+  return schedule_event(when, PWM_AUDIO_EVENT_PLAY, channel, 0, 0, volume, slot);
 }
 
 void
@@ -783,7 +867,7 @@ static void
 apply_event(const pwm_audio_event_t *event)
 {
   if (event->kind == PWM_AUDIO_EVENT_PLAY) {
-    play_locked(event->channel, event->volume);
+    play_locked(event->channel, event->slot, event->volume);
   } else if (event->frequency) {
     set_tone_locked(event->channel, event->frequency, event->waveform, event->volume);
   } else {

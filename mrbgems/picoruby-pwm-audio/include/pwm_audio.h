@@ -26,6 +26,15 @@ extern "C" {
  * regardless of its source. */
 #define PWM_AUDIO_NUM_CHANNELS 8
 
+/* Sample bank slots. A slot holds one preloaded sample's properties
+ * (see pwm_audio_load_sample). A scheduled play names a slot, so the
+ * chosen sample rides on the event instead of the channel's mutable
+ * source: several samples can share a channel and choke one another
+ * (the open and closed hi-hat, say). PWM_AUDIO_BANK_NONE plays whatever
+ * is currently attached (the pre-bank behavior). */
+#define PWM_AUDIO_NUM_BANKS 16
+#define PWM_AUDIO_BANK_NONE 0xFF
+
 typedef enum {
   PWM_AUDIO_WAVE_SINE = 0,
   PWM_AUDIO_WAVE_SQUARE,
@@ -78,6 +87,14 @@ void pwm_audio_stop_all(void);
  * or WAV stream. */
 bool pwm_audio_set_sample(uint8_t channel, const uint8_t *data, uint32_t length);
 
+/* Preload a sample into a bank slot, parsing its header once. A
+ * scheduled play that names this slot copies these properties into the
+ * target channel and retriggers, so several samples can share a channel
+ * and choke one another. Returns false for an out-of-range slot or
+ * unsupported data. Do not reload a slot while a channel is still
+ * playing it: the old bytes may be freed under the running stream. */
+bool pwm_audio_load_sample(uint8_t slot, const uint8_t *data, uint32_t length);
+
 /* One-shot playback of the channel's sample from the beginning (a
  * retrigger restarts it). No-op when the channel has no sample. */
 void pwm_audio_play(uint8_t channel, uint8_t volume);
@@ -98,6 +115,10 @@ bool pwm_audio_sample_info(const uint8_t *data, uint32_t length, uint32_t *sampl
 bool pwm_audio_set_stream(uint8_t channel, const uint8_t *extent_pairs, uint32_t extent_count,
                           uint32_t total_length);
 
+/* load_sample over an extent list (see set_stream). */
+bool pwm_audio_load_stream(uint8_t slot, const uint8_t *extent_pairs, uint32_t extent_count,
+                           uint32_t total_length);
+
 /* sample_info over an extent list. */
 bool pwm_audio_stream_info(const uint8_t *extent_pairs, uint32_t extent_count,
                            uint32_t total_length, uint32_t *samplerate, uint32_t *frames,
@@ -106,11 +127,12 @@ bool pwm_audio_stream_info(const uint8_t *extent_pairs, uint32_t extent_count,
 /* Sample-accurate scheduling. when is an absolute position on the
  * playback timeline (compare with pwm_audio_sample_clock()).
  * pwm_audio_schedule starts a tone (frequency 0 schedules a stop);
- * pwm_audio_play_schedule triggers the channel's sample. Both return
- * false when the queue is full. */
+ * pwm_audio_play_schedule triggers the channel's sample, loading bank
+ * slot first (PWM_AUDIO_BANK_NONE keeps the attached sample). Both
+ * return false when the queue is full. */
 bool pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
                         uint8_t waveform, uint8_t volume);
-bool pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume);
+bool pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume, uint8_t slot);
 
 /* Drop all scheduled events for one channel (a retrigger must not be
  * cut by a stale scheduled stop). */

@@ -32,12 +32,13 @@ Module functions (the flat low-level API under the objects):
 - [PWMAudio.stop_all](#pwmaudiostop_all)
 - [PWMAudio.set_sample](#pwmaudioset_samplechannel-data)
 - [PWMAudio.set_stream](#pwmaudioset_streamchannel-extents-total_length)
-- [PWMAudio.play](#pwmaudioplaychannel-volume)
+- [PWMAudio.load_sample](#pwmaudioload_sampleslot-data)
+- [PWMAudio.play](#pwmaudioplaychannel-volume-slot)
 - [PWMAudio.sample_info](#pwmaudiosample_infodata---array)
 - [PWMAudio.stream_info](#pwmaudiostream_infoextents-total_length---array)
 - [PWMAudio.sample_clock](#pwmaudiosample_clock---integer)
 - [PWMAudio.tone_at](#pwmaudiotone_atsample-channel-frequency-waveform-volume---bool)
-- [PWMAudio.play_at](#pwmaudioplay_atsample-channel-volume---bool)
+- [PWMAudio.play_at](#pwmaudioplay_atsample-channel-volume-slot---bool)
 - [PWMAudio.stop_at](#pwmaudiostop_atsample-channel---bool)
 - [PWMAudio.cancel_scheduled](#pwmaudiocancel_scheduledchannel)
 - [PWMAudio.stats](#pwmaudiostats---array)
@@ -121,10 +122,13 @@ object or the module functions for a given channel index, not both.
 - `source=(source)`: assign the playback source. A `Sample` or
   `Stream` is attached to the engine immediately; a `Tone` is kept
   and sent when played
-- `play(volume: ...)` / `play_at(at, volume: ...)`: start the source.
-  A Tone plays continuously until `stop`; a Sample or Stream plays
-  one-shot from the start (a retrigger restarts it). `volume`
-  defaults to the channel's `volume` attribute (0-15, default 15)
+- `play(volume: ..., slot: ...)` / `play_at(at, volume: ..., slot: ...)`:
+  start the source. A Tone plays continuously until `stop`; a Sample
+  or Stream plays one-shot from the start (a retrigger restarts it).
+  `volume` defaults to the channel's `volume` attribute (0-15, default
+  15). `slot` names a preloaded bank sample (`load_sample`) to play on
+  this channel instead of the attached source, so several samples can
+  share a channel and choke each other
 - `tone(frequency, waveform:, volume:)` / `tone_at(at, ...)`:
   shorthand for assigning a Tone source and playing it
 - `stop` / `stop_at(at)`: stop either source
@@ -178,11 +182,23 @@ Like `set_sample`, but the bytes come from a flash extent map
 than RAM plays by streaming. The binding keeps a reference to the
 extent map. `PWMAudio::Stream` wraps this.
 
-### PWMAudio.play(channel, volume)
+### PWMAudio.load_sample(slot, data)
 
-Play the channel's sample from the beginning (one-shot; playback
-stops at the end of the sample, and a retrigger restarts it). No-op
-on a channel whose source is the oscillator.
+Preload a QOA or WAV sample into a bank slot (0 up to `NUM_BANKS`),
+parsing its header once. `data` is a String with the file bytes; the
+binding keeps a reference so the data stays valid while loaded. A
+scheduled play that names this slot (see `play`/`play_at`) copies it
+onto the target channel and retriggers, so several samples can share a
+channel and choke one another. Raises `ArgumentError` for an
+out-of-range slot or unsupported data. Do not reload a slot while a
+channel is still playing it.
+
+### PWMAudio.play(channel, volume, slot=nil)
+
+Play a sample from the beginning (one-shot; playback stops at the end
+of the sample, and a retrigger restarts it). Without `slot`, plays the
+channel's attached sample (no-op when its source is the oscillator).
+With `slot`, plays that preloaded bank sample on the channel.
 
 ### PWMAudio.sample_info(data) -> Array
 
@@ -210,10 +226,13 @@ lead ahead of `sample_clock` (one buffer, 2048 samples, about 41 ms).
 An event closer than that is applied at the current render position,
 that is, as soon as possible but late.
 
-### PWMAudio.play_at(sample, channel, volume) -> bool
+### PWMAudio.play_at(sample, channel, volume, slot=nil) -> bool
 
 Schedule a sample trigger at an absolute sample position. Same queue
-and lead requirement as `tone_at`.
+and lead requirement as `tone_at`. `slot` names a preloaded bank
+sample (`load_sample`) to play; without it, the channel's attached
+sample triggers. The slot rides on the reservation, so two samples
+scheduled on a shared channel each play their own sound.
 
 ### PWMAudio.stop_at(sample, channel) -> bool
 
@@ -313,6 +332,22 @@ covering the file in order (see FlashFile.extents). The backing
 memory must stay valid while attached (the mruby binding pins the
 String).
 
+### pwm_audio_load_sample / pwm_audio_load_stream
+
+```c
+bool pwm_audio_load_sample(uint8_t slot, const uint8_t *data, uint32_t length);
+bool pwm_audio_load_stream(uint8_t slot, const uint8_t *extent_pairs,
+                           uint32_t extent_count, uint32_t total_length);
+```
+
+Preload a sample's properties into bank slot `slot` (0 up to
+`PWM_AUDIO_NUM_BANKS`), parsing the header once. A scheduled play that
+names the slot copies these properties onto its target channel and
+retriggers (see `pwm_audio_play_schedule`), so several samples share a
+channel and choke each other. The backing memory must stay valid while
+loaded. Pass `PWM_AUDIO_BANK_NONE` to a play to keep the channel's
+attached sample instead.
+
 ### pwm_audio_sample_info / pwm_audio_stream_info
 
 ```c
@@ -330,13 +365,15 @@ Validate a blob or extent map without touching any channel.
 ```c
 bool pwm_audio_schedule(uint64_t when, uint8_t channel, uint32_t frequency,
                         uint8_t waveform, uint8_t volume);
-bool pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume);
+bool pwm_audio_play_schedule(uint64_t when, uint8_t channel, uint8_t volume, uint8_t slot);
 void pwm_audio_cancel_scheduled(uint8_t channel);
 ```
 
 Enqueue sample-accurate events on the shared queue: a tone start
-(`frequency` 0 schedules a stop) or a sample trigger.
-`cancel_scheduled` drops all pending events for the channel.
+(`frequency` 0 schedules a stop) or a sample trigger. `slot` selects a
+preloaded bank sample for the trigger, or `PWM_AUDIO_BANK_NONE` keeps
+the channel's attached sample. `cancel_scheduled` drops all pending
+events for the channel.
 
 ### pwm_audio_sample_clock / pwm_audio_stats
 
@@ -512,6 +549,26 @@ works. Triggers restart the stream from the file start by re-reading
 the first frame header; playback ends when the stream is exhausted.
 Samples are mixed into the same signed 12-bit domain as the
 oscillator waveforms.
+
+### Sample bank
+
+A channel holds one sample stream, so its playback cursor plays one
+sound at a time. The sample bank decouples which sound plays from which
+channel plays it: a slot holds a sample's properties (byte source,
+format, frame count, resample step), parsed once at load. A scheduled
+play carries a slot number, and when the event fires the engine copies
+the slot's properties into the target channel's stream before the
+retrigger. The copy replaces the header re-read, so no parsing runs in
+the render path.
+
+This is what lets several samples share one channel and choke each
+other. Playing a slot on a busy channel hard-resets its cursor, cutting
+the current sound, and the new slot supplies a different sample, so the
+open and closed hi-hat (or any drum pair) coexist on one channel with
+distinct sounds. Because the slot travels on the reservation rather
+than on the channel's mutable source, two samples scheduled ahead on a
+shared channel each still play their own sound, which a per-trigger
+`set_sample` could not guarantee under the scheduler's lookahead.
 
 ### Flash streaming
 

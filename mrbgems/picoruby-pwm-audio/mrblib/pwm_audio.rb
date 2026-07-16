@@ -108,19 +108,26 @@ module PWMAudio
       @source = source
     end
 
-    def play(volume: @volume)
+    # slot selects a preloaded bank sample (PWMAudio.load_sample), so
+    # one channel can play any of several samples that choke each other.
+    # Omitted, it plays the Sample or Stream attached to this channel.
+    def play(volume: @volume, slot: nil)
       source = @source
       if source.is_a?(Tone)
         PWMAudio.tone(@index, source.frequency, source.waveform, volume)
+      elsif slot
+        PWMAudio.play(@index, volume, slot)
       else
         PWMAudio.play(@index, volume)
       end
     end
 
-    def play_at(at, volume: @volume)
+    def play_at(at, volume: @volume, slot: nil)
       source = @source
       if source.is_a?(Tone)
         PWMAudio.tone_at(at, @index, source.frequency, source.waveform, volume)
+      elsif slot
+        PWMAudio.play_at(at, @index, volume, slot)
       else
         PWMAudio.play_at(at, @index, volume)
       end

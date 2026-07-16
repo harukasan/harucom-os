@@ -26,6 +26,7 @@ module Board
   class PWMAudio
     SAMPLE_RATE = ::PWMAudio::SAMPLE_RATE
     CHANNELS    = ::PWMAudio::CHANNELS
+    NUM_BANKS   = ::PWMAudio::NUM_BANKS
 
     SINE     = ::PWMAudio::SINE
     SQUARE   = ::PWMAudio::SQUARE
@@ -92,10 +93,23 @@ module Board
       ::PWMAudio.stop_at(sample, channel)
     end
 
-    # Schedule a one-shot sample trigger at an absolute sample
-    # position. Returns false when the event queue is full.
-    def play_at(sample, channel, volume = 15)
-      ::PWMAudio.play_at(sample, channel, volume)
+    # Preload a sample into a bank slot (0...NUM_BANKS). A scheduled
+    # play naming the slot copies it onto the target channel, so several
+    # samples share a channel and choke each other (see play_at).
+    def load_sample(slot, data)
+      ::PWMAudio.load_sample(slot, data)
+    end
+
+    # Schedule a one-shot sample trigger at an absolute sample position.
+    # slot names a preloaded bank sample (load_sample); omitted, it
+    # triggers the channel's attached sample. Returns false when the
+    # event queue is full.
+    def play_at(sample, channel, volume = 15, slot = nil)
+      if slot
+        ::PWMAudio.play_at(sample, channel, volume, slot)
+      else
+        ::PWMAudio.play_at(sample, channel, volume)
+      end
     end
 
     # Drop scheduled events for a channel (call before retriggering so
