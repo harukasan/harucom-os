@@ -60,9 +60,9 @@ module Johakyu
                     6645, 7040, 7459, 7902]
 
     # Waveform names accepted from .sound() on note tracks live in
-    # @waveforms, built in initialize: referencing ::PWMAudio at file
-    # load would break the CRuby test discovery pass, which requires
-    # this file without the board modules.
+    # the lazily built waveforms map: referencing ::PWMAudio at file
+    # load or in initialize would break embedders without the audio
+    # module (the CRuby test discovery pass, the host bench).
 
     # Sinks fire this many ms before their musical target. Sound is
     # reserved in C for the target sample and light writes wait in the
@@ -93,14 +93,6 @@ module Johakyu
       @next_voice = 0
       @voice_busy_until = Array.new(TONE_CHANNELS.length, 0)
       @note_drop_count = 0
-      @waveforms = {
-        "sine" => ::PWMAudio::SINE, :sine => ::PWMAudio::SINE,
-        "square" => ::PWMAudio::SQUARE, :square => ::PWMAudio::SQUARE,
-        "tri" => ::PWMAudio::TRIANGLE, :tri => ::PWMAudio::TRIANGLE,
-        "triangle" => ::PWMAudio::TRIANGLE, :triangle => ::PWMAudio::TRIANGLE,
-        "saw" => ::PWMAudio::SAWTOOTH, :saw => ::PWMAudio::SAWTOOTH,
-        "sawtooth" => ::PWMAudio::SAWTOOTH, :sawtooth => ::PWMAudio::SAWTOOTH,
-      }
     end
 
     # Notes whose C-engine reservation was refused (the shared
@@ -326,7 +318,7 @@ module Johakyu
       channel = TONE_CHANNELS[index]
       @audio.cancel_scheduled(channel) if at_sample < @voice_busy_until[index]
 
-      waveform = @waveforms[map[:s]]
+      waveform = waveforms[map[:s]]
       waveform = ::PWMAudio::SQUARE if waveform.nil?
       gain = map[:gain]
       if gain
@@ -341,6 +333,17 @@ module Johakyu
       ok = @audio.stop_at(stop_sample, channel) && ok
       @note_drop_count += 1 unless ok
       @voice_busy_until[index] = stop_sample
+    end
+
+    def waveforms
+      @waveforms ||= {
+        "sine" => ::PWMAudio::SINE, :sine => ::PWMAudio::SINE,
+        "square" => ::PWMAudio::SQUARE, :square => ::PWMAudio::SQUARE,
+        "tri" => ::PWMAudio::TRIANGLE, :tri => ::PWMAudio::TRIANGLE,
+        "triangle" => ::PWMAudio::TRIANGLE, :triangle => ::PWMAudio::TRIANGLE,
+        "saw" => ::PWMAudio::SAWTOOTH, :saw => ::PWMAudio::SAWTOOTH,
+        "sawtooth" => ::PWMAudio::SAWTOOTH, :sawtooth => ::PWMAudio::SAWTOOTH,
+      }
     end
 
     # Integer Hz for a note number: shift the octave-9 table down
