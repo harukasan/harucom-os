@@ -15,6 +15,8 @@
 #   Ctrl-Enter: Evaluate the buffer (applies at the next cycle boundary)
 #   Ctrl-S:     Save (asks for a path when untitled), then evaluate
 #   Ctrl-O:     Open a file into the current scene
+#   Ctrl-R:     Restart the transport at cycle 0 (play the show from the top).
+#               During an eval it arms and fires when the apply lands.
 #   Ctrl-B:     Blackout (running light tracks relight on their next event)
 #   Ctrl-Q:     Quit (blackout)
 #   Ctrl-Z / Ctrl-Y: Undo / Redo
@@ -119,6 +121,7 @@ class JohakyuApp
     @command_bar_mode = false
 
     @evaling = false
+    @restart_armed = false
     @eval_started_ms = 0
     @highlight_stale = false
     @stale_syntax = nil       # bundle the screen was drawn with while stale
@@ -176,7 +179,10 @@ class JohakyuApp
     DMX.init
     DMX.start
     @dmx_running = true
-    DMX.deadman_ms = 500
+    # Long dead-man window: eval and GC can stall the loop for seconds,
+    # and blacking out the rig mid show is worse than a stale frame.
+    # The switch stays armed only as a backstop for a hard VM hang.
+    DMX.deadman_ms = 30_000
     # The rig is patched by the live script (fixture statements in the
     # buffer); before the first apply there are no slots to shorten to.
     slots = Johakyu.patch.max_channel
@@ -365,6 +371,7 @@ class JohakyuApp
       error = @sandbox.error
       if error && !error.is_a?(SystemExit)
         @live.discard
+        @restart_armed = false
         location = nil
         if error.respond_to?(:backtrace)
           backtrace = error.backtrace
@@ -392,7 +399,13 @@ class JohakyuApp
         # the new mean for minutes and reads like a slowdown.
         @session.reset_stats
         @view.reset_peaks
-        @message = "Applied (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms, late #{late_count}/#{late_ms}ms)"
+        restarted = ""
+        if @restart_armed
+          @restart_armed = false
+          @session.restart
+          restarted = " +restart"
+        end
+        @message = "Applied#{restarted} (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms, late #{late_count}/#{late_ms}ms)"
         unless Johakyu.patch.equal?(patch_before)
           # The rig changed: resize the universe view, re-lay the
           # editor out below it, and repaint everything.
@@ -413,6 +426,7 @@ class JohakyuApp
       @sandbox.terminate
       @live.discard
       @evaling = false
+      @restart_armed = false
       @message = "Eval timeout: scripts must not loop (bindings keep running)"
       draw_status
     end
@@ -747,7 +761,7 @@ class JohakyuApp
     mode = $ime ? $ime.mode_label : nil
     if @command_bar_text.nil? || mode != @command_bar_mode
       @command_bar_mode = mode
-      bar = " Alt-1..0:Scene  Ctrl-Enter:Eval  Ctrl-S:Save+Eval  Ctrl-O:Open  Ctrl-B:Blackout  Ctrl-Q:Quit"
+      bar = " Alt-1..0:Scene Ctrl-Enter:Eval Ctrl-S:Save+Eval Ctrl-O:Open Ctrl-R:Restart Ctrl-B:Blackout Ctrl-Q:Quit"
       if mode
         padding = Console.cols - Editor.display_width(bar) - Editor.display_width(mode)
         bar += " " * padding if padding > 0
@@ -970,6 +984,24 @@ class JohakyuApp
       # empty buffer to silence for good.
       DMX.blackout
       @message = "Blackout (running tracks relight)"
+      redraw_after_key(old_dirty)
+      return
+    end
+    if c.match?(:r, ctrl: true)
+      # Start the show from the top: the transport returns to cycle 0,
+      # so bar-indexed timelines (section tables, one-shot song
+      # triggers) play from their first bar. While an eval is still
+      # running (or nothing is bound yet) the restart arms instead and
+      # fires when the apply lands: a restart before the bind would
+      # reset the clock too early and the cycle 0 onsets would already
+      # be past when the tracks stage.
+      if @evaling || @session.scheduler.track_names.length == 0
+        @restart_armed = true
+        @message = "Restart armed: plays from the top when the eval applies"
+      else
+        @session.restart
+        @message = "Restart: transport at cycle 0"
+      end
       redraw_after_key(old_dirty)
       return
     end

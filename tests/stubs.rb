@@ -190,6 +190,15 @@ class FakeAudio
     @events << [:cancel, sample_clock, channel]
   end
 
+  def set_stream(channel, extents, total_length)
+    @events << [:set_stream, channel, extents, total_length]
+    true
+  end
+
+  def set_streams
+    @events.select { |e| e[0] == :set_stream }
+  end
+
   def tone_ats
     @events.select { |e| e[0] == :tone_at }
   end

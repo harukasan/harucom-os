@@ -248,17 +248,18 @@ module Johakyu
     end
 
     # Composite signature over member patterns: nil when any member
-    # is unsigned.
+    # is unsigned. Collect then join once: quadratic concatenation
+    # dominated eval time on scores with many slowcat members.
     def self.sig_of_all(label, patterns)
-      parts = ""
+      parts = []
       i = 0
       while i < patterns.length
         s = patterns[i].sig
         return nil if s.nil?
-        parts = parts + (i == 0 ? "" : ",") + s
+        parts << s
         i += 1
       end
-      label + "(" + parts + ")"
+      label + "(" + parts.join(",") + ")"
     end
 
     # True when this pattern is a continuous signal: its Haps carry no

@@ -375,4 +375,46 @@ class LiveTest < Picotest::Test
     assert_equal true, @audio.plays.all? { |e| e[2] >= 3 }
     assert_equal true, @audio.tone_ats.all? { |e| e[2] <= 2 }
   end
+
+  # stream: a flash-resident backing track attaches on apply and
+  # triggers through sound() under its registered name.
+  def test_stream_statement_attaches_and_triggers
+    @live.begin_recording
+    stream :song, address: 0x10400000, bytes: 2000, channel: 6, volume: 13
+    track(:song) { sound("song ~ ~ ~") }
+    @live.apply
+    run_until(400)
+    attached = @audio.set_streams
+    assert_equal 1, attached.length
+    assert_equal 6, attached[0][1]
+    assert_equal 2000, attached[0][3]
+    # little-endian (address, length) pair
+    extents = attached[0][2]
+    assert_equal 8, extents.bytesize
+    assert_equal 0x00, extents[0].ord
+    assert_equal 0x40, extents[2].ord
+    assert_equal 0x10, extents[3].ord
+    assert_equal 0xD0, extents[4].ord
+    assert_equal 0x07, extents[5].ord
+    plays = @audio.plays
+    assert_equal 1, plays.length
+    assert_equal 6, plays[0][2]
+    assert_equal 13, plays[0][3]
+  end
+
+  # Re-evaluating an unchanged stream statement must not reattach,
+  # or the running playback would cut out on every edit.
+  def test_stream_statement_is_not_reapplied_when_unchanged
+    @live.begin_recording
+    stream :song, address: 0x10400000, bytes: 2000, channel: 6
+    @live.apply
+    @live.begin_recording
+    stream :song, address: 0x10400000, bytes: 2000, channel: 6
+    @live.apply
+    assert_equal 1, @audio.set_streams.length
+    @live.begin_recording
+    stream :song, address: 0x10400000, bytes: 4000, channel: 6
+    @live.apply
+    assert_equal 2, @audio.set_streams.length
+  end
 end

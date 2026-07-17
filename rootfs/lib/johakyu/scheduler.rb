@@ -128,6 +128,27 @@ module Johakyu
       end
     end
 
+    # Follow a transport jump (Clock#restart): staged events and swap
+    # boundaries were computed under the old position, so promote any
+    # pending swap immediately, drop the staged queue, and stage again
+    # from the new position.
+    def restart
+      @pending = []
+      position = Fraction.of(@clock.position)
+      i = 0
+      while i < @order.length
+        track = @tracks[@order[i]]
+        i += 1
+        next if track.nil?
+        if track[:next_pattern]
+          track[:pattern] = track[:next_pattern]
+          track[:next_pattern] = nil
+          track[:swap_at] = nil
+        end
+        track[:staged_until] = position
+      end
+    end
+
     # Advance the most urgent track by one staging chunk when it runs
     # low.
     def tick

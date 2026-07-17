@@ -44,13 +44,15 @@ module Johakyu
       @session = session
       @recording = nil
       @applied = {}
+      @streams_applied = {}
       @capturing = 0
     end
 
     # Start a fresh recording. Call from the app task right before
     # executing the eval script.
     def begin_recording
-      @recording = { tempo: nil, latency: nil, tracks: [], patch: nil }
+      @recording = { tempo: nil, latency: nil, tracks: [], patch: nil,
+                     streams: [] }
       @capturing = 0
       Johakyu.build_patch = nil
     end
@@ -96,6 +98,15 @@ module Johakyu
         raise ArgumentError, "group needs fixture statements before it"
       end
       pending.group(name, *members)
+    end
+
+    # Register a flash-resident backing track under a sound name.
+    # Apply attaches it to its engine channel; sound("name") then
+    # triggers it like a drum hit. Like the patch, an attachment is
+    # kept across evals, and an unchanged statement is not reapplied,
+    # so re-evaluating a running show never cuts the audio.
+    def stream(name, address:, bytes:, channel:, volume: 12)
+      @recording[:streams] << [name.to_s, address, bytes, channel, volume]
     end
 
     # Named track: the block builds and returns a Pattern. Sugar
@@ -156,6 +167,18 @@ module Johakyu
         Johakyu.patch = recording[:patch]
         ::DMX.active_slots = recording[:patch].max_channel
         patch_changed = true
+      end
+
+      streams = recording[:streams]
+      i = 0
+      while streams && i < streams.length
+        entry = streams[i]
+        i += 1
+        if @streams_applied[entry[0]] != entry
+          @session.attach_stream(entry[0], address: entry[1], bytes: entry[2],
+                                 channel: entry[3], volume: entry[4])
+          @streams_applied[entry[0]] = entry
+        end
       end
 
       tempo_changed = false
@@ -371,6 +394,11 @@ end
 
 def group(name, *members)
   $johakyu_live.group(name, *members)
+end
+
+def stream(name, address:, bytes:, channel:, volume: 12)
+  $johakyu_live.stream(name, address: address, bytes: bytes,
+                       channel: channel, volume: volume)
 end
 
 def track(name, &block)

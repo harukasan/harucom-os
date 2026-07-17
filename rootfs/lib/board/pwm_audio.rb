@@ -118,6 +118,12 @@ module Board
       ::PWMAudio.cancel_scheduled(channel)
     end
 
+    # Attach a flash-resident stream to a channel from a packed
+    # extent map (see PWMAudio.set_stream and FlashFile.extents).
+    def set_stream(channel, extents, total_length)
+      ::PWMAudio.set_stream(channel, extents, total_length)
+    end
+
     # Play a tone for a given duration, then stop. Blocking.
     def beep(channel, frequency, duration_ms, waveform: SQUARE, volume: 15)
       tone(channel, frequency, waveform: waveform, volume: volume)

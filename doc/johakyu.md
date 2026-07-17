@@ -135,6 +135,21 @@ fourth simultaneous note steals the oldest voice. Chain `.sound("saw")`
 for the waveform (sine, square, tri, saw; default square) and
 `.gain(0..1)` for the volume.
 
+`stream` registers a flash-resident backing track under a sound name:
+
+```ruby
+stream :song, address: 0x10400000, bytes: 2078096, channel: 6, volume: 14
+track(:song) { sound("<song ~ ~ ~>") }
+```
+
+The address is the memory mapped flash location of a QOA or WAV file:
+a raw region flashed beside the firmware with picotool, or one extent
+of a LittleFS file. Apply attaches the stream to its engine channel
+through `PWMAudio.set_stream`, and `sound("song")` then reserves it
+sample accurate like a drum hit. Attachments persist across evals and
+an unchanged statement is not reapplied, so re-evaluating a running
+show never cuts the audio.
+
 ### Johakyu::Session
 
 The dispatcher ([dsl.rb](../rootfs/lib/johakyu/dsl.rb)). Statements are

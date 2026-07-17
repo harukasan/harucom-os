@@ -99,6 +99,36 @@ module Johakyu
       @next_voice = 0
       @voice_busy_until = Array.new(TONE_CHANNELS.length, 0)
       @note_drop_count = 0
+      @stream_channels = {}
+      @stream_volumes = {}
+    end
+
+    # Attach a flash-resident stream (QOA or WAV file bytes) to a
+    # channel and register it under a sound name, so sound("name")
+    # reserves it sample accurate like a drum hit. The address is the
+    # memory mapped flash location of the file bytes: a raw region
+    # flashed beside the firmware, or one extent of a LittleFS file.
+    def attach_stream(name, address:, bytes:, channel:, volume: KIT_VOLUME)
+      key = name.to_s
+      @stream_channels[key] = channel
+      @stream_volumes[key] = volume
+      return unless @audio
+      extents = ""
+      value = address
+      i = 0
+      while i < 4
+        extents << (value & 0xFF).chr
+        value >>= 8
+        i += 1
+      end
+      value = bytes
+      i = 0
+      while i < 4
+        extents << (value & 0xFF).chr
+        value >>= 8
+        i += 1
+      end
+      @audio.set_stream(channel, extents, bytes)
     end
 
     # Notes whose C-engine reservation was refused (the shared
@@ -216,6 +246,17 @@ module Johakyu
       @audio.stop_all if @audio
     end
 
+    # Restart the transport at cycle 0 with the currently bound
+    # patterns: bar-indexed timelines (section tables, one-shot song
+    # triggers) play from the top. Running sounds stop; already
+    # scheduled audio events inside the reserve lead are not recalled,
+    # so at most one stray hit can land right after the restart.
+    def restart
+      stop_sounds
+      @clock.restart
+      @scheduler.restart
+    end
+
     # Split one control map into the two sinks. Sound reserves now for
     # the target; light waits in the due list until the target.
     def dispatch_event(value, target_ms, duration_ms = nil)
@@ -306,12 +347,23 @@ module Johakyu
       colon = name.index(":")
       name = name[0, colon] if colon
       entry = KIT[name.to_sym]
-      return unless entry
+      if entry
+        channel = entry[:channel]
+        volume = KIT_VOLUME
+        slot = entry[:slot]
+      else
+        # Not a kit drum: a stream attached by the stream statement
+        # plays on its own channel, no bank slot.
+        channel = @stream_channels[name]
+        return unless channel
+        volume = @stream_volumes[name] || KIT_VOLUME
+        slot = nil
+      end
       target = target_ms - @audio_latency_ms
       now_ms = Machine.board_millis
       at_sample = @audio.sample_clock + (target - now_ms) * SAMPLES_PER_MS
       at_sample = @audio.sample_clock if at_sample < @audio.sample_clock
-      @audio.play_at(at_sample, entry[:channel], KIT_VOLUME, entry[:slot])
+      @audio.play_at(at_sample, channel, volume, slot)
     end
 
     # Reserve one pitched note: a tone at the target sample and a

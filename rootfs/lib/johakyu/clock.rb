@@ -35,6 +35,13 @@ module Johakyu
       @origin_ms + (position.to_f - @origin_position) * @ms_per_cycle
     end
 
+    # Restart the transport: the cycle position returns to 0 now.
+    # Used to play a bar-indexed timeline (a show) from the top.
+    def restart
+      @origin_ms = Machine.board_millis
+      @origin_position = 0.0
+    end
+
     def bpm=(bpm)
       rebase
       @bpm = bpm
