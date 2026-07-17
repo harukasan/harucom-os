@@ -399,6 +399,11 @@ class JohakyuApp
         # the new mean for minutes and reads like a slowdown.
         @session.reset_stats
         @view.reset_peaks
+        # Digest the eval's garbage (compile, sandbox, superseded
+        # patterns) in one sweep now. Left to the idle stepper it
+        # lingers into playback, the heap hits its ceiling mid show,
+        # and the emergency full GC stalls the loop for seconds.
+        GC.start
         restarted = ""
         if @restart_armed
           @restart_armed = false
