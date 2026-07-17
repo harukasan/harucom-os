@@ -117,12 +117,23 @@ dispatcher splits the map.
 Johakyu.sound("bd*4").color("<red blue>")   # light rides the kick
 Johakyu.pan(Johakyu.sine.slow(8)).on(:s1)   # standalone automation
 Johakyu.dimmer("1 0").spread(0.5, on: :all) # chase across members
+Johakyu.note("c5 e5 [c5,e5,g5] ~")          # pitched tones and a chord
 ```
 
 Chaining attaches controls with structure from the left (Tidal's `#`):
 `dimmer("1 0").color("<red blue>")` samples the colors at the dimmer's
 event times. Use two statements when the structures must stay
 independent.
+
+`note` is the pitched analogue of `sound`: values become `{note: n}`
+control maps (`c5` = 60 = 262 Hz, sharps `c#5`/`cs5`, flats `eb5`,
+octave defaults to 5, bare integers pass through). The dispatcher
+reserves a tone on channels 0-2 (round-robin voices, the drum kit owns
+3-7) and schedules the note-off at the event's whole end. Chords are
+mini comma stacks inside a step (`[c5,e5,g5]`), one voice per note; a
+fourth simultaneous note steals the oldest voice. Chain `.sound("saw")`
+for the waveform (sine, square, tri, saw; default square) and
+`.gain(0..1)` for the volume.
 
 ### Johakyu::Session
 
@@ -160,6 +171,14 @@ discarded and the show keeps playing. Each eval describes the whole
 desired state: tracks absent from the new recording are removed, so an
 empty buffer silences everything. The patch is the exception, kept
 unless the script states a new rig.
+
+Apply is differential: every pattern carries a change signature
+(`Pattern#sig`, a string composed only through deterministic
+transforms), and a track whose signature matches the currently bound
+one keeps its binding and staged events, so an eval that edits one
+track disturbs only that track. Block transforms leave the signature
+nil and always rebind (fail open); a patch swap or tempo change
+rebinds everything.
 
 ### Fixtures
 
@@ -221,6 +240,7 @@ allocates nothing.
 | `[bd hh]` | group: nested sequence in one step |
 | `<a b c>` | one item per cycle |
 | `bd, hh*4` | parallel stack |
+| `[c5,e5,g5]` | stack inside a step (a chord under `note`) |
 | `bd:2` | sample number, value `{s: "bd", n: 2}` |
 | `_` | hold: extends the previous event |
 
@@ -277,6 +297,17 @@ the next integer cycle boundary. Events already staged past that
 boundary are dropped and restaged from the new pattern, so edits land
 musically. A track whose query raises falls back to its last good
 pattern instead of silencing the whole scheduler.
+
+Around an eval the app prestages extra runway
+(`Scheduler#stage_ahead`): the compile is one atomic C call during
+which no tick can run, so the session stages every track ahead before
+compiling and again right after apply, pumping due events between
+chunks. The pre-staged pending events plus the reserve lead cover the
+compile and the sandbox run, and the post-apply pass pays the rebound
+tracks' first chunks immediately instead of one per loop iteration.
+The johakyu app also runs the GC scheduler-driven
+(`GC.scheduler_driven`): collection steps execute while every task
+sleeps instead of inside allocation bursts mid query.
 
 ### Determinism
 

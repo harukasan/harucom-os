@@ -59,7 +59,8 @@ module Johakyu
       @errors = {}
     end
 
-    # Bind a pattern. The sink receives (value, at_ms) for each onset.
+    # Bind a pattern. The sink receives (value, at_ms, duration_ms)
+    # for each onset; a two-argument sink simply ignores the duration.
     # Rebinding an existing name swaps at the next cycle boundary.
     # latency_ms fires the sink early of the musical target, e.g. to
     # leave room for a sample-accurate reservation on a slower output
@@ -178,7 +179,7 @@ module Johakyu
           reference = event[0] > event[4] ? event[0] : event[4]
           delay = now - reference
           @fire_delay_ms_max = delay if delay > @fire_delay_ms_max
-          event[1].call(event[2], event[0])
+          event[1].call(event[2], event[0], event[5])
           fired += 1
         else
           # Compact in place: delete_at per fired event made a busy
@@ -196,6 +197,37 @@ module Johakyu
     def tick_ms_average
       return 0.0 if @tick_count == 0
       @tick_ms_total.to_f / @tick_count
+    end
+
+    # Stage every track to at least the given runway ahead of now, one
+    # chunk at a time within a real-time budget. Yields between chunks
+    # so the caller can pump due events; a long prestage then cannot
+    # hold back firing. Called before a known stall (an eval compile
+    # is one atomic C call, no tick can run inside it) and after an
+    # apply rebinds tracks, so the stall or burst is paid from
+    # pre-staged runway instead of starving the outputs.
+    def stage_ahead(cycles, budget_ms)
+      deadline = Machine.board_millis + budget_ms
+      target = @clock.position + cycles
+      while Machine.board_millis < deadline
+        urgent = nil
+        i = 0
+        while i < @order.length
+          track = @tracks[@order[i]]
+          i += 1
+          next unless track
+          if urgent.nil? || track[:staged_until] < urgent[:staged_until]
+            urgent = track
+          end
+        end
+        break if urgent.nil? || urgent[:staged_until].to_f >= target
+        begin
+          stage_chunk(urgent)
+        rescue => e
+          track_failed(urgent, e)
+        end
+        yield if block_given?
+      end
     end
 
     private
@@ -286,14 +318,18 @@ module Johakyu
         hap = haps[i]
         i += 1
         next unless hap.has_onset?
-        at_ms = @clock.position_to_ms(hap.whole.begin_time).to_i - latency_ms
+        whole = hap.whole
+        at_ms = @clock.position_to_ms(whole.begin_time).to_i - latency_ms
+        # The event duration rides along so pitched sinks can schedule
+        # the note-off at the whole's end.
+        duration_ms = @clock.position_to_ms(whole.end_time).to_i - latency_ms - at_ms
         # The birth time rides along for the fire delay stat: a fresh
         # bind stages from the current position, so its first lead's
         # worth of events is born past at_ms while the musical target
         # (at_ms + lead, reconstructed by the sink) is still on time.
         # Measuring delay against birth keeps that benign case out of
         # the stat, which otherwise reads up to a full lead too high.
-        @pending << [at_ms, sink, hap.value, name, Machine.board_millis]
+        @pending << [at_ms, sink, hap.value, name, Machine.board_millis, duration_ms]
       end
       track[:staged_until] = to
       track[:last_good] = track[:pattern]

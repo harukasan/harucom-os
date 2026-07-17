@@ -176,6 +176,32 @@ class FakeAudio
     true
   end
 
+  def tone_at(sample, channel, frequency, waveform: 0, volume: 15)
+    @events << [:tone_at, sample, channel, frequency, waveform, volume]
+    true
+  end
+
+  def stop_at(sample, channel)
+    @events << [:stop_at, sample, channel]
+    true
+  end
+
+  def cancel_scheduled(channel)
+    @events << [:cancel, sample_clock, channel]
+  end
+
+  def tone_ats
+    @events.select { |e| e[0] == :tone_at }
+  end
+
+  def stop_ats
+    @events.select { |e| e[0] == :stop_at }
+  end
+
+  def cancels
+    @events.select { |e| e[0] == :cancel }
+  end
+
   def tones
     @events.select { |e| e[0] == :tone }
   end

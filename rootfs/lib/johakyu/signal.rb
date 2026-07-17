@@ -54,7 +54,9 @@ module Johakyu
     def fast(factor)
       f = factor.to_f
       raise ArgumentError, "fast factor must be positive" if f <= 0
-      Signal.new(@func, @time_scale * f, @value_scale, @value_offset, @time_offset)
+      result = Signal.new(@func, @time_scale * f, @value_scale, @value_offset, @time_offset)
+      result.sig = @sig && "fast:#{f}(#{@sig})"
+      result
     end
 
     def slow(factor)
@@ -65,8 +67,10 @@ module Johakyu
     # sampling at t must read the function at (t - amount).
     def late(amount)
       k = amount.to_f
-      Signal.new(@func, @time_scale, @value_scale, @value_offset,
-                 @time_offset - k * @time_scale)
+      result = Signal.new(@func, @time_scale, @value_scale, @value_offset,
+                          @time_offset - k * @time_scale)
+      result.sig = @sig && "late:#{k}(#{@sig})"
+      result
     end
 
     def early(amount)
@@ -77,13 +81,64 @@ module Johakyu
     # coefficients: min + (offset + scale * f) * (max - min).
     def range(min, max)
       span = (max - min).to_f
-      Signal.new(@func, @time_scale,
-                 @value_scale * span, min + @value_offset * span, @time_offset)
+      result = Signal.new(@func, @time_scale,
+                          @value_scale * span, min + @value_offset * span, @time_offset)
+      result.sig = @sig && "range:#{min},#{max}(#{@sig})"
+      result
     end
 
     def with_value(&block)
       source = self
       Signal.new { |t| block.call(source.sample(t)) }
+    end
+
+    # Signals discretize through the fast path below instead of the
+    # generic Pattern#segment.
+    def segment(n)
+      SegmentedSignal.new(self, n)
+    end
+  end
+
+  # Discrete segment fast path for signals: n Haps per cycle valued
+  # directly through Signal#sample, skipping the generic segment
+  # machinery (span_cycles split, one inner query and intersection per
+  # step). Values match the generic path exactly: the sample at each
+  # whole's midpoint.
+  class SegmentedSignal < Pattern
+    def initialize(signal, n)
+      @signal = signal
+      @n = n
+      self.sig = signal.sig && "seg:#{n}(#{signal.sig})"
+    end
+
+    def query(span)
+      b = span.begin_time
+      e = span.end_time
+      return [] if e <= b
+      n = @n
+      haps = []
+      # First segment index overlapping the span: floor(b * n) in
+      # integer math, no Rational temporaries.
+      j = (b.numerator * n).div(b.denominator)
+      ws = Rational(j, n)
+      while ws < e
+        we = Rational(j + 1, n)
+        part_b = ws > b ? ws : b
+        part_e = we < e ? we : e
+        haps << Hap.new(TimeSpan.new(ws, we), TimeSpan.new(part_b, part_e),
+                        value_at((j + 0.5) / n))
+        ws = we
+        j += 1
+      end
+      haps
+    end
+
+    private
+
+    # Hook for subclasses that wrap the sampled value (see
+    # SignalControl in control.rb).
+    def value_at(position)
+      @signal.sample(position)
     end
   end
 
@@ -92,29 +147,37 @@ module Johakyu
     Signal.new(&func)
   end
 
+  # A named factory result is fully determined by its name, so it
+  # carries the name as its change signature (see Pattern#sig).
+  def self.named_signal(name, &func)
+    result = Signal.new(&func)
+    result.sig = name
+    result
+  end
+
   # Rising ramp 0..1 each cycle.
   def self.saw
-    signal { |t| t - t.floor }
+    named_signal("saw") { |t| t - t.floor }
   end
 
   # Falling ramp 1..0 each cycle.
   def self.isaw
-    signal { |t| 1.0 - (t - t.floor) }
+    named_signal("isaw") { |t| 1.0 - (t - t.floor) }
   end
 
   # Sine mapped to 0..1, starting at 0.5 rising.
   def self.sine
-    signal { |t| 0.5 + 0.5 * Math.sin(TWO_PI * t) }
+    named_signal("sine") { |t| 0.5 + 0.5 * Math.sin(TWO_PI * t) }
   end
 
   # Cosine mapped to 0..1.
   def self.cosine
-    signal { |t| 0.5 + 0.5 * Math.cos(TWO_PI * t) }
+    named_signal("cosine") { |t| 0.5 + 0.5 * Math.cos(TWO_PI * t) }
   end
 
   # Triangle 0..1..0 each cycle.
   def self.tri
-    signal do |t|
+    named_signal("tri") do |t|
       phase = t - t.floor
       phase < 0.5 ? phase * 2.0 : 2.0 - phase * 2.0
     end
@@ -122,6 +185,6 @@ module Johakyu
 
   # Square: 0 for the first half cycle, 1 for the second.
   def self.square_signal
-    signal { |t| (t - t.floor) < 0.5 ? 0.0 : 1.0 }
+    named_signal("square_signal") { |t| (t - t.floor) < 0.5 ? 0.0 : 1.0 }
   end
 end

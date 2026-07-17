@@ -138,4 +138,16 @@ class MiniTest < Picotest::Test
     assert_equal ["1/1..3/2|1/1..3/2|\"sn\"", "3/2..2/1|3/2..2/1|\"hh\""],
                  hap_sigs(pattern.query_arc(1, 2))
   end
+
+  # Chord notation for note(): a comma stack inside a step already
+  # parses without parser changes, and note atoms stay plain strings.
+  def test_chord_stack_inside_step
+    assert_equal ["0/1..1/2|0/1..1/2|\"c3\"", "0/1..1/2|0/1..1/2|\"e3\"",
+                  "0/1..1/2|0/1..1/2|\"g3\"", "1/2..1/1|1/2..1/1|\"e4\""],
+                 hap_sigs(parse("[c3,e3,g3] e4").query_arc(0, 1)).sort
+  end
+
+  def test_sharp_atom_tokenizes
+    assert_equal "c#3", parse("c#3").query_arc(0, 1)[0].value
+  end
 end

@@ -193,12 +193,21 @@ class JohakyuApp
     Johakyu.preload_personalities
     @live = Johakyu::Live.new(@session)
     $johakyu_live = @live
+    # Idle-driven GC: steps run while every task sleeps (this loop
+    # sleeps 5 ms per iteration) instead of inside allocation bursts
+    # mid chunk query or mid eval. step_limit bounds one step's work
+    # (objects processed) and the debt valve forces synchronous
+    # progress when the loop never goes idle, bounding heap growth.
+    GC.scheduler_driven = true
+    GC.step_limit = 400
+    GC.debt_limit = 4096
   end
 
   # Runs from the ensure in run, so setup may have failed at any
   # point; only tear down what actually came up, and do not let a
   # teardown error mask the original exception.
   def shutdown
+    GC.scheduler_driven = false
     @sandbox.terminate if @sandbox
     @session.stop_sounds if @session
     @audio.deinit if @audio
@@ -325,6 +334,11 @@ class JohakyuApp
   def start_eval
     return if @evaling
     source = @buffer.lines.join("\n")
+    # Build staged runway before the compile: mrc compile is one
+    # atomic C call, so no tick can run inside it, and the sandbox
+    # run that follows shares the CPU with the show loop. Pre-staged
+    # pending events plus the reserve lead absorb both.
+    @session.prestage
     @live.begin_recording
     compile_t0 = Machine.board_millis
     @sandbox.terminate if @sandbox
@@ -367,13 +381,18 @@ class JohakyuApp
         @live.apply
         apply_ms = Machine.board_millis - apply_t0
         run_ms = apply_t0 - @eval_started_ms
+        # Capture the lateness accumulated since the previous reset
+        # before reset_stats wipes it: it covers this eval's compile
+        # and run window, so it measures the eval stall at the output.
+        late_count = @session.output_late_count
+        late_ms = @session.output_late_ms_max
         # Restart the stats so tick/st/lt read as steady-state numbers
         # for the new binding, the same as the demo does per preset. A
         # cumulative average spanning an unmute keeps climbing toward
         # the new mean for minutes and reads like a slowdown.
         @session.reset_stats
         @view.reset_peaks
-        @message = "Applied (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms)"
+        @message = "Applied (compile #{@eval_compile_ms}ms, run #{run_ms}ms, apply #{apply_ms}ms, late #{late_count}/#{late_ms}ms)"
         unless Johakyu.patch.equal?(patch_before)
           # The rig changed: resize the universe view, re-lay the
           # editor out below it, and repaint everything.

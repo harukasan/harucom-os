@@ -220,7 +220,7 @@ class SchedulerTest < Picotest::Test
                            Johakyu.dmx_builder(:s2).pan(Johakyu.sine.range(0.2, 0.8).slow(8)))
     run_until(session, 500, 20)
     pans = DMX.writes.select { |w| w[1] == 14 }
-    # the default segment(8) yields a write every 250 ms
+    # the default segment(16) yields a write every 125 ms
     assert_equal true, pans.length >= 2
     assert_equal true, pans.all? { |w| w[2] >= 51 && w[2] <= 204 }
   end
@@ -285,5 +285,17 @@ class SchedulerTest < Picotest::Test
     count = audio.plays.length
     run_until(session, 3000)
     assert_equal count, audio.plays.length
+  end
+
+  # The sink's third argument carries the event's whole duration, so
+  # pitched sinks can schedule the note-off. Two-argument sinks keep
+  # working (blocks ignore extra arguments).
+  def test_sink_receives_event_duration
+    clock = Johakyu::Clock.new(bpm: 120)
+    scheduler = Johakyu::Scheduler.new(clock)
+    durations = []
+    scheduler.bind(:t, Johakyu::Mini.parse("a b")) { |v, at, dur| durations << dur }
+    run_until(scheduler, 1100)
+    assert_equal [1000, 1000], durations
   end
 end

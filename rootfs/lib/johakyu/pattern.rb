@@ -217,6 +217,50 @@ module Johakyu
       query(TimeSpan.new(Fraction.of(begin_time), Fraction.of(end_time)))
     end
 
+    # Change signature: a short string that fully determines this
+    # pattern's behavior, or nil when unknown. Live#apply compares
+    # signatures across evals to skip rebinding unchanged tracks. nil
+    # always rebinds, so the mechanism fails open: only sites where
+    # the string provably captures the whole behavior set it, and
+    # block-based transforms (with_value, custom signals) leave it
+    # nil.
+    attr_accessor :sig
+
+    # Signature fragment for a plain value. Class-prefixed so "1",
+    # :"1" and 1 stay distinct. Arbitrary objects (resolved fixture
+    # targets) sign by identity, which is stable across evals as long
+    # as the same patch stays current; Live#apply only skips when the
+    # recording carries no patch swap.
+    def self.sig_value(value)
+      if value.is_a?(String)
+        "s:" + value
+      elsif value.is_a?(Symbol)
+        "y:" + value.to_s
+      elsif value.is_a?(Integer) || value.is_a?(Float) || value.is_a?(Rational)
+        "n:" + value.to_s
+      elsif value.nil?
+        "nil"
+      elsif value == true || value == false
+        value.to_s
+      else
+        "o:" + value.object_id.to_s
+      end
+    end
+
+    # Composite signature over member patterns: nil when any member
+    # is unsigned.
+    def self.sig_of_all(label, patterns)
+      parts = ""
+      i = 0
+      while i < patterns.length
+        s = patterns[i].sig
+        return nil if s.nil?
+        parts = parts + (i == 0 ? "" : ",") + s
+        i += 1
+      end
+      label + "(" + parts + ")"
+    end
+
     # True when this pattern is a continuous signal: its Haps carry no
     # whole, so nothing ever has an onset. Probed with one tiny query.
     # The DSL uses this to choose between staged events and per-tick
@@ -242,7 +286,7 @@ module Johakyu
     # ---- factories ----
 
     def self.pure(value)
-      Pattern.new do |span|
+      result = Pattern.new do |span|
         spans = span.span_cycles
         haps = []
         i = 0
@@ -253,10 +297,14 @@ module Johakyu
         end
         haps
       end
+      result.sig = "p(" + sig_value(value) + ")"
+      result
     end
 
     def self.silence
-      Pattern.new { |_span| [] }
+      result = Pattern.new { |_span| [] }
+      result.sig = "silence"
+      result
     end
 
     # Strings become mini notation once the parser exists (M7); until
@@ -276,7 +324,7 @@ module Johakyu
         i += 1
       end
       n = patterns.length
-      Pattern.new do |span|
+      result = Pattern.new do |span|
         spans = span.span_cycles
         haps = []
         i = 0
@@ -288,6 +336,8 @@ module Johakyu
         end
         haps
       end
+      result.sig = sig_of_all("cat", patterns)
+      result
     end
 
     # All items within one cycle.
@@ -308,7 +358,7 @@ module Johakyu
         patterns << reify(items[i])
         i += 1
       end
-      Pattern.new do |span|
+      result = Pattern.new do |span|
         haps = []
         i = 0
         while i < patterns.length
@@ -317,6 +367,8 @@ module Johakyu
         end
         haps
       end
+      result.sig = sig_of_all("stack", patterns)
+      result
     end
 
     # Euclidean rhythm: pulses spread over steps, value true.
@@ -333,7 +385,7 @@ module Johakyu
         beats << i if flags[i]
         i += 1
       end
-      Pattern.new do |span|
+      result = Pattern.new do |span|
         spans = span.span_cycles
         haps = []
         i = 0
@@ -353,6 +405,8 @@ module Johakyu
         end
         haps
       end
+      result.sig = "euclid:#{pulses},#{steps},#{rotation}"
+      result
     end
 
     def self.bjorklund(pulses, steps)
@@ -421,7 +475,9 @@ module Johakyu
     def fast(factor)
       factor = Fraction.of(factor)
       raise ArgumentError, "fast factor must be positive" if factor.num <= 0
-      with_query_time { |t| t * factor }.with_hap_time { |t| t / factor }
+      result = with_query_time { |t| t * factor }.with_hap_time { |t| t / factor }
+      result.sig = @sig && "fast:#{factor}(#{@sig})"
+      result
     end
 
     def slow(factor)
@@ -433,7 +489,9 @@ module Johakyu
     # fixture member.
     def late(amount)
       amount = Fraction.of(amount)
-      with_query_time { |t| t - amount }.with_hap_time { |t| t + amount }
+      result = with_query_time { |t| t - amount }.with_hap_time { |t| t + amount }
+      result.sig = @sig && "late:#{amount}(#{@sig})"
+      result
     end
 
     def early(amount)
@@ -458,7 +516,7 @@ module Johakyu
     def every(n, &func)
       source = self
       transformed = func.call(self)
-      Pattern.new do |span|
+      result = Pattern.new do |span|
         spans = span.span_cycles
         haps = []
         i = 0
@@ -470,12 +528,16 @@ module Johakyu
         end
         haps
       end
+      # The block ran once at build time; its output's signature (when
+      # present) captures what it did, so every() stays signable.
+      result.sig = @sig && transformed.sig && "every:#{n}(#{@sig},#{transformed.sig})"
+      result
     end
 
     # Reverse playback within each cycle.
     def rev
       source = split_queries
-      Pattern.new do |span|
+      result = Pattern.new do |span|
         spans = span.span_cycles
         haps = []
         k = 0
@@ -503,6 +565,8 @@ module Johakyu
         end
         haps.sort { |a, b| a.part.begin_time <=> b.part.begin_time }
       end
+      result.sig = @sig && "rev(#{@sig})"
+      result
     end
 
     # ---- value transforms ----
@@ -547,14 +611,16 @@ module Johakyu
 
     def with_control(key, other)
       unless other.is_a?(Pattern)
-        return with_value do |value|
+        result = with_value do |value|
           merged = Pattern.control_map(value, key)
           merged[key] = other
           merged
         end
+        result.sig = @sig && "wc:#{key}=#{Pattern.sig_value(other)}(#{@sig})"
+        return result
       end
       source = self
-      Pattern.new do |span|
+      pattern = Pattern.new do |span|
         haps = source.query(span)
         result = []
         i = 0
@@ -578,6 +644,8 @@ module Johakyu
         end
         result
       end
+      pattern.sig = @sig && other.sig && "wc:#{key}(#{@sig},#{other.sig})"
+      pattern
     end
 
     def onsets_only
@@ -596,7 +664,9 @@ module Johakyu
 
     # Scale 0.0-1.0 values to min..max.
     def range(min, max)
-      with_value { |v| min + v * (max - min) }
+      result = with_value { |v| min + v * (max - min) }
+      result.sig = @sig && "range:#{Pattern.sig_value(min)},#{Pattern.sig_value(max)}(#{@sig})"
+      result
     end
 
     # ---- structure transforms ----
@@ -605,7 +675,7 @@ module Johakyu
     def struct(bool_pattern)
       bool_pattern = Pattern.reify(bool_pattern)
       source = self
-      Pattern.new do |span|
+      result = Pattern.new do |span|
         bool_haps = bool_pattern.query(span)
         haps = []
         i = 0
@@ -625,6 +695,8 @@ module Johakyu
         end
         haps
       end
+      result.sig = @sig && bool_pattern.sig && "struct(#{@sig},#{bool_pattern.sig})"
+      result
     end
 
     # Keep events where the boolean pattern is truthy (and not 0),
@@ -632,7 +704,7 @@ module Johakyu
     def mask(bool_pattern)
       bool_pattern = Pattern.reify(bool_pattern)
       source = self
-      Pattern.new do |span|
+      pattern = Pattern.new do |span|
         haps = source.query(span)
         result = []
         i = 0
@@ -654,6 +726,8 @@ module Johakyu
         end
         result
       end
+      pattern.sig = @sig && bool_pattern.sig && "mask(#{@sig},#{bool_pattern.sig})"
+      pattern
     end
 
     # Euclidean structure applied to this pattern's values.
@@ -664,7 +738,7 @@ module Johakyu
     # Sample a continuous pattern into n discrete events per cycle.
     def segment(n)
       source = self
-      Pattern.new do |span|
+      result = Pattern.new do |span|
         spans = span.span_cycles
         haps = []
         i = 0
@@ -686,12 +760,14 @@ module Johakyu
         end
         haps
       end
+      result.sig = @sig && "seg:#{n}(#{@sig})"
+      result
     end
 
     # Remove events with the given probability (deterministic per time).
     def degrade_by(amount)
       source = self
-      Pattern.new do |span|
+      pattern = Pattern.new do |span|
         haps = source.query(span)
         result = []
         i = 0
@@ -703,6 +779,8 @@ module Johakyu
         end
         result
       end
+      pattern.sig = @sig && "deg:#{amount}(#{@sig})"
+      pattern
     end
 
     def degrade

@@ -1,6 +1,19 @@
 require "picotest"
 require "johakyu/live"
 
+# Session that records every bind_statement call, so tests can assert
+# which tracks the differential apply actually rebinds.
+class LiveBindSpySession < Johakyu::Session
+  def bind_names
+    @bind_names ||= []
+  end
+
+  def bind_statement(name, pattern)
+    bind_names << name
+    super
+  end
+end
+
 # Live coding layer: eval scripts record tracks through the top-level
 # DSL, apply replays onto the running session with replace semantics.
 # track(:name) blocks are the primary form (strudel-rb compatible);
@@ -102,7 +115,7 @@ class LiveTest < Picotest::Test
     @live.apply
     run_until(500, 20)
     pans = DMX.writes.select { |w| w[1] == 14 }
-    # the default segment(8) yields a write every 250 ms
+    # the default segment(16) yields a write every 125 ms
     assert_equal true, pans.length >= 2
   end
 
@@ -222,5 +235,144 @@ class LiveTest < Picotest::Test
     assert_raise(ArgumentError) do
       track(:bad) { 42 }
     end
+  end
+
+  def spy_live
+    session = LiveBindSpySession.new(audio: @audio, bpm: 120, audio_latency_ms: 0)
+    live = Johakyu::Live.new(session)
+    $johakyu_live = live
+    [session, live]
+  end
+
+  def record_two_tracks(live, drums)
+    live.begin_recording
+    track(:drums) { sound(drums) }
+    track(:wash) { dimmer(sine.slow(4)).on(:s1) }
+    live.apply
+  end
+
+  # Differential apply: re-evaling an unchanged buffer rebinds
+  # nothing, editing one track rebinds only that track.
+  def test_unchanged_tracks_skip_rebinding
+    session, live = spy_live
+    record_two_tracks(live, "bd*4")
+    assert_equal [:drums, :wash], session.bind_names
+    record_two_tracks(live, "bd*4")
+    assert_equal [:drums, :wash], session.bind_names
+    record_two_tracks(live, "bd*2 sd")
+    assert_equal [:drums, :wash, :drums], session.bind_names
+  end
+
+  def test_tempo_change_rebinds_everything
+    session, live = spy_live
+    record_two_tracks(live, "bd*4")
+    live.begin_recording
+    tempo(240)
+    track(:drums) { sound("bd*4") }
+    track(:wash) { dimmer(sine.slow(4)).on(:s1) }
+    live.apply
+    assert_equal [:drums, :wash, :drums, :wash], session.bind_names
+  end
+
+  # A block transform leaves the signature nil, so it rebinds on
+  # every apply (fail open).
+  def test_unsigned_patterns_always_rebind
+    session, live = spy_live
+    2.times do
+      live.begin_recording
+      track(:x) { sound("bd*4").fmap { |m| m } }
+      live.apply
+    end
+    assert_equal [:x, :x], session.bind_names
+  end
+
+  # Unchanged tracks keep their staged events across an eval: the
+  # skip must not drop or double the track's output.
+  def test_skipped_track_output_stays_continuous
+    session, live = spy_live
+    audio = @audio
+    live.begin_recording
+    track(:drums) { sound("bd*2") }
+    live.apply
+    run_for(session, 900)
+    count_before = audio.plays.length
+    live.begin_recording
+    track(:drums) { sound("bd*2") }
+    live.apply
+    run_for(session, 2900)
+    # bd*2 at bpm 120: one hit every 1000 ms, reserved one lead
+    # early. No hit is lost or doubled across the no-op eval.
+    assert_equal [0, 1000, 2000, 3000], play_ms(audio).uniq
+    assert_equal true, audio.plays.length > count_before
+  end
+
+  def run_for(session, until_ms, step_ms = 10)
+    t = Machine.board_millis
+    while t <= until_ms
+      Machine.millis = t
+      session.update
+      t += step_ms
+    end
+  end
+
+  # note(): sample-accurate tone reservations with the note-off at
+  # each event's whole end, voices round-robin over channels 0-2.
+  def test_note_track_plays_tones_with_duration
+    @live.begin_recording
+    track(:lead) { note("c5 e5 g5 b5") }
+    @live.apply
+    run_until(1600)
+    tones = @audio.tone_ats
+    assert_equal [0, 25000, 50000, 75000], tones.map { |e| e[1] }
+    assert_equal [0, 1, 2, 0], tones.map { |e| e[2] }
+    assert_equal [262, 330, 392, 494], tones.map { |e| e[3] }
+    assert_equal [1, 1, 1, 1], tones.map { |e| e[4] }
+    assert_equal [12, 12, 12, 12], tones.map { |e| e[5] }
+    assert_equal [25000, 50000, 75000, 100000], @audio.stop_ats.map { |e| e[1] }
+    assert_equal 0, @session.note_drop_count
+  end
+
+  def test_note_chord_uses_three_voices
+    @live.begin_recording
+    track(:chord) { note("[c5,e5,g5]") }
+    @live.apply
+    run_until(200)
+    tones = @audio.tone_ats
+    assert_equal [0, 0, 0], tones.map { |e| e[1] }
+    assert_equal [0, 1, 2], tones.map { |e| e[2] }.sort
+    assert_equal [100000, 100000, 100000], @audio.stop_ats.map { |e| e[1] }
+    assert_equal 0, @audio.cancels.length
+  end
+
+  def test_four_note_chord_steals_the_oldest_voice
+    @live.begin_recording
+    track(:chord) { note("[c5,e5,g5,c6]") }
+    @live.apply
+    run_until(200)
+    assert_equal 4, @audio.tone_ats.length
+    cancels = @audio.cancels
+    assert_equal 1, cancels.length
+    assert_equal 0, cancels[0][2]
+  end
+
+  def test_note_waveform_and_gain_chain
+    @live.begin_recording
+    track(:lead) { note("c5").sound("saw").gain(1.0) }
+    @live.apply
+    run_until(200)
+    tone = @audio.tone_ats[0]
+    assert_equal 3, tone[4]
+    assert_equal 15, tone[5]
+  end
+
+  def test_note_and_drums_share_the_session
+    @live.begin_recording
+    track(:drums) { sound("bd*2") }
+    track(:lead) { note("c5 g5") }
+    @live.apply
+    run_until(900)
+    # drums stay on the kit channels, notes on the tone pool
+    assert_equal true, @audio.plays.all? { |e| e[2] >= 3 }
+    assert_equal true, @audio.tone_ats.all? { |e| e[2] <= 2 }
   end
 end
