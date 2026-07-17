@@ -390,13 +390,13 @@ ch 7  Strobe
 
 # UARTで送ってみる
 
-- picoruby-uartを使えば送信できる
-- ただし、UART送信はブロッキング
-- 送信中にほかのことができない
-- そこでDMAを使う
+- picoruby-uartで送信する
 
 {::wait/}
 
+- UART送信はブロッキング
+- 送信中にほかのことができない
+- そこでDMAを使う
 - **picoruby-dmx** をつくった
 
 # picoruby-dmx
