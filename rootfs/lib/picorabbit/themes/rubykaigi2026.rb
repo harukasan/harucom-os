@@ -3,14 +3,10 @@ module PicoRabbit
     class Rubykaigi2026 < Theme
       ACCENT = 0x64  # RGB332 closest to #7F412B
 
-      # Fonts
+      # Fonts (Latin only; the deck content is English)
       def title_font; G::FONT_OUTFIT_EXTRABOLD_32; end
       def body_font; G::FONT_OUTFIT_22; end
       def bold_font; G::FONT_OUTFIT_BOLD_22; end
-      # Japanese (JIS X 0208) glyphs for body/bold text, baseline-matched to Outfit 22.
-      def body_wide_font; G::FONT_MPLUS_1_MEDIUM_22; end
-      # Japanese glyphs for the title, baseline-matched to Outfit ExtraBold 32.
-      def title_wide_font; G::FONT_MPLUS_1_EXTRABOLD_32; end
 
       # Colors
       def background_color; 0xFF; end

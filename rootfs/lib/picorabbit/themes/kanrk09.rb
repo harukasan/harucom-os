@@ -46,9 +46,10 @@ module PicoRabbit
         p5.background(ACCENT)
 
         title_lines = slide.title.split("\n")
+        author_lines = metadata["author"] ? Parser.replace_br(metadata["author"]).split("\n") : []
         total_height = title_lines.length * (title_font_height + leading) - leading
         total_height += 16 + body_font_height if metadata["subtitle"]
-        total_height += 8 + body_font_height if metadata["author"]
+        total_height += 8 + author_lines.length * (body_font_height + leading) - leading if author_lines.length > 0
         y = (480 - total_height) / 2
 
         p5.text_font(title_font, title_wide_font)
@@ -67,11 +68,14 @@ module PicoRabbit
           p5.text(metadata["subtitle"], 320, y)
           y += body_font_height
         end
-        if metadata["author"]
+        if author_lines.length > 0
           y += 8
           p5.text_font(body_font, body_wide_font)
           p5.text_color(0xDB)
-          p5.text(metadata["author"], 320, y)
+          author_lines.each do |line|
+            p5.text(line, 320, y)
+            y += body_font_height + leading
+          end
         end
         p5.text_align(:left)
       end
@@ -83,6 +87,15 @@ module PicoRabbit
         p5.no_stroke
         p5.rect(0, 0, 640, 10)
         p5.no_fill
+      end
+
+      # Page number below the timer track (456) so they do not overlap
+      def render_footer(p5, slide_index, total_slides)
+        p5.text_font(footer_font)
+        p5.text_color(footer_color)
+        p5.text_align(:right)
+        p5.text("#{slide_index + 1} / #{total_slides}", 640 - margin_x, 462)
+        p5.text_align(:left)
       end
 
       def render_slide(p5, slide, slide_index, total_slides, step = nil, metadata = {})

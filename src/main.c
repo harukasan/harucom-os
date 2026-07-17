@@ -231,7 +231,7 @@ int main(void) {
     /* Switch Core 0 stack from SCRATCH_Y (2 KB) to BSS (32 KB).
      * Must happen before any deep calls (mruby compiler needs >2 KB).
      * After this, the SCRATCH_Y stack region is unused. */
-    __asm volatile("msr msp, %0" ::"r"((uint32_t)(bss_stack + BSS_STACK_SIZE))
+     __asm volatile("msr msp, %0" ::"r"((uint32_t)(bss_stack + BSS_STACK_SIZE))
                    : "memory");
     harucom_main();
     return 0;
