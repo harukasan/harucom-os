@@ -17,7 +17,8 @@ allotted_time: 20
 # Harucom
 
 * モニターとキーボードだけでうごく<br>ちいさな Ruby コンピューター
-* harukasan.booth.pm で頒布してます!
+* BOOTH で頒布してます!
+* harukasan.booth.pm
 
 # 照
 
@@ -36,7 +37,7 @@ p5.image_masked(sho.data, sho.mask, sho_x, sho_y, sho.width, sho.height)
 
 - ふだん触れない世界に触れる
 - AIでできるからこそ理解を試みる
-- よくわからないことについて話しあう
+- よくわからないことについて話す
 
 # 舞台照明のしくみ
 
@@ -425,18 +426,18 @@ ch 7  Strobe
 - strudel-rb を参考に実装
 - DMXをDSLでかんたんに書ける
 
-# デモ
+# QOA
+
+Quite OK Audio
+
+- マイコン向け超軽量フォーマット
+- 整数演算だけでうごく
+- Cで400行くらい
 
 # まとめ
 
 - 普段さわらない技術にさわるとおもしろい
--
 
-# ご清聴ありがとうございました
-
-GitHub:
-- harukasan/harucom-os (PR #17: Johakyu)
-
-Social:
 - X: @harukasan
+- GitHub: harukasan/harucom-os
 - https://harukasan.dev/
