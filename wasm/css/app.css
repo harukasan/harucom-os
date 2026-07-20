@@ -1,0 +1,74 @@
+/* Tailwind input for the wasm browser shell.
+ *
+ * Utility classes are authored in index.html and the funicular UI .rb files.
+ * source(none) disables Tailwind's automatic scanning so only the listed @source
+ * files are read (keeps node_modules out and the output deterministic). rake
+ * wasm:css builds this into build/wasm/style.css. */
+@import "tailwindcss" source(none);
+
+@source "../index.html";
+@source "../ruby";
+
+/* Tokyo Night palette (VS Code). Borders are darker than the background so the
+ * dividers recede; blue is the accent (splitter hover) and green is the
+ * pressed-pad color. The token names stay semantic so each panel's
+ * utility classes read as intent, not color. Ordering dark -> light:
+ * border #13141b < bar #16161e < base/panel #1a1b26 < pad #24283b. */
+@theme {
+  --color-base: #1a1b26;        /* editor bg: page, dock, console */
+  --color-panel-bg: #1a1b26;    /* panel body and active tab */
+  --color-bar-bg: #16161e;      /* tab strip (darker than the editor) */
+  --color-border: #13141b;      /* dividers and splitters, darker than the bg */
+  --color-border-hover: #2a2f45;
+  --color-fg: #c0caf5;          /* primary text */
+  --color-fg-dim: #565f89;      /* secondary text (comment) */
+  --color-console: #a9b1d6;     /* console output (fg_dark) */
+  --color-tab-active: #ffffff;
+  --color-tab-inactive: #565f89;
+  --color-accent: #7aa2f7;      /* Tokyo Night blue accent */
+  --color-pad: #24283b;         /* raised pad button (bg_highlight) */
+  --color-pad-on: #9ece6a;      /* Tokyo Night green when pressed */
+}
+
+@layer base {
+  /* The DVI surface is 640x480; scale it up with crisp (nearest) pixels. Sizing
+   * and image-rendering are not utility-shaped, so they stay hand-written. The
+   * Screen panel moves this canvas into its host on mount. */
+  #screen {
+    display: block;
+    width: 640px;
+    height: 480px;
+    background: #000;
+    border-radius: 4px;
+    image-rendering: pixelated;
+  }
+
+  /* Undocked panel box: native bottom-right corner resize (no JS), clamped.
+   * resize needs overflow != visible; the Panels host scrolls its own body. */
+  .undock-box {
+    resize: both;
+    overflow: hidden;
+    width: 640px;
+    height: 320px;
+    min-width: 240px;
+    min-height: 120px;
+    max-width: min(1280px, 100%);
+    max-height: 80vh;
+  }
+
+  /* Thin dark scrollbars to match the devtools look. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-hover);
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3b4261;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
