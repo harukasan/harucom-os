@@ -165,31 +165,35 @@ module PicoRabbit
     end
 
     # Draw text with inline **bold** and `code` formatting.
+    # Lines split on "\n" (from <br> markers) stack vertically at the same x.
     # Returns the next Y position.
     def draw_rich_text(p5, str, x, y)
-      segments = parse_inline(str)
-      cx = x
-      segments.each do |seg|
-        case seg[0]
-        when :bold
-          p5.text_font(bold_font, bold_wide_font)
-          p5.text_color(text_color)
-          p5.text(seg[1], cx, y)
-          cx += p5.text_width(seg[1])
-        when :code
-          p5.text_font(inline_code_font)
-          p5.text_color(inline_code_color)
-          code_y = y + body_font_ascent - inline_code_font_ascent
-          p5.text(seg[1], cx, code_y)
-          cx += p5.text_width(seg[1])
-        else
-          p5.text_font(body_font, body_wide_font)
-          p5.text_color(text_color)
-          p5.text(seg[1], cx, y)
-          cx += p5.text_width(seg[1])
+      str.split("\n").each do |line|
+        segments = parse_inline(line)
+        cx = x
+        segments.each do |seg|
+          case seg[0]
+          when :bold
+            p5.text_font(bold_font, bold_wide_font)
+            p5.text_color(text_color)
+            p5.text(seg[1], cx, y)
+            cx += p5.text_width(seg[1])
+          when :code
+            p5.text_font(inline_code_font)
+            p5.text_color(inline_code_color)
+            code_y = y + body_font_ascent - inline_code_font_ascent
+            p5.text(seg[1], cx, code_y)
+            cx += p5.text_width(seg[1])
+          else
+            p5.text_font(body_font, body_wide_font)
+            p5.text_color(text_color)
+            p5.text(seg[1], cx, y)
+            cx += p5.text_width(seg[1])
+          end
         end
+        y += body_font_height + leading
       end
-      y + body_font_height + leading
+      y
     end
 
     # Parse inline formatting markers into segments.

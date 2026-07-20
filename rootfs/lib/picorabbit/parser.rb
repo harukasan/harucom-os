@@ -147,7 +147,7 @@ module PicoRabbit
         if stripped.start_with?("- ") || stripped.start_with?("* ")
           indent = line.length - stripped.length
           level = indent / 2
-          text = stripped[2, stripped.length - 2]
+          text = replace_br(stripped[2, stripped.length - 2])
           current_elements << Element.new(:bullet, text, level)
           next
         end
