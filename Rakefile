@@ -7,6 +7,14 @@ DICT_UF2    = File.join(DICT_DIR, "build", "dict.uf2")
 HARUCOM_UF2 = File.join(BUILD_DIR, "harucom_os.uf2")
 FULL_UF2    = File.join(BUILD_DIR, "harucom_os_full.uf2")
 MERGE_SCRIPT = File.join(PROJECT_DIR, "scripts", "merge_uf2.rb")
+BIN2UF2_SCRIPT = File.join(PROJECT_DIR, "scripts", "bin2uf2.rb")
+
+# The lumica entrance song, streamed from raw flash (see
+# rootfs/data/johakyu/lumica.rb). Kept outside the repository; the
+# combined UF2 includes it when the file exists.
+SONG_QOA = ENV["SONG_QOA"] || File.expand_path("~/lumica/lumica.qoa")
+SONG_UF2 = File.join(BUILD_DIR, "song.uf2")
+SONG_ADDRESS = 0x10440000
 
 def nproc
   require "etc"
@@ -40,9 +48,19 @@ task configure: :mruby_patches do
   sh "cmake -B #{BUILD_DIR} -G Ninja"
 end
 
+# The lumica show streams a QOA file from raw flash at this address
+# (see rootfs/data/johakyu/lumica.rb). The firmware image must stay
+# below it or flashing one would corrupt the other.
+SONG_REGION_START = 0x440000
+
 desc "Build firmware"
 task build: :configure do
   sh "cmake --build #{BUILD_DIR} -j#{nproc}"
+  bin = File.join(BUILD_DIR, "harucom_os.bin")
+  if File.exist?(bin) && File.size(bin) > SONG_REGION_START
+    abort format("firmware (%d bytes) overlaps the song region at 0x%X",
+                 File.size(bin), SONG_REGION_START)
+  end
 end
 
 desc "Build UF2 (harucom-os only)"
@@ -60,9 +78,28 @@ task dict_uf2: :dict_submodule do
   sh "rake uf2", chdir: DICT_DIR
 end
 
-desc "Build combined UF2 (harucom-os + dict)"
-task full_uf2: [:uf2, :dict_uf2] do
-  sh "ruby #{MERGE_SCRIPT} -o #{FULL_UF2} #{HARUCOM_UF2} #{DICT_UF2}"
+desc "Build song UF2 from SONG_QOA (skipped when the file is absent)"
+task :song_uf2 do
+  if File.exist?(SONG_QOA)
+    # The song region ends at the dictionary image (flash 0x600000).
+    region = 0x600000 - SONG_REGION_START
+    if File.size(SONG_QOA) > region
+      abort format("song (%d bytes) overlaps the dictionary: %d over the " \
+                   "%d byte region", File.size(SONG_QOA),
+                   File.size(SONG_QOA) - region, region)
+    end
+    sh format("ruby %s -o %s -a 0x%08x %s", BIN2UF2_SCRIPT, SONG_UF2,
+              SONG_ADDRESS, SONG_QOA)
+  else
+    puts "song_uf2: #{SONG_QOA} not found, skipping"
+  end
+end
+
+desc "Build combined UF2 (harucom-os + dict + song when present)"
+task full_uf2: [:uf2, :dict_uf2, :song_uf2] do
+  inputs = [HARUCOM_UF2, DICT_UF2]
+  inputs << SONG_UF2 if File.exist?(SONG_QOA)
+  sh "ruby #{MERGE_SCRIPT} -o #{FULL_UF2} #{inputs.join(" ")}"
 
   # Make a version-stamped copy alongside the CMake-produced release file,
   # e.g. harucom_os-<git>-<date>.uf2  ->  harucom_os_full-<git>-<date>.uf2.
