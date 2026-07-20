@@ -65,34 +65,18 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
 
   ruby_cmd = "ruby"
 
-  # M PLUS 1 Medium: full JIS X 0208, 4bpp anti-aliased, compressed
-  # (canonical Huffman + zero-run). Rendered at 20px with the baseline forced
-  # to row 22 so it aligns with FONT_OUTFIT_22 (ascender 22) in PicoRabbit.
+  # M PLUS 1 TTF sources. Only the kanrk09 subset fonts below are built from
+  # these; the full JIS X 0208 variants do not fit the 6 MB flash window.
   mplus1_dir = "#{dir}/lib/fonts/mplus-1"
-  mplus1_ttf = "#{mplus1_dir}/MPLUS1-Medium.ttf"
-  mplus1_dst = "#{include_dir}/font_mplus_1_medium_22.h"
-  file mplus1_dst => [mplus1_ttf, ttf2c, include_dir] do
-    sh "#{ruby_cmd} #{ttf2c} #{mplus1_ttf} -s 20 --ascent 22 --jis --aa --compress -n mplus_1_medium_22 -o #{mplus1_dst}"
-  end
-
-  # M PLUS 1 ExtraBold: full JIS X 0208, 4bpp anti-aliased, compressed.
-  # Rendered at 27px with the baseline forced to row 32 so it aligns with
-  # FONT_OUTFIT_EXTRABOLD_32 (ascender 32) for PicoRabbit slide titles.
   mplus1_eb_ttf = "#{mplus1_dir}/MPLUS1-ExtraBold.ttf"
-  mplus1_eb_dst = "#{include_dir}/font_mplus_1_extrabold_32.h"
-  file mplus1_eb_dst => [mplus1_eb_ttf, ttf2c, include_dir] do
-    sh "#{ruby_cmd} #{ttf2c} #{mplus1_eb_ttf} -s 27 --ascent 32 --jis --aa --compress -n mplus_1_extrabold_32 -o #{mplus1_eb_dst}"
-  end
 
-  # Kanrk09 theme fonts: M PLUS 1 at 32px (body) and 48px (title), for both
-  # Latin and Japanese glyphs. Full JIS X 0208 coverage at these sizes does
-  # not fit the 6 MB firmware flash window, so the Japanese fonts are
-  # subsetted to the symbol/alnum/kana rows (1-5) plus the characters used in
-  # the kanrk09 slide deck. Editing the deck regenerates the fonts on the
-  # next build. The LATIN/JAPANESE pairs share the point size and baseline;
-  # the legacy MEDIUM_22/EXTRABOLD_32 fonts are ascent-named instead (they
-  # baseline-match Outfit), which is why these carry an explicit suffix.
+  # Kanrk09 theme fonts: M PLUS 1 subsetted to the symbol/alnum/kana rows (1-5)
+  # plus the characters used in the kanrk09 slide deck, so full JIS X 0208
+  # coverage is not needed. Sizes: 32px (body) and 48px (title) for the
+  # LATIN/JAPANESE pairs. Editing the deck regenerates these fonts on the
+  # next build.
   mplus1_medium_ttf = "#{mplus1_dir}/MPLUS1-Medium.ttf"
+  project_root = File.expand_path("#{dir}/../..")
   kanrk09_deck = "#{project_root}/rootfs/slides/kanrk09.md"
   kanrk09_subset = "--jis-rows 1-5 --chars #{kanrk09_deck}"
   kanrk09_fonts = [
@@ -235,8 +219,6 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
     { header: "font_spleen_8x16.h",           var: "font_spleen_8x16",          sym: "FONT_SPLEEN_8X16" },
     { header: "font_spleen_12x24.h",          var: "font_spleen_12x24",         sym: "FONT_SPLEEN_12X24" },
     { header: "font_mplus_j12_combined.h",    var: "font_mplus_j12_wide",       sym: "FONT_MPLUS_J12" },
-    { header: "font_mplus_1_medium_22.h",     var: "font_mplus_1_medium_22",    sym: "FONT_MPLUS_1_MEDIUM_22" },
-    { header: "font_mplus_1_extrabold_32.h",  var: "font_mplus_1_extrabold_32", sym: "FONT_MPLUS_1_EXTRABOLD_32" },
     { header: "font_mplus_1_medium_32_latin.h",       var: "font_mplus_1_medium_32_latin",       sym: "FONT_MPLUS_1_MEDIUM_32_LATIN" },
     { header: "font_mplus_1_medium_32_japanese.h",    var: "font_mplus_1_medium_32_japanese",    sym: "FONT_MPLUS_1_MEDIUM_32_JAPANESE" },
     { header: "font_mplus_1_extrabold_32_latin.h",    var: "font_mplus_1_extrabold_32_latin",    sym: "FONT_MPLUS_1_EXTRABOLD_32_LATIN" },
@@ -317,8 +299,6 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
   if (tasks & %w(default all picoruby:debug picoruby:prod microruby:debug microruby:prod)).any?
     fonts.each { |font| Rake::Task[font[:dst]].invoke }
     Rake::Task[font8x8_dst].invoke
-    Rake::Task[mplus1_dst].invoke
-    Rake::Task[mplus1_eb_dst].invoke
     kanrk09_fonts.each { |font| Rake::Task[font[:dst]].invoke }
     inter_fonts.each { |font| Rake::Task[font[:dst]].invoke }
     outfit_fonts.each { |font| Rake::Task[font[:dst]].invoke }
