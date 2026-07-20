@@ -1,54 +1,75 @@
 ---
-title: 照らす技術をRubyで照らす
+title: 「照らす技術」を<br>Rubyで照らす
 subtitle: 関西Ruby会議09
-author: Shunsuke Michii (harukasan)
+author: Shunsuke Michii<br>@harukasan
 theme: kanrk09
 allotted_time: 20
 ---
 
 # 自己紹介
 
-みちい しゅんすけ / **はるかさん**
-Michii Shunsuke / **Harukasan**
+道井 俊介 / **はるかさん**
 
 * ピクシブ株式会社 執行役員 CTO
-* よく PicoPicoRuby に出没している
+* PicoPicoRuby に出没している
 * 機材をみるのがすき
 
 # Harucom
 
-モニターとキーボードがあればRubyがうごく
-ちいさな Ruby コンピューター
+* モニターとキーボードだけでうごく<br>ちいさな Ruby コンピューター
+* BOOTH で頒布してます!
+* harukasan.booth.pm
 
 # 照
 
-# 今日のテーマ「照らす」
+```p5_setup
+sho = PicoRabbit::BMP.load("/data/sho.bmp")
+sho_x = (640 - sho.width) / 2
+sho_y = (480 - sho.height) / 2
+```
 
-ふだんは照明があたらない
-**裏側のからくり**にスポットライトを
+```p5
+p5.background(0x00)
+p5.image_masked(sho.data, sho.mask, sho_x, sho_y, sho.width, sho.height)
+```
 
-{::wait/}
+# 今日のねらい
 
-ムービングスポットライトを2台もってきました
+- ふだん触れない世界に触れる
+- AIでできるからこそ理解を試みる
+- よくわからないことについて話す
 
 # 舞台照明のしくみ
-
-灯体 = ライトそのもの
-調光器 = 電力を絞って明るさをかえる
 
 ```p5_setup
 boxes = ["Console", "Dimmer", "Fixture"]
 jp = ["調光卓", "調光器", "灯体"]
-bw = 120
-bh = 56
-gap = 50
+latin_font = DVI::Graphics::FONT_MPLUS_1_MEDIUM_32_LATIN
+wide_font = DVI::Graphics::FONT_MPLUS_1_MEDIUM_32_JAPANESE
+p5.text_font(latin_font, wide_font)
+fh = DVI::Graphics.font_height(wide_font)
+pad_x = 16
+pad_y = 10
+line_gap = 4
+bw = 0
+i = 0
+while i < boxes.size
+  w1 = p5.text_width(boxes[i])
+  w2 = p5.text_width(jp[i])
+  w = w1 > w2 ? w1 : w2
+  bw = w + pad_x * 2 if w + pad_x * 2 > bw
+  i += 1
+end
+bh = pad_y * 2 + fh * 2 + line_gap
+line2_dy = pad_y + fh + line_gap
+gap = 32
 total_w = boxes.size * bw + (boxes.size - 1) * gap
 sx = 320 - total_w / 2
-sy = 230
+sy = 96 + (360 - bh) / 2
 ```
 
 ```p5
-p5.text_font(DVI::Graphics::FONT_OUTFIT_BOLD_18, DVI::Graphics::FONT_MPLUS_1_MEDIUM_22)
+p5.text_font(latin_font, wide_font)
 p5.text_align(:center)
 i = 0
 while i < boxes.size
@@ -59,8 +80,8 @@ while i < boxes.size
   p5.rect(x, sy, bw, bh)
   p5.no_stroke
   p5.text_color(0x00)
-  p5.text(boxes[i], x + bw / 2, sy + 7)
-  p5.text(jp[i], x + bw / 2, sy + 27)
+  p5.text(boxes[i], x + bw / 2, sy + pad_y)
+  p5.text(jp[i], x + bw / 2, sy + line2_dy)
   i += 1
 end
 p5.stroke(0x92)
@@ -79,11 +100,11 @@ end
 
 # トライアック調光
 
-電球は、供給する電力そのものを絞る
+交流波形の一部を落とし電力を調整
 
 ```p5_setup
 wx = 80
-wy = 260
+wy = 280
 ww = 480
 wh = 55
 ```
@@ -126,35 +147,24 @@ while k < 4
 end
 ```
 
-交流波形の一部をおとして電力を調整する
+# LED照明
+
+* 省電力、低発熱、高機能
+* 多くの照明が単体で調光機能を内蔵
+
+# Rubyで照らす
 
 # Lチカ
 
-LEDは「点けて、消して」を高速にくりかえす
-
-```ruby
-led = GPIO.new(25, GPIO::OUT)
-
-loop do
-  led.write 1
-  sleep_ms 1000
-  led.write 0
-  sleep_ms 1000
-end
-```
-
-{::wait/}
-
-sleepをちぢめていくと……?
-
 # PWM
 
-Pulse Width Modulation
-ONの時間の割合(デューティ比)で明るさがかわる
+* PWM = Pulse Width Modulation
+  * 周波数: 1秒あたりのサイクル数
+  * デューティー比: ONの時間の割合
 
 ```p5_setup
 wx = 100
-wy = 230
+wy = 320
 ww = 400
 wh = 60
 periods = 4
@@ -180,48 +190,45 @@ p5.no_stroke
 p5.fill(p5.color(v, v, 0))
 p5.rect(540, wy, 44, wh)
 p5.no_fill
-p5.stroke(0x92)
+p5.stroke(0x00)
 p5.stroke_weight(2)
 p5.rect(540, wy, 44, wh)
 ```
 
-いまのLED照明の多くはPWM調光を内蔵している
+# 調光の制御
 
-# 調光器との通信
-
-- 調光卓は会場のうしろの機材ブースに
-- 調光器は灯体の中や舞台袖に
-- はなれたばしょから操作したい
-- 1本ずつ配線すると線がたばになる
-
-{::wait/}
-
-そこで共通規格 **DMX512**
+- たくさんの照明をブースから操作
+- 少ない配線で通信したい
+- 互換性がないと大変
 
 # DMX512
 
-**D**igital **M**ultiple**x**
-
-- 512chの調光データを1本の線に多重化
-- 40年まえにつくられた規格
-- いまも世界中の舞台・ライブハウスの共通語
-
-# デイジーチェーン
+- 512chを多重化(Multiplex)する
+- これを 1 Universe (宇宙) と呼ぶ
 
 ```p5_setup
 boxes = ["Console", "Fixture", "Fixture", "Fixture"]
 addrs = [nil, "Addr 1", "Addr 14", "Addr 27"]
+starts = [nil, 1, 14, 27]
+span = 13
 bw = 110
 bh = 48
 gap = 40
 total_w = boxes.size * bw + (boxes.size - 1) * gap
 sx = 320 - total_w / 2
-sy = 210
+sy = 360
+ux = sx
+uw = total_w
+uy = 244
+uh = 30
+chw = uw.to_f / 512
 ```
 
 ```p5
 p5.text_font(DVI::Graphics::FONT_OUTFIT_18)
 p5.text_align(:center)
+
+# Daisy chain of the console and fixtures
 i = 0
 while i < boxes.size
   x = sx + i * (bw + gap)
@@ -250,48 +257,76 @@ while i < boxes.size - 1
   p5.line(x2, ay, x2 - 5, ay + 5)
   i += 1
 end
-```
 
-数珠つなぎ + 各灯体にアドレスを設定
+# One universe holds 512 channels
+p5.no_fill
+p5.stroke(0x92)
+p5.stroke_weight(2)
+p5.rect(ux, uy, uw, uh)
+
+# Each fixture takes 13 channels from its address, drawn to scale
+p5.no_stroke
+p5.fill(0x01)
+i = 1
+while i < boxes.size
+  bx = ux + ((starts[i] - 1) * chw).to_i
+  p5.rect(bx, uy, (span * chw).to_i - 1, uh)
+  i += 1
+end
+p5.no_fill
+
+# Label the free remainder and the channel scale
+used_end = ux + ((starts[boxes.size - 1] - 1 + span) * chw).to_i
+free = 512 - span * (boxes.size - 1)
+p5.text_color(0x92)
+p5.text("Universe", (ux + uw) / 2, uy + uh / 2 - 9)
+p5.text_color(0x64)
+p5.text_align(:left)
+p5.text("1", ux, uy + uh + 8)
+p5.text_align(:right)
+p5.text("512", ux + uw, uy + uh + 8)
+p5.text_align(:center)
+
+# Tie each fixture up to its channel block
+p5.stroke(0x92)
+p5.stroke_weight(1)
+i = 1
+while i < boxes.size
+  cx = sx + i * (bw + gap) + bw / 2
+  bcx = ux + (((starts[i] - 1) + span / 2.0) * chw).to_i
+  p5.line(cx, sy, bcx, uy + uh)
+  i += 1
+end
+```
 
 # RS485
 
-いちばん下、電気の層
-
-- 2本の線の電圧差で信号をあらわす(差動伝送)
-- ノイズに強い: 2本ともずれるので差はこわれない
-- 1200mまで、32台まで
-- 枯れた、信頼性の高い規格
+- バランス接続のシリアル通信規格
+- 差動信号を使用しノイズに強い
+- 最大1200m、32台を接続できる
 
 # UART
 
-RS485の上は、UARTとおなじフレーム形式
+- よく使われる非同期シリアル通信規格
+- DMXの通信設定は 250kbps / 8N2
 
 ```
-| start |  b0 b1 b2 b3 b4 b5 b6 b7  | stop | stop |
-  1 bit          8 bit                  2 bit
+ 1 bit           8 bit             2 bit
+|start| b0 b1 b2 b3 b4 b5 b6 b7 |stop|stop|
+
 ```
-
-- 250kbps / 8N2
-- 1バイト = 11ビット = **44マイクロ秒**
-
-{::wait/}
-
-つまりDMXは……
-**ただの250kbpsのUART**
-マイコンでそのまましゃべれる!
 
 # DMXパケット
 
 ```p5_setup
 cells = ["BREAK", "MAB", "SC", "1", "2", "3", "...", "512"]
-widths = [80, 52, 44, 40, 40, 40, 56, 52]
+widths = [80, 52, 44, 40, 40, 40, 80, 52]
 bh = 44
 gap = 4
 total = gap * (cells.size - 1)
 widths.each { |w| total += w }
 sx = 320 - total / 2
-sy = 210
+sy = 110
 ```
 
 ```p5
@@ -308,7 +343,7 @@ while i < cells.size
     p5.text_color(0xFF)
   else
     p5.no_fill
-    p5.stroke(0x92)
+    p5.stroke(0x00)
     p5.stroke_weight(2)
     p5.rect(x, sy, w, bh)
     p5.no_stroke
@@ -320,23 +355,13 @@ while i < cells.size
 end
 ```
 
-- BREAK = わざとつくる合図 (Lowを88us以上)
-- あとはUARTフレームが513個ならぶだけ
+- UARTにはパケットの概念がない
+- BREAKとMABで"区切り"をつくる
+  - BREAK: 最低88us LOWにする
+  - MAB: 最低8us HIGHにする
+  - SC: 1byteのスタートコード
 
-{::wait/}
-
-- ヘッダなし、チェックサムなし、ACKなし
-- 1パケット約23ms、秒間44回おくりつづける
-
-# ユニバース
-
-512chのひとまとまり = **ユニバース**
-
-- 1本のケーブルで1ユニバース
-- ムービングライト1台で13chつかう
-- たりなければユニバースを増やす
-
-# 13ch ムービングライト
+# ムービングライト
 
 SHEHDS LED Spot 80W (13chモード)
 
@@ -350,268 +375,65 @@ ch 6  Dimmer       ch 13 Function
 ch 7  Strobe
 ```
 
-- ch6に255を書けば全開で点灯
-- ch8は12なら赤、28なら青
-- 2台目はアドレス14から
+# DMXパケットを送信する
 
-# OSI参照モデルにあてはめると
+構成:
+- Harucom (RP2350)
+- M5Stack DMXユニット
+  - Groveコネクタに接続
+  - 絶縁型RS485トランシーバー
+  - マイコンとUARTで通信する
 
-- 物理層: RS485
-- データリンク層: DMXパケット
-- アプリケーション層: チャンネルの割り当て
+# UARTで送ってみる
+
+- picoruby-uartで送信する
 
 {::wait/}
-
-**あいだの層は、なにもない**
-
-そのかわり秒間40回おくりつづける
-この割り切りがRubyでも参加できる低いしきい
-
-# パケットを送信する
-
-- Raspberry Pi Pico 2 (RP2350)
-- M5Stack DMXユニット
-  - 絶縁型RS485トランシーバー
-  - マイコンからみるとただのUART
-
-# RubyでDMXを送る
-
-```ruby
-uart = UART.new(unit: :RP2040_UART1,
-                txd_pin: 20, rxd_pin: 21,
-                baudrate: 250_000, stop_bits: 2)
-
-universe = "\x00" * 513   # スタートコード + 512ch
-universe[6] = 255.chr     # ch6 = ディマー全開
-
-loop do
-  uart.break              # パケットのはじまりの合図
-  uart.write universe
-end
-```
-
-# デモ
-
-灯体を点ける
-
-# 問題: Rubyがとまる
 
 - UART送信はブロッキング
-- 1パケット23ms、CPUのほとんどが送信に
-- 音もならしたいし、画面も描きたい
-
-{::wait/}
-
-送信をCにきりだそう → **picoruby-dmx**
+- 送信中にほかのことができない
+- そこでDMAを使う
+- **picoruby-dmx** をつくった
 
 # picoruby-dmx
 
-- Cがわに513バイトのユニバースバッファ
-- タイマー + DMAが秒間40回おくりつづける
-- Rubyは値を書くだけ、ブロックしない
-
-```ruby
-DMX.init
-DMX.start        # バックグラウンド送信開始
-DMX.set(6, 255)  # Rubyはチャンネルに書くだけ
-```
+- universeバッファをC側で確保
+- タイマー/DMAが40fpsでDMXを送信
+- Ruby側は値を書くだけでブロックしない
 
 # デッドマンスイッチ
 
-じつは灯体は、信号がとまっても**消えない**
-最後の値のまま固まる
-
-{::wait/}
-
-Rubyがハングすると、だれにも消せない照明が……
-
-{::wait/}
-
-- Rubyが keepalive をよびつづける
-- とまったらエンジンが自動でブラックアウト
-
-# 実践: Harucom
-
-趣味でつくっている自作コンピュータ
-
-- RP2350 + DVI出力 + USBキーボード
-- PicoRubyベースの自作OS
-- エディタもシェルもRuby
-- このスライドもRuby (PicoRabbit)
-
-ここに照明コントローラをつくっていく
-
-# コンソールをつくる
-
-チャンネル番号をなまで書きたくない
-
-```ruby
-patch.add(:s1, SHEHDS_SPOT_80W_13CH, base: 1)
-patch.add(:s2, SHEHDS_SPOT_80W_13CH, base: 14)
-patch.group(:all, :s1, :s2)
-```
-
-```ruby
-dmx(:s1).pan(0.5).tilt(0.2)  # 0.0-1.0に正規化
-dmx(:all).dimmer(1.0)        # グループにまとめて
-dmx(:s1).color(:red)         # 色は名前で
-```
-
-# デモ
-
-ユニバース表示 + コンソール
-
-# 円運動
-
-パンにcos、チルトにsinをわたすだけ
-
-```ruby
-t = 0.0
-loop do
-  dmx(:s1).pan(0.5 + 0.15 * Math.cos(t))
-          .tilt(0.4 + 0.15 * Math.sin(t))
-  t += 0.05
-  sleep_ms 20
-end
-```
-
-# x = cos, y = sin
-
-```p5
-t = DVI.frame_count * 0.03
-cx = 320
-cy = 250
-r = 80
-p5.no_fill
-p5.stroke(0x49)
-p5.stroke_weight(2)
-p5.circle(cx, cy, r * 2)
-x = cx + r * Math.cos(t)
-y = cy + r * Math.sin(t)
-p5.no_stroke
-p5.fill(0xE0)
-p5.circle(x.to_i, y.to_i, 20)
-```
-
-高校数学の円のパラメータ表示、そのまま
+- 灯体は信号がこなくても消えない
+- 途絶えるとつけっぱになってしまう
+- 使用中はkeepaliveをよぶ
+- とまったら自動でブラックアウト
 
 # シーケンサーをつくる
 
-つぎは時間軸、音楽とあわせたい
+- 複雑なうごきを簡単に書きたい
+- 音と光をあわせて動かしたい
+- 型をつくって発展させたい
 
-- Rubyは「何を・いつ」を決めるだけ
-- 発火はハードウェアにまかせる (schedule-ahead)
-- GCでとまってもタイミングはくずれない
+# 序破急
 
-```ruby
-seq(:bd, [1, 0, 0, 0])                    # 4つ打ち
-dmx_seq(:all, :dimmer, [255, 0, 128, 0])  # おなじ拍で明滅
-```
+# 序破急
 
-# Strudel-rb
+- 音と光を同時に扱えるシーケンサー
+- strudel-rb を参考に実装
+- DMXをDSLでかんたんに書ける
 
-TidalCycles → Strudel (JS) → **strudel-rb** (asonas)
+# QOA
 
-Pattern = 時間の区間をわたすと
-イベントの一覧をかえす関数
+Quite OK Audio
 
-```ruby
-sound("bd ~ sd ~")                        # ミニ記法
-sound("bd*4, hh*8")                       # かさねる
-sound("bd*4").every(4) { |p| p.fast(2) }  # 4サイクルごとに倍速
-```
-
-{::wait/}
-
-fast/slow/every は「時間の変換」
-→ なかみは音でなくてもいい
-
-# 序破急 Johakyu
-
-strudel-rb互換のパターンエンジンをPicoRubyに実装
-ひとつのパターンで音とDMXを駆動する
-
-- 序: しずかなたちあがり
-- 破: 展開
-- 急: クライマックス
-
-{::wait/}
-
-この会館の舞台は、能舞台です
-
-# 音と光をおなじtrackに
-
-```ruby
-tempo 120
-
-track(:drums) { sound("bd*4, ~ sd ~ sd, hh*8") }
-track(:orbit) { ha("circle", on: :s1, slow: 8) }
-track(:pulse) { ha("color_beat",
-                   colors: "<red blue yellow>") }
-```
-
-ぜんぶ、ひとつのクロック、ひとつのPatternの上に
-
-# ha("circle") のなかみ
-
-```ruby
-pan(cosine.range(0.35, 0.65).slow(8))   # パンはcos
-tilt(sine.range(0.25, 0.55).slow(8))    # チルトはsin
-```
-
-チルトだけ fast(2) にすると……
-
-```p5
-cx = 320
-cy = 300
-rx = 110
-ry = 60
-p5.stroke(0x49)
-p5.stroke_weight(2)
-i = 0
-n = 72
-while i < n
-  a1 = i * 2.0 * Math::PI / n
-  a2 = (i + 1) * 2.0 * Math::PI / n
-  x1 = cx + rx * Math.cos(a1)
-  y1 = cy + ry * Math.sin(2 * a1)
-  x2 = cx + rx * Math.cos(a2)
-  y2 = cy + ry * Math.sin(2 * a2)
-  p5.line(x1.to_i, y1.to_i, x2.to_i, y2.to_i)
-  i += 1
-end
-t = DVI.frame_count * 0.03
-p5.no_stroke
-p5.fill(0xE0)
-dx = cx + rx * Math.cos(t)
-dy = cy + ry * Math.sin(2 * t)
-p5.circle(dx.to_i, dy.to_i, 20)
-```
-
-# デモ
-
-序破急でひと演目
-
-序 → 破 → 急
+- マイコン向け超軽量フォーマット
+- 整数演算だけでうごく
+- Cで400行くらい
 
 # まとめ
 
-- 照明のうらがわは枯れた技術のつみかさね
-  - トライアック / PWM / RS485 / UART / DMX
-- 割り切りのおかげで、Rubyでも参加できた
-- 照らす技術をRubyで照らしてみました
+- 普段さわらない技術にさわるとおもしろい
 
-{::wait/}
-
-つぎにライブにいったら
-うしろの機材ブースをみてください
-**512個の数字が、秒間40回、とんでいます**
-
-# ご清聴ありがとうございました
-
-GitHub:
-- harukasan/harucom-os (PR #17: Johakyu)
-
-Social:
 - X: @harukasan
+- GitHub: harukasan/harucom-os
 - https://harukasan.dev/
