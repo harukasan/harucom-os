@@ -71,6 +71,7 @@ Design documents and implementation notes are in `doc/`:
 - [doc/dmx.md](doc/dmx.md) — DMX output (background 40 Hz UART/DMA engine, frame collision guard, dead-man switch)
 - [doc/johakyu.md](doc/johakyu.md) — Johakyu live coding engine (Strudel-style patterns, mini notation, chunked scheduler, DMX fixtures, live eval isolation)
 - [doc/editor-buffer-improvements.md](doc/editor-buffer-improvements.md) — Editor::Buffer improvement plan (desired column, tab width)
+- [doc/dual-rp2350.md](doc/dual-rp2350.md) — Dual RP2350 architecture study (stall inventory, single-chip improvements, UI/engine chip split, interconnect)
 
 ## Documentation style
 
