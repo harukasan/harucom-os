@@ -407,6 +407,65 @@ Practical notes:
   eventual on-board second chip, and a Pico 2 wired to a Grove cable
   is enough to start.
 
+#### Unit requirements
+
+Hardware, kept deliberately minimal:
+
+- RP2350 (the A package suffices: the unit needs the link UART, a DMX
+  UART, LEDs, USB, and SWD) with its own QSPI flash for firmware. No
+  PSRAM and no filesystem partition by default; the session working
+  set targets the 520 KB SRAM, to be confirmed by measuring session
+  heap usage.
+- Grove plug to the main board (5 V power plus the UART1 link) and a
+  local 3.3 V regulator sized for the RP2350 and the transceiver.
+- DMX output as a pass-through Grove socket for the existing M5 DMX
+  Unit (no new analog design); an onboard isolated RS-485 stage with
+  an XLR jack is a later product option.
+- Own USB connector for BOOTSEL firmware updates and debug stdio, an
+  SWD header for development, and status LEDs (link alive, session
+  running, dead-man tripped).
+
+Firmware functions:
+
+- **Link endpoint**: length-prefixed CRC frames over UART1 with a
+  protocol version handshake at boot, sequence numbers with
+  acknowledgment for control messages, and software flow control
+  (there are no spare handshake pins through the Grove port).
+- **Session VM**: the johakyu clock, scheduler, and dispatcher on
+  mruby, built from the shared tree with the same VM configuration as
+  the main firmware.
+- **Eval execution**: receive compiled bytecode, run it in the
+  sandboxed Live recorder with a timeout, apply on clean completion,
+  and report the result or the error with backtrace back to the UI.
+- **Sound output**: translate scheduled sound events into link
+  messages (`play_at`, `tone_at`, `stop_at`, bank slot numbers) sent
+  with the reserve lead, against the main chip's sample clock.
+- **Light output**: the existing DMX C engine runs locally, extended
+  with the timestamped event queue from Part 1, fed by the dispatcher
+  with no link hop.
+- **Clock sync**: periodic anchor pings answered by the main chip's C
+  handler, maintaining the unit-millis to sample-clock mapping with
+  drift estimation.
+- **Fixture data**: parsed personalities and the patch arrive over the
+  link (the UI chip parses the OFL JSON from its filesystem), so the
+  unit stores nothing.
+- **Fail-soft behavior**: on link silence the session keeps playing
+  the bound patterns, with a configurable blackout timeout; the DMX
+  dead-man switch stays armed by the unit's own loop; a watchdog
+  reboot announces itself so the UI, which keeps the last applied
+  recording as the state of record, can re-ship it and resume the
+  show.
+- **Telemetry**: scheduler health (staged runway, late events), heap
+  and GC statistics, DMX frame rate, link error counters, and the
+  last eval error, polled by the UI for the UniverseView health row.
+- **Panic**: one message that stops all scheduled sound and blacks
+  out the rig, honored ahead of anything queued.
+
+The main chip gains the mirror-image functions: the C-level link
+handler that injects sound events and answers clock pings without the
+VM, the deepened audio event queue it feeds, and an app layer that
+compiles evals, ships bytecode, and renders the unit's telemetry.
+
 ### Programming and development workflow
 
 - The engine firmware is a second build target sharing the mrbgems
