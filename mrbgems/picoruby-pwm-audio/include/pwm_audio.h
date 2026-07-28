@@ -12,13 +12,16 @@ extern "C" {
  * slice wraps once per sample and its DREQ paces the DMA that writes
  * the CC register, so every sample boundary lands at a fixed phase of
  * the carrier (any other ratio or phase beats audibly; see
- * doc/pwm-audio.md). The sample rate must divide clk_sys exactly:
- * 250 MHz has no factor 3, so 48k/44.1k/24k are impossible, and 50000
- * divides it. pwm_audio_init() checks the divisibility at runtime and
- * warns if the clock changes. */
+ * doc/pwm-audio.md). The sample rate must divide clk_sys exactly and
+ * a sample must span an integer number of carrier periods: at 252 MHz
+ * (2^8 x 3^2 x 5^6 x 7) the rate 50000 gives 5040 cycles per sample,
+ * five carrier periods of 1008 cycles each. 44100 does not divide
+ * 252 MHz; 48000 does but breaks the five-periods-per-sample ratio.
+ * pwm_audio_init() checks the divisibility at runtime and warns if
+ * the clock changes. */
 #define PWM_AUDIO_SAMPLE_RATE  50000
 #define PWM_AUDIO_CARRIER_HZ   250000
-#define PWM_AUDIO_PWM_WRAP     999
+#define PWM_AUDIO_PWM_WRAP     1007
 
 /* Mixer channels. Each channel plays one source at a time: an
  * oscillator (set_tone) or a QOA or WAV sample (set_sample + play).

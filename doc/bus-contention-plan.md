@@ -84,8 +84,8 @@ QMI bus occupancy.
 uint8_t max_select = PSRAM_MAX_SELECT_FS / fs_per_cycle;
 ```
 
-At 250 MHz sys_clk: `fs_per_cycle` = 4,000,000 fs, so `max_select` =
-125,000,000 / 4,000,000 = 31.  This means CS1 can stay asserted for
+At 252 MHz sys_clk: `fs_per_cycle` = 3,968,253 fs, so `max_select` =
+125,000,000 / 3,968,253 = 31.  This means CS1 can stay asserted for
 31 x 64 = 1,984 sys_clk cycles (~7.9 us), close to the APS6404L tCEM
 limit of 8 us.
 
@@ -111,8 +111,8 @@ if (max_select > 4) max_select = 4;
 ### Trade-off
 
 - **Shorter MAX_SELECT**: More frequent CS deassert/reassert cycles.
-  Each cycle costs SELECT_HOLD (3 cycles) + MIN_DESELECT (7 cycles at
-  250 MHz) + command overhead (8 QPI prefix + 24 address + 24 dummy =
+  Each cycle costs SELECT_HOLD (3 cycles) + MIN_DESELECT (13 cycles at
+  252 MHz) + command overhead (8 QPI prefix + 24 address + 24 dummy =
   14 SCK cycles at CLKDIV=2 = 28 sys_clk cycles) per re-select.
   Total overhead per re-select: ~38 sys_clk cycles.
 - **PSRAM throughput impact**: At MAX_SELECT=8 (512 cycles), re-select

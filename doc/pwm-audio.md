@@ -406,9 +406,9 @@ Pins are passed to `PWMAudio.init` by
 |---------------|--------------------------------------------------------------|
 | Audio L pin   | GPIO 24 (`AUDIO_L_PIN`), PWM slice 4 channel A               |
 | Audio R pin   | GPIO 25 (`AUDIO_R_PIN`), PWM slice 4 channel B               |
-| Carrier       | 250 kHz (wrap 999, divider 1, clk_sys 250 MHz)               |
+| Carrier       | 250 kHz (wrap 1007, divider 1, clk_sys 252 MHz)              |
 | Sample rate   | 50,000 Hz (exactly five carrier periods per sample)          |
-| Pacer         | PWM slice 8 (wrap 4999); slices 8-11 have no GPIO on the RP2350A package |
+| Pacer         | PWM slice 8 (wrap 5039); slices 8-11 have no GPIO on the RP2350A package |
 | DMA           | one channel claimed at init, endless mode, paced by the pacer wrap DREQ |
 | Render pump   | repeating timer on TIMER1 alarm 1, 10 ms interval            |
 | Ring buffer   | 2048 samples (about 41 ms), 8 KB, aligned to its size        |
@@ -426,11 +426,14 @@ non-integer rate ratio (or an uncontrolled write phase) would
 re-quantize each boundary differently, and the beat between the two
 rates is audible as a crackle proportional to the signal slope.
 
-clk_sys is 250 MHz, overclocked for HSTX (see [dvi.md](dvi.md)).
-250 MHz = 2^7 * 5^9 has no factor 3, so the common audio rates
-(48000, 44100, 24000) cannot divide it exactly; 50000 does
-(250 MHz / 5000). `pwm_audio_init()` checks the divisibility at
-runtime and prints a warning if the clock ever changes.
+clk_sys is 252 MHz, overclocked for HSTX and chosen as a multiple of
+12 MHz for Pico-PIO-USB (see [dvi.md](dvi.md)). The sample rate must
+divide clk_sys exactly and each sample must span an integer number of
+250 kHz carrier periods (1008 cycles). 50000 satisfies both: one
+sample is 5040 cycles, exactly five carrier periods. 44100 does not
+divide 252 MHz (= 2^8 * 3^2 * 5^6 * 7); 48000 divides it but breaks
+the integer carrier ratio. `pwm_audio_init()` checks the divisibility
+at runtime and prints a warning if the clock ever changes.
 
 ### Output stage
 
@@ -494,8 +497,8 @@ Each of the `CHANNELS` channels plays one source, selected by
 around a constant mid-scale bias (the output idles at 50 percent PWM
 duty), so playing or stopping a channel never moves the DC level; a
 moving DC level would thump through the AC coupling. The mix is
-soft-clipped around the bias and scaled to the PWM level range 0-999
-(1000 output levels). A mono source contributes the same signal to
+soft-clipped around the bias and scaled to the PWM level range 0-1007
+(1008 output levels). A mono source contributes the same signal to
 both sides; a stereo sample keeps its sides separate, with pan acting
 as balance. The bias itself ramps up at init and down at deinit
 (about 10 ms), the only times the DC level moves.

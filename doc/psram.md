@@ -185,7 +185,8 @@ Clock divider, MAX_SELECT, and MIN_DESELECT are computed dynamically from
 
 RXDELAY is computed dynamically to maintain approximately 4 ns of sample
 delay regardless of sys_clk frequency. At 125 MHz this yields RXDELAY=1;
-at 372 MHz (DVI overclock) this yields RXDELAY=3.
+at the project clock of 252 MHz (see [dvi.md](dvi.md)) it yields
+RXDELAY=3.
 
 ### Step 5: Enable XIP writes
 

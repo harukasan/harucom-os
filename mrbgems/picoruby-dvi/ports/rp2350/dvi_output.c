@@ -55,7 +55,7 @@
 #define SYNC_VSYNC_OFF SYNC_V0_H1 // H=1 deasserted, V=0 asserted
 #define SYNC_VSYNC_ON  SYNC_V0_H0 // H=0 asserted,   V=0 asserted
 
-// 640x480 @ 60Hz timing (pixel clock = sys_clk / 5; 125 MHz -> 25 MHz)
+// 640x480 @ 60Hz timing (pixel clock = clk_hstx / 5; 126 MHz -> 25.2 MHz)
 // H total = 16 + 96 + 48 + 640 = 800 pixels
 // V total = 10 + 2 + 33 + 480 = 525 lines
 #define MODE_H_FRONT_PORCH   16

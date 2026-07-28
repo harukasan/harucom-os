@@ -27,7 +27,7 @@ descriptors, consuming 2 line buffers per batch.  See
 2N buffers are required because double-buffered descriptors mean the
 DMA reads from N=4 buffers while the CPU simultaneously renders N=4
 new lines into separate buffers.  CPU rendering (~29 usec for 4 lines
-at 250 MHz) finishes before DMA finishes reading the first buffer
+at 252 MHz) finishes before DMA finishes reading the first buffer
 (~32 usec), so the DMA-read and CPU-write buffer sets must be
 completely disjoint.
 

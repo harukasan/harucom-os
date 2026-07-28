@@ -34,10 +34,10 @@ underflow.
 ## Main SRAM Bus Contention
 
 At sys_clk = clk_hstx (1:1 ratio), DMA and CPU compete for main SRAM bus
-bandwidth on every cycle. The 2:1 ratio (250 MHz sys_clk, 125 MHz clk_hstx)
+bandwidth on every cycle. The 2:1 ratio (252 MHz sys_clk, 126 MHz clk_hstx)
 reduces contention enough for the render to fit within the scanline budget.
 
-Measured per-line render cycles at 250 MHz:
+Measured per-line render cycles at 252 MHz:
 
 | Workload | Cycles |
 |----------|--------|

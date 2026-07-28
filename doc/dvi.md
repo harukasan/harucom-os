@@ -314,8 +314,8 @@ Defined in [dvi.h](../mrbgems/picoruby-dvi/include/dvi.h) and
 void dvi_init_clock(void);
 ```
 
-Initialize system clock for DVI 640x480 output. Configures PLL to 250 MHz
-and sets clk_hstx = clk_sys / 2 (125 MHz). Must be called before
+Initialize system clock for DVI 640x480 output. Configures PLL to 252 MHz
+and sets clk_hstx = clk_sys / 2 (126 MHz). Must be called before
 `dvi_start_mode()`.
 
 ### dvi_start_mode
@@ -577,8 +577,9 @@ Both display modes use RGB332 pixel format (1 byte per pixel).
 
 ### Video Timing
 
-640x480 @ 60 Hz (VGA DMT). The pixel clock is 25.0 MHz (-0.7% from
-25.175 MHz standard), within typical display tolerance.
+640x480 @ 60 Hz (VGA DMT). The pixel clock is 25.2 MHz (+0.1% from the
+25.175 MHz standard), within typical display tolerance, and the refresh
+rate is exactly 60.000 Hz (25.2 MHz / 800 / 525).
 
 | Parameter | Pixels/Lines |
 |-----------|--------------|
@@ -602,20 +603,25 @@ contention between DMA and CPU. A 2:1 ratio gives sufficient headroom.
 
 | Parameter | Value |
 |-----------|-------|
-| clk_sys | 250 MHz |
-| clk_hstx | 125 MHz (clk_sys / 2) |
+| clk_sys | 252 MHz |
+| clk_hstx | 126 MHz (clk_sys / 2) |
 | CLKDIV | 5 |
 | N_SHIFTS | 5 |
 | SHIFT | 2 bits |
-| Pixel clock | 125 / 5 = 25.0 MHz |
+| Pixel clock | 126 / 5 = 25.2 MHz |
 
 PLL configuration:
 
 ```
-VCO     = 12 MHz x 125 = 1500 MHz
-sys_clk = 1500 / 6 / 1 = 250 MHz
+VCO     = 12 MHz x 126 = 1512 MHz
+sys_clk = 1512 / 6 / 1 = 252 MHz
 VREG    = 1.15 V
 ```
+
+clk_sys must be a multiple of 12 MHz: Pico-PIO-USB derives its PIO clock
+dividers from clk_sys, and only integer ratios give jitter-free USB bit
+timing (see [usb-host-keyboard.md](usb-host-keyboard.md)). 252 MHz is
+the nearest multiple that keeps the DVI and QMI budgets intact.
 
 Changing clk_sys does not affect clk_usb or clk_peri (both sourced from
 PLL_USB at 48 MHz). UART baud rates remain correct.
@@ -727,9 +733,9 @@ instrumentation.
 ### Initialization Order
 
 ```c
-dvi_init_clock();           // 250 MHz, VREG 1.15V
+dvi_init_clock();           // 252 MHz, VREG 1.15V
 stdio_init_all();           // UART on core 0
-psram_init();               // PSRAM timing at 375 MHz
+psram_init();               // PSRAM timing computed from clk_sys
 dvi_text_set_font(...);     // configure fonts before DVI starts
 
 multicore_launch_core1_with_stack(core1_dvi_entry, ...);
