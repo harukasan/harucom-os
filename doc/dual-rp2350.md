@@ -342,6 +342,71 @@ milliseconds:
   samples (say 4096); the UI chip timestamps edges. Removes link
   jitter from the anchor at the cost of one pin.
 
+### Engine unit on the Grove port (no board revision)
+
+The current board routes the Grove port to GPIO 20 and 21, and those
+pins are also UART1 TX and RX (which is why the DMX engine drives its
+transceiver from GPIO 20 today). The port therefore already exposes a
+powered, full-duplex UART at up to 3 Mbaud: a second RP2350 can attach
+as a plug-in unit with no change to the main board. The unit sits
+inline where the DMX transceiver sits now, carrying its own RS-485
+transceiver or a pass-through Grove socket for the existing M5 DMX
+Unit.
+
+With only two signal wires available, the strongest cut is not Option
+B verbatim but a variant that keeps every output on the main board and
+moves only the computation out:
+
+- **The unit runs the session VM** (clock, scheduler, dispatcher) and
+  owns DMX, which must move to the unit anyway because the link now
+  occupies the Grove UART.
+- **Sound events travel back to the main chip's existing C audio
+  engine.** The wire protocol already exists in spirit: `play_at`,
+  `tone_at`, `stop_at`, and the sample bank slots are exactly the
+  vocabulary the link needs. On the main chip a C-level UART handler
+  (IRQ or DMA ring, no VM involvement) validates frames and injects
+  them into the scheduled event queue, so a stalled UI VM cannot stop
+  event delivery. Samples stay in the main chip's flash and bank
+  slots, loaded at kit load as today, so no bulk sample traffic
+  crosses the link.
+- **The sample clock stays on the main chip.** The unit acquires
+  `(unit millis, sample_clock)` anchors through a ping answered by the
+  same C handler, keeping anchor jitter at microsecond scale.
+- **Evals compile on the main chip** and ship as bytecode (tens of KB,
+  roughly 100 ms at 3 Mbaud). The compile still pauses the UI VM, but
+  every output is behind C engines by then, so the pause is cosmetic.
+
+This variant inverts Option B's audio placement while preserving its
+essential property: no VM sits between event production and the
+output engines. Editor work, syntax analysis, file saves, and GC on
+the main chip cannot silence the show; staging cost moves to a chip
+that does nothing else. What it does not fix is the main-chip flash
+write dropout (the audio ring and streams still live there), so Part 1
+items 2 and 5 remain relevant, and the deep event queue of item 1 is a
+hard prerequisite because the link feeds that same queue.
+
+A second variant puts audio hardware on the unit as well, matching
+Option B exactly; the main board's audio circuit then goes unused.
+This is only worth the duplicated hardware if flash writes during
+shows must never touch playback and the core 1 pump move is off the
+table.
+
+Practical notes:
+
+- The Grove port supplies power; the unit regulates locally. An
+  RP2350 plus transceiver is a modest load, but the connector and
+  regulator current budget on the main board should be verified.
+- SWD does not reach through the Grove port, so the unit updates over
+  its own USB connector or a serial bootloader in the unit firmware
+  spoken over the link.
+- If the board breaks out any of the uncommitted GPIOs (1, 4 to 7, 26,
+  27) on a header, they can add handshake lines or SWD to the same
+  unit; the two-wire protocol should not depend on them.
+- The unit is the Phase 3 prototype made permanent: the protocol,
+  build target, and dead-man behavior all carry over unchanged to an
+  eventual on-board second chip, and a Pico 2 wired to a Grove cable
+  is enough to start.
+
 ### Programming and development workflow
 
 - The engine firmware is a second build target sharing the mrbgems
@@ -384,14 +449,15 @@ board revision after measuring what remains.
 2. **Single-chip stall immunity.** Grow the audio event queue, raise
    staging depth, add the C-side DMX event scheduler, and apply the
    flash write hygiene. Optionally move the audio pump to core 1.
-3. **Two-board prototype.** Two Pico 2 boards over UART: define the
-   frame format and message set (events, bytecode, anchors, status,
-   kit sync), port the session loop to the engine target, and measure
-   end-to-end timing under deliberate UI-side abuse (huge evals,
-   saves, redraw storms).
-4. **Board revision.** Second RP2350 (RP2350B preferred for pins),
-   audio and DMX moved to the engine chip, SWD programming path,
-   optional clock pulse line.
+3. **Grove-attached prototype.** A Pico 2 on the Grove port's UART1
+   against an unmodified Harucom board: define the frame format and
+   message set (events, bytecode, anchors, status), port the session
+   loop to the engine target, and measure end-to-end timing under
+   deliberate UI-side abuse (huge evals, saves, redraw storms).
+4. **Productize.** Either harden the Grove engine unit as a plug-in
+   product (no main board change), or fold the second RP2350 into a
+   board revision (RP2350B preferred for pins, SWD programming path,
+   optional clock pulse line, audio optionally moved to the engine).
 
 ## References
 
