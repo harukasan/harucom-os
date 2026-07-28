@@ -138,6 +138,17 @@ uint8_t usb_host_keyboard_modifier(void);
 
 Returns the modifier byte from the latest HID report.
 
+### usb_host_last_activity_ms
+
+```c
+uint32_t usb_host_last_activity_ms(void);
+```
+
+Returns the milliseconds-since-boot timestamp of the last USB topology
+activity (device mount or unmount, HID interface mount). The boot pump in
+`main.c` uses it to keep pumping while a hub's chained enumerations are
+still in progress.
+
 ## Hardware Configuration
 
 ### Pin Assignment
@@ -164,6 +175,40 @@ on RHPORT 1 via PIO-USB. All USB processing runs on Core 0 because Core 1
 is dedicated to DVI output.
 
 [tinyusb]: https://github.com/hathach/tinyusb
+
+### Clock Requirement
+
+Pico-PIO-USB derives its four PIO clock dividers (48, 96, 6, and 12 MHz
+targets for full-speed and low-speed TX/RX) from `clk_sys`, so `clk_sys`
+must be a multiple of 12 MHz for all dividers to be exact. A non-multiple
+clock produces fractional divider jitter on the USB bit timing; direct
+HID devices usually tolerate it, but hubs are repeaters with much tighter
+jitter tolerance and fail to operate. The project clock is 252 MHz
+(12 MHz x 21, see [dvi.md](dvi.md)).
+
+### Hub Support
+
+TinyUSB hub support is enabled (`CFG_TUH_HUB 1` in
+[tusb_config.h](../src/tusb_config.h)), with up to `CFG_TUH_DEVICE_MAX`
+(4) devices plus the hub itself. One level of hub is supported (a TinyUSB
+limitation). Keyboards behind a hub enumerate like direct ones; the
+`tuh_mount_cb` and `tuh_umount_cb` callbacks log every device mount,
+including the hub itself, so the UART log shows how far enumeration got.
+
+Only the first keyboard-protocol interface is tracked, and only that
+interface has a report request armed. Additional keyboards on the bus are
+ignored until the tracked keyboard unmounts and the other is replugged.
+
+### Boot Enumeration Pump
+
+`main.c` pumps `usb_host_task()` before starting the mruby VM, because
+enumeration callbacks racing a literal-heavy bootstrap can corrupt the
+mruby heap. A hub chains enumerations (hub, port power, debounce, port
+reset, downstream devices), so the pump exits on quiet time since the
+last mount or unmount activity (reported by `usb_host_last_activity_ms`)
+rather than a fixed deadline: 200 ms of quiet once a keyboard is mounted,
+700 ms otherwise, with a 4 s hard cap. A boot with nothing attached exits
+after 700 ms.
 
 ### Resource Allocation
 
@@ -195,16 +240,41 @@ other Core 0 IRQs are assigned lower priorities:
 
 ### HID Report Processing
 
-[TinyUSB][tinyusb] dispatches keyboard events through three callbacks in
+[TinyUSB][tinyusb] dispatches events through five callbacks in
 [ports/rp2350/usb_host.c](../mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c).
 Each callback updates static state that the Ruby API reads directly (no
-event queue or buffering):
+event queue or buffering), and every mount or unmount stamps the activity
+time used by the boot pump:
 
-- `tuh_hid_mount_cb`: Records device address and requests the first HID
-  report when a HID keyboard (HID_ITF_PROTOCOL_KEYBOARD) is enumerated
-- `tuh_hid_report_received_cb`: Copies the modifier byte and 6-byte
-  keycode array into static state, then requests the next report
-- `tuh_hid_umount_cb`: Clears the connection flag and zeroes keyboard state
+- `tuh_mount_cb` / `tuh_umount_cb`: Log every device attach and detach
+  (hubs included) and stamp activity
+- `tuh_hid_mount_cb`: Records device address and instance and requests
+  the first HID report when a keyboard (HID_ITF_PROTOCOL_KEYBOARD) is
+  enumerated and no keyboard is tracked yet
+- `tuh_hid_report_received_cb`: Ignores reports from anything but the
+  tracked keyboard interface, copies the modifier byte and 6-byte keycode
+  array into static state, then requests the next report
+- `tuh_hid_umount_cb`: Clears the connection flag and zeroes keyboard
+  state when the tracked keyboard detaches
+
+### Debugging
+
+`USB_LOG=2 rake` builds a firmware with TinyUSB host logging
+(`CFG_TUSB_DEBUG=2`) on the UART console (115200 baud). Toggling the flag
+only reconfigures the CMake build; no `rake distclean` is needed. The
+always-on `tuh_mount_cb` printfs show device mounts without a debug
+build.
+
+Hub enumeration triage from the log:
+
+1. No `USB device mounted (dev_addr=1)` line: the hub itself never
+   enumerates. Attach, reset, or bit-level timing problem.
+2. Hub mounted but silent afterwards: the hub's interrupt status
+   endpoint is not delivering port change events.
+3. Port change logged but no downstream device appears: the downstream
+   port reset or the follow-up enumeration fails.
+4. Downstream keyboard mounts but keys are dead: host-side HID tracking
+   problem; check which dev_addr and instance the reports come from.
 
 ### File Layout
 

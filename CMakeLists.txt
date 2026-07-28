@@ -225,6 +225,17 @@ target_compile_definitions(harucom_os PRIVATE
 
 target_compile_options(harucom_os PRIVATE -fshort-enums)
 
+# TinyUSB host debug log level (CFG_TUSB_DEBUG, 0-3). tusb_config.h only
+# defines CFG_TUSB_DEBUG when unset (#ifndef guard), and the TinyUSB and
+# Pico-PIO-USB sources are INTERFACE libraries compiled into this target,
+# so a PRIVATE definition here reaches all of them. Toggling this does
+# not touch the PicoRuby build, so no distclean is needed.
+# Usage: USB_LOG=2 rake (see Rakefile).
+set(HARUCOM_USB_LOG "0" CACHE STRING "TinyUSB host debug log level (CFG_TUSB_DEBUG)")
+if(HARUCOM_USB_LOG GREATER 0)
+    target_compile_definitions(harucom_os PRIVATE CFG_TUSB_DEBUG=${HARUCOM_USB_LOG})
+endif()
+
 target_include_directories(harucom_os PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
     ${CMAKE_CURRENT_LIST_DIR}/include

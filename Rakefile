@@ -37,7 +37,10 @@ end
 
 desc "Run cmake configure"
 task configure: :mruby_patches do
-  sh "cmake -B #{BUILD_DIR} -G Ninja"
+  # USB_LOG=2 rake builds a TinyUSB host debug firmware (CFG_TUSB_DEBUG).
+  # Always pass the value so toggling it updates the CMake cache.
+  usb_log = ENV.fetch("USB_LOG", "0")
+  sh "cmake -B #{BUILD_DIR} -G Ninja -DHARUCOM_USB_LOG=#{usb_log}"
 end
 
 desc "Build firmware"
