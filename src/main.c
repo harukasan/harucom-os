@@ -314,23 +314,22 @@ static void harucom_main(void) {
     /* Initialize USB host (PIO-USB on RHPORT 1) */
     usb_host_init();
 
-    /* Pump the USB host stack until enumeration (reset, set address,
-     * descriptor reads, SET_IDLE, HID report setup) settles before we
-     * hand control to mruby. When a keyboard connects mid-bootstrap,
-     * tuh_task allocations and callbacks race with literal-heavy
-     * requires and intermittently corrupt the mruby heap. Pump for up
-     * to 1 s; exit early once a keyboard is mounted and then give its
-     * follow-up transactions another 200 ms to complete. */
+    /* Pump the USB host stack until enumeration settles before we hand
+     * control to mruby. When a device connects mid-bootstrap, tuh_task
+     * allocations and callbacks race with literal-heavy requires and
+     * intermittently corrupt the mruby heap. A hub chains enumerations
+     * (hub, port power, debounce, port reset, downstream devices), so
+     * a fixed deadline is not enough: exit on quiet time since the last
+     * mount or unmount activity instead. 200 ms of quiet once a
+     * keyboard is mounted, 700 ms otherwise, with a 4 s hard cap. A
+     * nothing-attached boot exits after 700 ms. */
     {
-        absolute_time_t hard_deadline = make_timeout_time_ms(1000);
-        absolute_time_t settle_deadline = nil_time;
+        absolute_time_t hard_deadline = make_timeout_time_ms(4000);
         while (absolute_time_diff_us(get_absolute_time(), hard_deadline) > 0) {
             usb_host_task();
-            if (usb_host_keyboard_connected() && is_nil_time(settle_deadline)) {
-                settle_deadline = make_timeout_time_ms(200);
-            }
-            if (!is_nil_time(settle_deadline) &&
-                absolute_time_diff_us(get_absolute_time(), settle_deadline) <= 0) {
+            uint32_t quiet_ms = usb_host_keyboard_connected() ? 200 : 700;
+            uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+            if ((uint32_t)(now_ms - usb_host_last_activity_ms()) >= quiet_ms) {
                 break;
             }
         }

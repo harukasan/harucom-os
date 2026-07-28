@@ -19,6 +19,10 @@ bool usb_host_keyboard_connected(void);
 uint8_t usb_host_keyboard_modifier(void);
 const uint8_t *usb_host_keyboard_keycodes(void);
 
+/* Milliseconds since boot of the last USB topology activity
+ * (device mount/unmount, HID interface mount) */
+uint32_t usb_host_last_activity_ms(void);
+
 #ifdef __cplusplus
 }
 #endif

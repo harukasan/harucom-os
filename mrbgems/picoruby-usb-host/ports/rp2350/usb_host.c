@@ -11,6 +11,7 @@
 
 #include "hardware/gpio.h"
 #include "hardware/irq.h"
+#include "pico/time.h"
 #include "pio_usb.h"
 #include "tusb.h"
 
@@ -38,6 +39,25 @@ static uint8_t keyboard_instance = 0;
 static uint8_t keyboard_modifier_state = 0;
 static uint8_t keyboard_keycodes_state[6] = {0};
 
+/* Milliseconds since boot of the last topology activity (device
+ * mount/unmount, HID interface mount). The boot pump in main.c exits
+ * once this stays quiet, so a hub's chained enumerations extend the
+ * pump instead of racing the mruby bootstrap. All callbacks run inside
+ * tuh_task() on core 0, the same context as every reader. */
+static volatile uint32_t last_activity_ms;
+
+static void
+note_activity(void)
+{
+  last_activity_ms = to_ms_since_boot(get_absolute_time());
+}
+
+uint32_t
+usb_host_last_activity_ms(void)
+{
+  return last_activity_ms;
+}
+
 void
 usb_host_init(void)
 {
@@ -61,6 +81,10 @@ usb_host_init(void)
    * Raise its priority so USB transactions are not preempted by other
    * Core 0 IRQs (UART, etc.), which would break USB timing. */
   irq_set_priority(TIMER0_IRQ_2, PICO_HIGHEST_IRQ_PRIORITY);
+
+  /* Start the boot pump's quiet window from init so a nothing-attached
+   * boot exits after one idle period instead of waiting on zero. */
+  note_activity();
 
   printf("USB Host initialized (PIO-USB on GPIO %d)\n", HARUCOM_USBH_DP_PIN);
 }
@@ -90,6 +114,26 @@ usb_host_keyboard_keycodes(void)
 }
 
 /*--------------------------------------------------------------------
+ * TinyUSB Host device callbacks
+ *--------------------------------------------------------------------*/
+
+/* Fires for every configured device, hubs included, so the log shows
+ * whether a hub itself enumerates even without a debug build. */
+void
+tuh_mount_cb(uint8_t dev_addr)
+{
+  printf("USB device mounted (dev_addr=%d)\n", dev_addr);
+  note_activity();
+}
+
+void
+tuh_umount_cb(uint8_t dev_addr)
+{
+  printf("USB device unmounted (dev_addr=%d)\n", dev_addr);
+  note_activity();
+}
+
+/*--------------------------------------------------------------------
  * TinyUSB Host HID callbacks
  *--------------------------------------------------------------------*/
 
@@ -99,9 +143,15 @@ tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_report,
   (void)desc_report;
   (void)desc_len;
 
+  note_activity();
+
   uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
-  if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
+  /* Track the first keyboard only. Its interface alone gets a report
+   * armed, so a second keyboard behind a hub can never overwrite the
+   * shared state. It takes over only after the tracked one unmounts
+   * and it is replugged. */
+  if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD && !keyboard_connected_flag) {
     printf("USB keyboard connected (dev_addr=%d, instance=%d)\n", dev_addr, instance);
     keyboard_dev_addr = dev_addr;
     keyboard_instance = instance;
@@ -116,6 +166,8 @@ tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_report,
 void
 tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance)
 {
+  note_activity();
+
   if (dev_addr == keyboard_dev_addr && instance == keyboard_instance) {
     printf("USB keyboard disconnected\n");
     keyboard_connected_flag = false;
@@ -130,6 +182,13 @@ void
 tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len)
 {
   (void)len;
+
+  /* Only the tracked keyboard's interface is ever armed, but filter
+   * anyway so a stray report can neither corrupt the shared state nor
+   * re-arm an untracked interface. */
+  if (dev_addr != keyboard_dev_addr || instance != keyboard_instance) {
+    return;
+  }
 
   uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
