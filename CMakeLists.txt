@@ -103,6 +103,7 @@ add_custom_command(
         ${RAKE} MRUBY_CONFIG=${CMAKE_CURRENT_LIST_DIR}/build_config/${PICORUBY_BUILD_CONFIG}.rb
     WORKING_DIRECTORY ${PICORUBY_ROOT}
     COMMENT "Building PicoRuby (libmruby.a)..."
+    VERBATIM
 )
 
 add_custom_target(build_picoruby
