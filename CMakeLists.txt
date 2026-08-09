@@ -98,9 +98,9 @@ set(PICORUBY_BUILD_CONFIG harucom-os-pico2)
 add_custom_command(
     OUTPUT ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/lib/libmruby.a
     COMMAND ${CMAKE_COMMAND} -E env
-        "PATH=${_toolchain_bindir}:${_ruby_bindir}:$ENV{PATH}"
+        "PATH=${_ruby_bindir}:${_toolchain_bindir}:$ENV{PATH}"
         "GEM_PATH=${_gem_path}"
-        ${RAKE} MRUBY_CONFIG=${CMAKE_CURRENT_LIST_DIR}/build_config/${PICORUBY_BUILD_CONFIG}.rb
+        ${Ruby_EXECUTABLE} ${RAKE} MRUBY_CONFIG=${CMAKE_CURRENT_LIST_DIR}/build_config/${PICORUBY_BUILD_CONFIG}.rb
     WORKING_DIRECTORY ${PICORUBY_ROOT}
     COMMENT "Building PicoRuby (libmruby.a)..."
     VERBATIM
