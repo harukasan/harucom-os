@@ -14,7 +14,7 @@ GEM
     ffi (1.17.3-x86_64-linux-musl)
     freetype (0.0.6)
       ffi
-    rake (13.3.1)
+    rake (13.4.2)
 
 PLATFORMS
   aarch64-linux-gnu
