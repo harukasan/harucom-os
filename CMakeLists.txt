@@ -183,11 +183,12 @@ add_executable(harucom_os
     src/init_rootfs.c
     ports/picoruby-littlefs/flash_hal.c
     src/platform.c
-    src/env.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-env/ports/rp2040/env.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-rng/ports/rp2040/rng.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-gpio/ports/rp2040/gpio.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-adc/ports/rp2040/adc.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-uart/ports/rp2040/uart.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-irq/ports/rp2040/irq.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-pwm/ports/rp2040/pwm.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/ports/rp2040/io-console.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
@@ -249,6 +250,7 @@ target_include_directories(harucom_os PRIVATE
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems
     ${PICORUBY_ROOT}/mrbgems/picoruby-adc/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-uart/include
+    ${PICORUBY_ROOT}/mrbgems/picoruby-irq/include
     ${PICORUBY_ROOT}/mrbgems/picoruby-pwm/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/picoruby-usb-host/include
     ${CMAKE_CURRENT_LIST_DIR}/mrbgems/harucom-os-dict/include
