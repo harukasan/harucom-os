@@ -170,6 +170,7 @@ add_custom_command(
             ${CMAKE_BINARY_DIR}/ruby_scripts.h
     DEPENDS ${ROOTFS_FILES} ${CMAKE_SOURCE_DIR}/scripts/gen_ruby_scripts.rb
     COMMENT "Generating ruby_scripts.h from rootfs/"
+    VERBATIM
 )
 add_custom_target(ruby_scripts_gen DEPENDS ${CMAKE_BINARY_DIR}/ruby_scripts.h)
 
@@ -313,4 +314,5 @@ add_custom_command(TARGET harucom_os POST_BUILD
         ${CMAKE_BINARY_DIR}/harucom_os.uf2
         ${CMAKE_BINARY_DIR}/${HARUCOM_RELEASE_NAME}.uf2
     COMMENT "Creating release files: ${HARUCOM_RELEASE_NAME}.{elf,uf2}"
+    VERBATIM
 )
