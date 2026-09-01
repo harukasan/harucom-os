@@ -402,18 +402,32 @@ Machine_bootsel_pressed_q(void)
  *
  *------------------------------------*/
 
-void
-Machine_sleep(uint32_t seconds)
+/*
+ * Low-power sleep is not supported on this board: DVI output (HSTX)
+ * and the QMI-mapped PSRAM heap depend on clk_sys staying up, which
+ * the SDK sleep modes reconfigure. A timer wait without deep mode
+ * degrades to a plain busy sleep, everything else raises
+ * NotImplementedError via MACHINE_SLEEP_EUNSUPPORTED.
+ */
+
+machine_sleep_result_t
+Machine_sleep_timer(bool deep, uint32_t ms)
 {
-  sleep_ms(seconds * 1000);
+  if (deep) {
+    return MACHINE_SLEEP_EUNSUPPORTED;
+  }
+  sleep_ms(ms);
+  return MACHINE_SLEEP_OK;
 }
 
-void
-Machine_deep_sleep(uint8_t gpio_pin, bool edge, bool high)
+machine_sleep_result_t
+Machine_sleep_gpio(bool deep, int pin, bool edge, bool high)
 {
-  (void)gpio_pin;
+  (void)deep;
+  (void)pin;
   (void)edge;
   (void)high;
+  return MACHINE_SLEEP_EUNSUPPORTED;
 }
 
 /*-------------------------------------

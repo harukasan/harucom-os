@@ -29,11 +29,14 @@ drag-and-drop. The dictionary is built from the
 [harucom-os-dict](vendor/harucom-os-dict) submodule; `rake` auto-initializes
 it on first run.
 
-**When changing `build_config/*.rb` (adding/removing gems, changing defines)
-or adding new `MRB_SYM()` identifiers in C code, you must run
-`rake distclean` before `rake`.** `rake clean` only removes the CMake build
-directory; it does not rebuild `libmruby.a` or regenerate the presym table.
-The PicoRuby build cache is separate and only cleared by `distclean`.
+**When changing `build_config/*.rb` (adding/removing gems, changing defines),
+adding new `MRB_SYM()` identifiers in C code, or updating the `lib/picoruby`
+submodule, you must run `rake distclean` before `rake`.** `rake clean` only
+removes the CMake build directory; it does not rebuild `libmruby.a` or
+regenerate the presym table. The PicoRuby build cache is separate and only
+cleared by `distclean`. CMake has no dependency edge from the submodule to
+`libmruby.a`, so an incremental `rake` after a submodule update links the
+previously built archive and silently ships the old VM.
 
 ## Testing
 
@@ -192,9 +195,7 @@ Build responsibilities:
   `rake` to confirm real build errors.
 - **`lib/picoruby` submodule may show as "modified content" in git status.**
   `rake distclean` recreates `lib/picoruby/build/.gitignore` to prevent
-  this issue. The inner mruby tree also carries the working-tree patches
-  from `patches/mruby/` (applied automatically by `rake`), so "modified
-  content" there is expected. Never stage or commit the submodule.
+  this issue. Never stage or commit the submodule.
 
 ## Commit messages
 
