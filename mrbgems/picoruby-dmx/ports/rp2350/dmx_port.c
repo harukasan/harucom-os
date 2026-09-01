@@ -180,9 +180,9 @@ dmx_init(const char *unit_name, int txd_pin)
 
   uart_init(unit, DMX_BAUDRATE);
   uart_set_format(unit, 8, 2, UART_PARITY_NONE);
-  /* On RP2350 a pin with bit 1 set reaches UART TX through the AUX
-   * funcsel. The plain UART funcsel would select CTS there, which
-   * leaves the UART transmitting into a pin that never drives. */
+  /* On RP2350 the UART signal on a pin with bit 1 set sits on the AUX
+   * funcsel, and the plain funcsel carries CTS or RTS there. Only even
+   * pins carry TX, so GPIO6 needs AUX while GPIO20 needs the plain one. */
   gpio_set_function(txd_pin, UART_FUNCSEL_NUM(unit, txd_pin));
 
   dma_channel_config config = dma_channel_get_default_config(channel);
