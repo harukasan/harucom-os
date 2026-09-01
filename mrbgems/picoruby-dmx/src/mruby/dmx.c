@@ -18,9 +18,17 @@ mrb_dmx__init(mrb_state *mrb, mrb_value self)
   const char *unit_name;
   mrb_int txd_pin;
   mrb_get_args(mrb, "zi", &unit_name, &txd_pin);
+  /* The check runs on mrb_int before the int cast, or a huge pin would
+   * truncate into a valid GPIO number. Negative selects the board default. */
+  if (DMX_MAX_TXD_PIN < txd_pin) {
+    mrb_raisef(mrb, E_ARGUMENT_ERROR, "txd_pin out of range: %i", txd_pin);
+  }
   int channel = dmx_init(unit_name, (int)txd_pin);
   if (channel == DMX_INIT_ERR_UNIT) {
     mrb_raisef(mrb, E_ARGUMENT_ERROR, "unknown UART unit: %s", unit_name);
+  }
+  if (channel == DMX_INIT_ERR_PIN) {
+    mrb_raisef(mrb, E_ARGUMENT_ERROR, "GPIO%i does not carry TX for that UART unit", txd_pin);
   }
   if (channel < 0) {
     mrb_raise(mrb, E_RUNTIME_ERROR, "DMX init failed: no free DMA channel or alarm pool");

@@ -58,11 +58,13 @@ Both keywords are optional; omitted arguments select the board default
 wiring from the board header
 ([harucom_board.h](../include/boards/harucom_board.h), the Grove port).
 Pass `unit:` (e.g. `:RP2040_UART1`) and `txd_pin:` to use other wiring.
-The line parameters (250000 baud, 8N2) are fixed by the standard, and
-the engine only transmits, so there is no receive pin. Returns the
-claimed DMA channel number, raises `ArgumentError` on an unknown unit
-and `RuntimeError` when no DMA channel or alarm pool is available.
-Sends nothing yet.
+`txd_pin` has to be a pin that carries TX for the chosen unit, listed
+under [UART TX pins](#uart-tx-pins). The line parameters (250000 baud,
+8N2) are fixed by the standard, and the engine only transmits, so there
+is no receive pin. Returns the claimed DMA channel number, raises
+`ArgumentError` on an unknown unit or on a pin that cannot carry TX for
+that unit, and `RuntimeError` when no DMA channel or alarm pool is
+available. Sends nothing yet.
 
 ### DMX.start
 
@@ -196,6 +198,24 @@ receive use. The transmit engine does not configure that pin.
 
 TIMER0's four alarms are already taken (mruby task tick, PIO-USB SOF,
 SDK default alarm pool), so the engine creates its alarm pool on TIMER1.
+
+### UART TX pins
+
+These are the only GPIOs that carry UART TX on the RP2350 QFN-60
+package, so `txd_pin` has to come from the row of the unit in use. Odd
+GPIOs carry RX and are never valid. On a pin with bit 1 set the TX
+signal sits on the AUX function select (11) while the plain UART
+function select (2) carries CTS, so `dmx_init` chooses between them
+with the `UART_FUNCSEL_NUM` macro from the pico-sdk.
+
+| Unit | TX on funcsel 2 | TX on funcsel 11 (AUX) |
+|---|---|---|
+| UART0 | GPIO0, 12, 16, 28 | GPIO2, 14, 18 |
+| UART1 | GPIO4, 8, 20, 24 | GPIO6, 10, 22, 26 |
+
+Any other pin raises `ArgumentError` at `DMX.init`. Without the check a
+mismatched pin is muxed to CTS or to the other unit's TX, which drives
+nothing and leaves the rig dark with no error to trace.
 
 ## Architecture
 
