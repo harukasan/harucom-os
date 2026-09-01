@@ -32,9 +32,17 @@ void dmx_set_active_slots(uint16_t count);
  * the frame alarm pool, and returns the claimed DMA channel number.
  * A NULL or empty unit_name and a negative txd_pin select the board
  * default wiring from the board header. The engine only transmits,
- * so there is no receive pin. */
+ * so there is no receive pin. txd_pin must be a pin that carries TX
+ * for the chosen unit, which the port checks against a pin table. */
 #define DMX_INIT_ERR_UNIT     (-1) /* unknown UART unit name */
 #define DMX_INIT_ERR_RESOURCE (-2) /* no free DMA channel or alarm pool */
+#define DMX_INIT_ERR_PIN      (-3) /* txd_pin cannot carry TX for the unit */
+
+/* Highest GPIO number on the package. Bindings check the requested pin
+ * against this before narrowing it to int, so a value too large for int
+ * cannot truncate into a valid pin. The port table rejects the rest. */
+#define DMX_MAX_TXD_PIN 29
+
 int dmx_init(const char *unit_name, int txd_pin);
 void dmx_start(void); /* start 40 Hz background transmission */
 void dmx_stop(void);  /* stop transmission (fixtures hold last values) */

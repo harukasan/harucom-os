@@ -148,6 +148,25 @@ frame_timer_callback(repeating_timer_t *timer)
   return true;
 }
 
+/*
+ * RP2350 (QFN-60) UART TX pins, terminated by -1. Odd GPIOs carry RX and
+ * never appear here. Which UART owns a pin does not follow a formula, so
+ * the assignment is listed rather than computed.
+ */
+static const int8_t uart0_tx_pins[] = {0, 2, 12, 14, 16, 18, 28, -1};
+static const int8_t uart1_tx_pins[] = {4, 6, 8, 10, 20, 22, 24, 26, -1};
+
+/* Report whether pin can carry TX for unit. */
+static bool
+tx_pin_belongs_to_unit(uart_inst_t *unit, int pin)
+{
+  const int8_t *pins = (unit == uart0) ? uart0_tx_pins : uart1_tx_pins;
+  for (int i = 0; 0 <= pins[i]; i++) {
+    if (pins[i] == pin) return true;
+  }
+  return false;
+}
+
 int
 dmx_init(const char *unit_name, int txd_pin)
 {
@@ -165,6 +184,11 @@ dmx_init(const char *unit_name, int txd_pin)
   }
   if (txd_pin < 0) txd_pin = DMX_DEFAULT_TXD_PIN;
 
+  /* Reject the pin before claiming any resource. Muxing a pin that does
+   * not carry TX for this unit produces a silent dead line, which is the
+   * failure this check exists to turn into an error. */
+  if (!tx_pin_belongs_to_unit(unit, txd_pin)) return DMX_INIT_ERR_PIN;
+
   /* DVI holds channels 0/1 and PIO-USB claims channel 2, so this
    * normally lands on channel 3. */
   int channel = dma_claim_unused_channel(false);
@@ -180,7 +204,10 @@ dmx_init(const char *unit_name, int txd_pin)
 
   uart_init(unit, DMX_BAUDRATE);
   uart_set_format(unit, 8, 2, UART_PARITY_NONE);
-  gpio_set_function(txd_pin, GPIO_FUNC_UART);
+  /* On RP2350 the UART signal on a pin with bit 1 set sits on the AUX
+   * funcsel, and the plain funcsel carries CTS there. GPIO6 needs AUX
+   * while GPIO20 needs the plain one. */
+  gpio_set_function(txd_pin, UART_FUNCSEL_NUM(unit, txd_pin));
 
   dma_channel_config config = dma_channel_get_default_config(channel);
   channel_config_set_transfer_data_size(&config, DMA_SIZE_8);
