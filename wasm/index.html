@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harucom OS (wasm)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- #screen is the DVI framebuffer, blitted every committed frame. #log
+       collects stdout and stderr, which the Console mirrors to fd 1. -->
+  <canvas id="screen" width="640" height="480"></canvas>
+  <pre id="log"></pre>
+
+  <!-- harucom.js (classic script) defines the global createHarucomModule
+       factory; main.js (ES module) boots the VM and wires up the page. -->
+  <script src="harucom.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
