@@ -16,6 +16,7 @@
 //   https://github.com/Panda381/PicoLibSDK
 
 #include "dvi_output.h"
+#include "dvi_text_internal.h"
 
 #include "hardware/dma.h"
 #include "hardware/gpio.h"
@@ -198,31 +199,18 @@ static volatile int next_graphics_scale = -1;
 // ----------------------------------------------------------------------------
 // Text mode data
 
-// Double-buffered text VRAM: Core 0 writes to write_vram (back buffer),
+// Double-buffered text VRAM: Core 0 writes to dvi_text_write_vram (back buffer),
 // Core 1 reads from render_vram (front buffer). Pointer swap at VBlank.
 static dvi_text_cell_t text_vram_a[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
 static dvi_text_cell_t text_vram_b[DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS];
-static dvi_text_cell_t *write_vram = text_vram_a;
+// dvi_text_write_vram (the shared write-side buffer pointer) is owned by
+// src/dvi_text.c; this port points it at the current back buffer at init and
+// swaps it in dvi_text_commit. render_vram is the front buffer Core 1 reads.
 static dvi_text_cell_t *volatile render_vram = text_vram_a;
 
-// Physical VRAM row stride is fixed at the maximum grid width so cell
-// addressing stays valid when the active column count (text_cols) changes.
-#define TEXT_VRAM_STRIDE DVI_TEXT_MAX_COLS
-
-// Active text grid. Used for bounds checks, wrapping, and the scroll ring
-// modulus. Changes with the text scale.
-static int text_cols = DVI_TEXT_MAX_COLS;
-static int text_rows = DVI_TEXT_MAX_ROWS;
-
-// Runtime text scale: 1 = 640x480 native, 2 = 320x240 (2x scaled)
-static int text_scale = 1;
+// Pending text scale applied by the VSync IRQ (see dma_irq_handler).
 static volatile int next_text_scale = -1;
 
-// Per-scale text grid dimensions, precomputed in dvi_text_set_font so the
-// VSync IRQ can apply a scale change without reading the flash-resident
-// font struct. Index 0 is unused.
-static int text_cols_for_scale[3] = {0, DVI_TEXT_MAX_COLS, DVI_TEXT_MAX_COLS / 2};
-static int text_rows_for_scale[3] = {0, DVI_TEXT_MAX_ROWS, DVI_TEXT_MAX_ROWS / 2};
 
 // All-black line buffer for DVI blanking mode (flash write safety).
 // Used as pixel data source when dvi_blanking is true, avoiding any
@@ -240,43 +228,29 @@ static uint8_t blank_line_buf[MODE_H_ACTIVE_PIXELS + 4] __attribute__((aligned(4
 static uint8_t line_buf[LINE_BUF_COUNT][LINE_BUF_STRIDE] __attribute__((aligned(4)));
 static int line_buf_next = 0;
 
-static const dvi_font_t *text_font;
-static const dvi_font_t *text_wide_font;
-static uint8_t text_palette[16];
 
-// 12px renderer constants
-#define TEXT_GLYPH_HEIGHT_12WIDE 13
+// 12px renderer constants (TEXT_GLYPH_HEIGHT_12WIDE comes from dvi_text_internal.h)
 #define TEXT_12WIDE_COLS         (MODE_H_ACTIVE_PIXELS / 6) // 106
 
-// Row-major narrow font cache in SRAM (regular + bold).
-// Layout: [glyph_y * 512 + ch]. Regular at 0-255, bold at 256-511.
-#define NARROW_CACHE_STRIDE 512
-static uint8_t narrow_row_cache[TEXT_GLYPH_HEIGHT_12WIDE * NARROW_CACHE_STRIDE];
 
 // Per-row wide character flag for narrow-only / mixed path dispatch
 // (double-buffered).
 static uint8_t row_has_wide_a[DVI_TEXT_MAX_ROWS];
 static uint8_t row_has_wide_b[DVI_TEXT_MAX_ROWS];
-static uint8_t *write_row_has_wide = row_has_wide_a;
 static uint8_t *volatile render_row_has_wide = row_has_wide_a;
 
-// Per-position glyph bitmap constants.
-// Layout: [(physical_row * GLYPH_HEIGHT + glyph_y) * STRIDE + col]
+// Per-position glyph bitmap layout (GLYPH_BITMAP_STRIDE/SIZE come from
+// dvi_text_internal.h): [(physical_row * GLYPH_HEIGHT + glyph_y) * STRIDE + col].
 // Wide-left cell stores low 8 bits, wide-right stores high 8 bits of the
 // 12-bit glyph row. ldrh at wide-left reads the full 16-bit value.
-#define GLYPH_BITMAP_STRIDE DVI_TEXT_MAX_COLS
-#define GLYPH_BITMAP_SIZE   (DVI_TEXT_MAX_ROWS * TEXT_GLYPH_HEIGHT_12WIDE * GLYPH_BITMAP_STRIDE)
 
 // Ring buffer scroll offset (double-buffered).
-// Logical row N maps to physical row (N + scroll_offset) % text_rows.
-static int write_scroll_offset = 0;
+// Logical row N maps to physical row (N + scroll_offset) % dvi_text_rows.
 static volatile int render_scroll_offset = 0;
 
 // Pending buffer swap request from Core 0, processed at VBlank by Core 1.
 static volatile bool swap_pending = false;
 
-// Pre-expanded palette: RGB332 byte replicated to all 4 lanes.
-static uint32_t text_palette32[16];
 
 // Pre-expanded nibble mask table in SCRATCH_Y (SRAM9, separate bus port).
 // Maps font byte (0-255) to pre-computed (mask_hi, mask_lo) pair.
@@ -284,32 +258,6 @@ static uint32_t text_palette32[16];
 static uint32_t font_byte_mask[256][2]
     __attribute__((section(".scratch_y.font_byte_mask"), aligned(8)));
 
-// Default 16-color palette (RGB332, ANSI color order)
-static const uint8_t default_palette[16] = {
-    0x00, // 0  Black        (R0 G0 B0)
-    0xE0, // 1  Red          (R7 G0 B0)
-    0x1C, // 2  Green        (R0 G7 B0)
-    0xA8, // 3  Brown        (R5 G2 B0)
-    0x03, // 4  Blue         (R0 G0 B3)
-    0xE3, // 5  Magenta      (R7 G0 B3)
-    0x1F, // 6  Cyan         (R0 G7 B3)
-    0xB6, // 7  Light Gray   (R5 G5 B2)
-    0x49, // 8  Dark Gray    (R2 G2 B1)
-    0xF0, // 9  Orange       (R7 G4 B0)
-    0x7C, // 10 Lime         (R3 G7 B0)
-    0xFC, // 11 Yellow       (R7 G7 B0)
-    0x17, // 12 Sky Blue     (R0 G5 B3)
-    0xEA, // 13 Pink         (R7 G2 B2)
-    0x5F, // 14 Bright Cyan  (R2 G7 B3)
-    0xFF, // 15 White        (R7 G7 B3)
-};
-
-static void
-update_palette32(void)
-{
-  for (int i = 0; i < 16; i++)
-    text_palette32[i] = text_palette[i] * 0x01010101u;
-}
 
 static void
 init_font_byte_mask(void)
@@ -327,30 +275,7 @@ init_font_byte_mask(void)
   }
 }
 
-// Map logical row to physical row in the ring buffer.
-static inline int
-physical_row(int logical_row, int offset)
-{
-  int r = logical_row + offset;
-  return r >= text_rows ? r - text_rows : r;
-}
 
-// Render a wide glyph's bitmap from flash font into the per-position
-// glyph bitmap at the given physical row and column.
-static void
-render_wide_glyph_at(int col, int phys_row, uint16_t linear_jis, const dvi_font_t *font, bool bold)
-{
-  if (!font) return;
-  int bytes_per_glyph = font->glyph_height * 2;
-  int stride = bytes_per_glyph * 2;
-  const uint8_t *src = font->bitmap + (linear_jis - font->first_char) * stride;
-  if (bold) src += bytes_per_glyph;
-  for (int y = 0; y < font->glyph_height; y++) {
-    int base = (phys_row * TEXT_GLYPH_HEIGHT_12WIDE + y) * GLYPH_BITMAP_STRIDE + col;
-    screenbuf.glyph_bitmap[base] = src[y * 2];
-    screenbuf.glyph_bitmap[base + 1] = src[y * 2 + 1];
-  }
-}
 
 // ----------------------------------------------------------------------------
 // 12px mixed-width renderer (6px half-width + 12px full-width, 106 columns)
@@ -373,16 +298,16 @@ static void __scratch_x("") render_text_scanline_12wide(int scanline, uint8_t *o
 
   // Ring buffer: map logical text_row to physical row.
   int phys_row = text_row + render_scroll_offset;
-  if (phys_row >= text_rows) phys_row -= text_rows;
+  if (phys_row >= dvi_text_rows) phys_row -= dvi_text_rows;
 
   const uint32_t *cell = (const uint32_t *)&render_vram[phys_row * TEXT_12WIDE_COLS];
   const uint32_t *end = cell + TEXT_12WIDE_COLS;
   uint8_t *out_end = out + MODE_H_ACTIVE_PIXELS;
 
   // SRAM cache row: regular at [0..255], bold at [256..511].
-  const uint8_t *narrow_row = narrow_row_cache + (glyph_y * NARROW_CACHE_STRIDE);
+  const uint8_t *narrow_row = dvi_text_narrow_cache + (glyph_y * NARROW_CACHE_STRIDE);
 
-  const uint32_t *pal32 = text_palette32;
+  const uint32_t *pal32 = dvi_text_palette32;
 
   // Force first attr lookup (bitwise NOT guarantees mismatch).
   uint32_t prev_attr = ~(uint32_t)(uint8_t)(*cell >> 16);
@@ -471,7 +396,7 @@ static void __scratch_x("") render_text_scanline_12wide(int scanline, uint8_t *o
   } else {
     // MIXED PATH (narrow 6px + wide 12px) WITH ATTR CHECKS
     // Wide glyphs read from per-position glyph bitmap (sequential access).
-    // Narrow uses narrow_row_cache. glyph_ptr advances by 1 for narrow,
+    // Narrow uses dvi_text_narrow_cache. glyph_ptr advances by 1 for narrow,
     // 2 for wide to stay synchronized with cell position.
     const uint8_t *glyph_ptr =
         screenbuf.glyph_bitmap +
@@ -597,10 +522,10 @@ static void __not_in_flash_func(render_text_scanline_12wide_scaled)(int src_line
 
   // Ring buffer: map logical text_row to physical row.
   int phys_row = text_row + render_scroll_offset;
-  if (phys_row >= text_rows) phys_row -= text_rows;
+  if (phys_row >= dvi_text_rows) phys_row -= dvi_text_rows;
 
   const dvi_text_cell_t *cells = &render_vram[phys_row * TEXT_VRAM_STRIDE];
-  const uint8_t *narrow_row = narrow_row_cache + (glyph_y * NARROW_CACHE_STRIDE);
+  const uint8_t *narrow_row = dvi_text_narrow_cache + (glyph_y * NARROW_CACHE_STRIDE);
   const uint8_t *glyph_row =
       screenbuf.glyph_bitmap +
       (phys_row * TEXT_GLYPH_HEIGHT_12WIDE + glyph_y) * GLYPH_BITMAP_STRIDE;
@@ -609,14 +534,14 @@ static void __not_in_flash_func(render_text_scanline_12wide_scaled)(int src_line
   uint32_t bg4 = 0, xor4 = 0;
 
   int col = 0;
-  int cols = text_cols;
+  int cols = dvi_text_cols;
   while (col < cols) {
     const dvi_text_cell_t *cell = &cells[col];
     uint32_t attr = cell->attr;
     if (attr != prev_attr) {
       prev_attr = attr;
-      bg4 = text_palette32[attr & 0x0F];
-      xor4 = bg4 ^ text_palette32[attr >> 4];
+      bg4 = dvi_text_palette32[attr & 0x0F];
+      xor4 = bg4 ^ dvi_text_palette32[attr >> 4];
     }
     if (cell->flags & (DVI_CELL_FLAG_WIDE_L | DVI_CELL_FLAG_WIDE_R)) {
       // Wide (12px): the glyph row is 12 bits, low byte at the left cell
@@ -676,7 +601,7 @@ static void __not_in_flash_func(prepare_batch_dma_text_scaled)(uint32_t *buf, in
 {
   const uint32_t fifo = (uintptr_t)&hstx_fifo_hw->fifo;
   int full_build = (first_line < BATCH_SIZE * 2);
-  int active_source_lines = text_rows * TEXT_GLYPH_HEIGHT_12WIDE;
+  int active_source_lines = dvi_text_rows * TEXT_GLYPH_HEIGHT_12WIDE;
 
 #ifdef DVI_DIAGNOSTICS
   uint32_t batch_cyc0 = *DWT_CYCCNT;
@@ -759,7 +684,7 @@ static void __force_inline __scratch_x("") prepare_batch_dma(uint32_t *buf, int 
     buf[5] = 0;
     buf[6] = 0;
     buf[7] = 0;
-  } else if (active_mode == DVI_MODE_TEXT && text_scale == 2) {
+  } else if (active_mode == DVI_MODE_TEXT && dvi_text_scale == 2) {
     // 2x scaled text mode, including flash-write blanking (handled inside
     // with the scale 2 transfer count).
     prepare_batch_dma_text_scaled(buf, first_line);
@@ -910,9 +835,9 @@ void __scratch_x("") dma_irq_handler(void)
     frame_count++;
     // Swap text VRAM double-buffer pointers if Core 0 requested it.
     if (swap_pending) {
-      render_vram = write_vram;
-      render_row_has_wide = write_row_has_wide;
-      render_scroll_offset = write_scroll_offset;
+      render_vram = dvi_text_write_vram;
+      render_row_has_wide = dvi_text_write_row_has_wide;
+      render_scroll_offset = dvi_text_write_scroll_offset;
       swap_pending = false;
     }
     __asm volatile("sev"); // wake Core 0 WFE
@@ -943,14 +868,14 @@ void __scratch_x("") dma_irq_handler(void)
     // below stay consistent with each other.
     int pending_text_scale = next_text_scale;
     if (pending_text_scale > 0) {
-      text_scale = pending_text_scale;
+      dvi_text_scale = pending_text_scale;
       next_text_scale = -1;
-      text_cols = text_cols_for_scale[text_scale];
-      text_rows = text_rows_for_scale[text_scale];
+      dvi_text_cols = dvi_text_cols_for_scale[dvi_text_scale];
+      dvi_text_rows = dvi_text_rows_for_scale[dvi_text_scale];
       // Core 1 owns the render-side ring offset. Clamp it into the new
       // row range so the renderer's single-subtraction wrap stays in
       // bounds when the grid shrinks.
-      while (render_scroll_offset >= text_rows) render_scroll_offset -= text_rows;
+      while (render_scroll_offset >= dvi_text_rows) render_scroll_offset -= dvi_text_rows;
       __asm volatile("sev");
     }
 
@@ -959,7 +884,7 @@ void __scratch_x("") dma_irq_handler(void)
     // 320x240 (text or graphics): 2 shifts (byte-lane replication for 2x
     // horizontal scaling).
     {
-      int scale = (active_mode == DVI_MODE_GRAPHICS) ? graphics_scale : text_scale;
+      int scale = (active_mode == DVI_MODE_GRAPHICS) ? graphics_scale : dvi_text_scale;
       int n_shifts = (scale == 2) ? 2 : 4;
       hstx_ctrl_hw->expand_shift = n_shifts << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
                                    8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
@@ -1013,7 +938,7 @@ dvi_start_mode(dvi_mode_t mode)
 
   // Configure HSTX ENC_N_SHIFTS based on mode and runtime scale.
   {
-    int scale = (mode == DVI_MODE_GRAPHICS) ? graphics_scale : text_scale;
+    int scale = (mode == DVI_MODE_GRAPHICS) ? graphics_scale : dvi_text_scale;
     int n_shifts = (scale == 2) ? 2 : 4;
     hstx_ctrl_hw->expand_shift = n_shifts << HSTX_CTRL_EXPAND_SHIFT_ENC_N_SHIFTS_LSB |
                                  8 << HSTX_CTRL_EXPAND_SHIFT_ENC_SHIFT_LSB |
@@ -1075,18 +1000,21 @@ dvi_start_mode(dvi_mode_t mode)
   init_font_byte_mask();
 
   // Initialize text mode state (both VRAM buffers)
-  memcpy(text_palette, default_palette, sizeof(default_palette));
-  update_palette32();
+  dvi_text_init_palette();
   memset(text_vram_a, 0, sizeof(text_vram_a));
   memset(text_vram_b, 0, sizeof(text_vram_b));
   memset(row_has_wide_a, 0, sizeof(row_has_wide_a));
   memset(row_has_wide_b, 0, sizeof(row_has_wide_b));
-  write_vram = text_vram_a;
+  // Point the shared write-side pointers at this port's buffers.
+  dvi_text_write_vram = text_vram_a;
   render_vram = text_vram_a;
-  write_row_has_wide = row_has_wide_a;
+  dvi_text_write_row_has_wide = row_has_wide_a;
   render_row_has_wide = row_has_wide_a;
-  write_scroll_offset = 0;
+  dvi_text_write_scroll_offset = 0;
   render_scroll_offset = 0;
+  // The wide-glyph bitmap is unioned with the graphics framebuffer here; the
+  // shared renderer writes glyphs through this pointer.
+  dvi_text_glyph_bitmap = screenbuf.glyph_bitmap;
   memset(screenbuf.glyph_bitmap, 0, GLYPH_BITMAP_SIZE);
   swap_pending = false;
   memset(line_buf, 0, sizeof(line_buf));
@@ -1162,7 +1090,7 @@ void
 dvi_set_text_scale(int scale)
 {
   if (scale != 1 && scale != 2) return;
-  if (text_scale == scale) return;
+  if (dvi_text_scale == scale) return;
   next_text_scale = scale;
   // Block until the VSync IRQ has applied the change, so callers that
   // read cols()/rows() immediately after see the new grid. Worst case
@@ -1173,7 +1101,7 @@ dvi_set_text_scale(int scale)
   // Core 0 owns the write-side ring offset. Clamp it into the new row
   // range so physical_row's single-subtraction wrap stays in bounds
   // when the grid shrinks.
-  while (write_scroll_offset >= text_rows) write_scroll_offset -= text_rows;
+  while (dvi_text_write_scroll_offset >= dvi_text_rows) dvi_text_write_scroll_offset -= dvi_text_rows;
 }
 
 uint8_t *
@@ -1256,321 +1184,6 @@ dvi_wait_vsync(void)
 }
 
 // ----------------------------------------------------------------------------
-// Text mode API
-
-dvi_text_cell_t *
-dvi_get_text_vram(void)
-{
-  return write_vram;
-}
-
-int
-dvi_text_get_cols(void)
-{
-  return text_cols;
-}
-
-int
-dvi_text_get_rows(void)
-{
-  return text_rows;
-}
-
-void
-dvi_text_set_font(const dvi_font_t *font)
-{
-  text_font = font;
-  // Precompute the grid for each scale. Scale 1 keeps the partial bottom
-  // row (ceil, matching the native 640x480 grid). Scale 2 uses only full
-  // rows (floor); the remaining source lines stay black.
-  for (int scale = 1; scale <= 2; scale++) {
-    int cols = (MODE_H_ACTIVE_PIXELS / scale) / font->glyph_width;
-    int content_height = MODE_V_ACTIVE_LINES / scale;
-    int rows = (scale == 1) ? (content_height + font->glyph_height - 1) / font->glyph_height
-                            : content_height / font->glyph_height;
-    if (cols > DVI_TEXT_MAX_COLS) cols = DVI_TEXT_MAX_COLS;
-    if (rows > DVI_TEXT_MAX_ROWS) rows = DVI_TEXT_MAX_ROWS;
-    text_cols_for_scale[scale] = cols;
-    text_rows_for_scale[scale] = rows;
-  }
-  text_cols = text_cols_for_scale[text_scale];
-  text_rows = text_rows_for_scale[text_scale];
-
-  // Build row-major SRAM cache (regular region 0-255) from column-major font.
-  if (font->glyph_height <= TEXT_GLYPH_HEIGHT_12WIDE) {
-    const uint8_t *src = font->bitmap;
-    int first = font->first_char;
-    int num = font->num_chars;
-    int gh = font->glyph_height;
-    memset(narrow_row_cache, 0, sizeof(narrow_row_cache));
-    for (int ch = 0; ch < num; ch++) {
-      for (int y = 0; y < gh; y++) {
-        narrow_row_cache[y * NARROW_CACHE_STRIDE + (first + ch)] = src[ch * gh + y];
-      }
-    }
-  }
-}
-
-void
-dvi_text_set_wide_font(const dvi_font_t *font)
-{
-  text_wide_font = font;
-}
-
-void
-dvi_text_set_bold_font(const dvi_font_t *font)
-{
-  if (font && font->glyph_height <= TEXT_GLYPH_HEIGHT_12WIDE) {
-    const uint8_t *src = font->bitmap;
-    int first = font->first_char;
-    int num = font->num_chars;
-    int gh = font->glyph_height;
-    // Build bold region (offset 256-511) of the 512-stride cache.
-    for (int y = 0; y < gh; y++)
-      memset(&narrow_row_cache[y * NARROW_CACHE_STRIDE + 256], 0, 256);
-    for (int ch = 0; ch < num; ch++) {
-      for (int y = 0; y < gh; y++) {
-        narrow_row_cache[y * NARROW_CACHE_STRIDE + 256 + (first + ch)] = src[ch * gh + y];
-      }
-    }
-  }
-}
-
-void
-dvi_text_set_palette(const uint8_t palette[16])
-{
-  memcpy(text_palette, palette, 16);
-  update_palette32();
-}
-
-void
-dvi_text_put_char(int col, int row, char ch, uint8_t attr)
-{
-  if (col < 0 || col >= text_cols || row < 0 || row >= text_rows) return;
-  int phys = physical_row(row, write_scroll_offset);
-  dvi_text_cell_t *c = &write_vram[phys * TEXT_VRAM_STRIDE + col];
-  c->ch = (uint8_t)ch;
-  c->attr = attr;
-  c->flags = 0;
-}
-
-void
-dvi_text_put_char_bold(int col, int row, char ch, uint8_t attr)
-{
-  if (col < 0 || col >= text_cols || row < 0 || row >= text_rows) return;
-  int phys = physical_row(row, write_scroll_offset);
-  dvi_text_cell_t *c = &write_vram[phys * TEXT_VRAM_STRIDE + col];
-  c->ch = (uint8_t)ch | 0x100; // bit 8 = bold indicator for 512-stride cache
-  c->attr = attr;
-  c->flags = DVI_CELL_FLAG_BOLD;
-}
-
-void
-dvi_text_put_wide_char(int col, int row, uint16_t ch, uint8_t attr)
-{
-  if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows) return;
-  int phys = physical_row(row, write_scroll_offset);
-  render_wide_glyph_at(col, phys, ch, text_wide_font, false);
-  dvi_text_cell_t *left = &write_vram[phys * TEXT_VRAM_STRIDE + col];
-  dvi_text_cell_t *right = &write_vram[phys * TEXT_VRAM_STRIDE + col + 1];
-  left->ch = ch; // linear JIS index (used by write_line for re-rendering)
-  left->attr = attr;
-  left->flags = DVI_CELL_FLAG_WIDE_L;
-  right->ch = 0;
-  right->attr = attr;
-  right->flags = DVI_CELL_FLAG_WIDE_R;
-  write_row_has_wide[phys] = 1;
-}
-
-void
-dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr)
-{
-  if (col < 0 || col + 1 >= text_cols || row < 0 || row >= text_rows) return;
-  int phys = physical_row(row, write_scroll_offset);
-  render_wide_glyph_at(col, phys, ch, text_wide_font, true);
-  dvi_text_cell_t *left = &write_vram[phys * TEXT_VRAM_STRIDE + col];
-  dvi_text_cell_t *right = &write_vram[phys * TEXT_VRAM_STRIDE + col + 1];
-  left->ch = ch; // linear JIS index
-  left->attr = attr;
-  left->flags = DVI_CELL_FLAG_WIDE_L | DVI_CELL_FLAG_BOLD;
-  right->ch = 0;
-  right->attr = attr;
-  right->flags = DVI_CELL_FLAG_WIDE_R | DVI_CELL_FLAG_BOLD;
-  write_row_has_wide[phys] = 1;
-}
-
-// Decode one UTF-8 character from str, store codepoint in *cp.
-// Returns pointer to next character, or NULL on invalid sequence.
-static const char *
-utf8_decode(const char *str, uint32_t *cp)
-{
-  uint8_t b = (uint8_t)*str;
-  if (b < 0x80) {
-    *cp = b;
-    return str + 1;
-  } else if ((b & 0xE0) == 0xC0) {
-    *cp = (b & 0x1F) << 6 | ((uint8_t)str[1] & 0x3F);
-    return str + 2;
-  } else if ((b & 0xF0) == 0xE0) {
-    *cp = (b & 0x0F) << 12 | ((uint8_t)str[1] & 0x3F) << 6 | ((uint8_t)str[2] & 0x3F);
-    return str + 3;
-  } else if ((b & 0xF8) == 0xF0) {
-    *cp = (b & 0x07) << 18 | ((uint8_t)str[1] & 0x3F) << 12 | ((uint8_t)str[2] & 0x3F) << 6 |
-          ((uint8_t)str[3] & 0x3F);
-    return str + 4;
-  }
-  *cp = '?';
-  return str + 1;
-}
-
-// Wrapper for shared uni2jis_lookup (defined in uni2jis_table.h).
-static inline uint16_t
-unicode_to_jis(uint32_t cp)
-{
-  return uni2jis_lookup(cp);
-}
-
-void
-dvi_text_put_string(int col, int row, const char *str, uint8_t attr)
-{
-  int start_col = col;
-  while (*str && row < text_rows) {
-    uint32_t cp;
-    str = utf8_decode(str, &cp);
-
-    if (cp == '\n') {
-      col = start_col;
-      row++;
-      continue;
-    }
-
-    if (cp < 0x80) {
-      if (col >= text_cols) {
-        col = start_col;
-        row++;
-        if (row >= text_rows) break;
-      }
-      dvi_text_put_char(col, row, (char)cp, attr);
-      col++;
-    } else {
-      uint16_t jis = unicode_to_jis(cp);
-      if (jis) {
-        if (col + 1 >= text_cols) {
-          col = start_col;
-          row++;
-          if (row >= text_rows) break;
-        }
-        dvi_text_put_wide_char(col, row, dvi_jis_to_linear(jis), attr);
-        col += 2;
-      } else {
-        if (col >= text_cols) {
-          col = start_col;
-          row++;
-          if (row >= text_rows) break;
-        }
-        dvi_text_put_char(col, row, '?', attr);
-        col++;
-      }
-    }
-  }
-}
-
-void
-dvi_text_put_string_bold(int col, int row, const char *str, uint8_t attr)
-{
-  int start_col = col;
-  while (*str && row < text_rows) {
-    uint32_t cp;
-    str = utf8_decode(str, &cp);
-
-    if (cp == '\n') {
-      col = start_col;
-      row++;
-      continue;
-    }
-
-    if (cp < 0x80) {
-      if (col >= text_cols) {
-        col = start_col;
-        row++;
-        if (row >= text_rows) break;
-      }
-      dvi_text_put_char_bold(col, row, (char)cp, attr);
-      col++;
-    } else {
-      uint16_t jis = unicode_to_jis(cp);
-      if (jis) {
-        if (col + 1 >= text_cols) {
-          col = start_col;
-          row++;
-          if (row >= text_rows) break;
-        }
-        dvi_text_put_wide_char_bold(col, row, dvi_jis_to_linear(jis), attr);
-        col += 2;
-      } else {
-        if (col >= text_cols) {
-          col = start_col;
-          row++;
-          if (row >= text_rows) break;
-        }
-        dvi_text_put_char_bold(col, row, '?', attr);
-        col++;
-      }
-    }
-  }
-}
-
-void
-dvi_text_clear(uint8_t attr)
-{
-  // Clear the full physical buffer, not just the active grid, so cells
-  // beyond the active columns hold no stale content after a scale change.
-  for (int i = 0; i < DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS; i++) {
-    write_vram[i].ch = ' ';
-    write_vram[i].attr = attr;
-    write_vram[i].flags = 0;
-  }
-  memset(write_row_has_wide, 0, DVI_TEXT_MAX_ROWS);
-  write_scroll_offset = 0;
-}
-
-// Clear a physical row (used internally by scroll).
-static void
-clear_physical_line(int phys, uint8_t attr)
-{
-  dvi_text_cell_t *line = &write_vram[phys * TEXT_VRAM_STRIDE];
-  for (int i = 0; i < text_cols; i++) {
-    line[i].ch = ' ';
-    line[i].attr = attr;
-    line[i].flags = 0;
-  }
-  write_row_has_wide[phys] = 0;
-}
-
-void
-dvi_text_clear_line(int row, uint8_t attr)
-{
-  if (row < 0 || row >= text_rows) return;
-  int phys = physical_row(row, write_scroll_offset);
-  clear_physical_line(phys, attr);
-}
-
-void
-dvi_text_set_palette_entry(int index, uint8_t color)
-{
-  if (index < 0 || index >= 16) return;
-  text_palette[index] = color;
-  update_palette32();
-}
-
-uint8_t
-dvi_text_get_palette_entry(int index)
-{
-  if (index < 0 || index >= 16) return 0;
-  return text_palette[index];
-}
-
-// ----------------------------------------------------------------------------
 // Double-buffer commit
 
 void
@@ -1582,115 +1195,17 @@ dvi_text_commit(void)
     asm volatile("wfe" ::: "memory");
   }
   // Flip write buffer to the other array
-  if (write_vram == text_vram_a) {
-    write_vram = text_vram_b;
-    write_row_has_wide = row_has_wide_b;
+  if (dvi_text_write_vram == text_vram_a) {
+    dvi_text_write_vram = text_vram_b;
+    dvi_text_write_row_has_wide = row_has_wide_b;
   } else {
-    write_vram = text_vram_a;
-    write_row_has_wide = row_has_wide_a;
+    dvi_text_write_vram = text_vram_a;
+    dvi_text_write_row_has_wide = row_has_wide_a;
   }
   // Copy front buffer state to new back buffer (full physical buffer,
   // stride-addressed rows are not contiguous within the active grid)
-  write_scroll_offset = render_scroll_offset;
-  memcpy(write_vram, render_vram, sizeof(text_vram_a));
-  memcpy(write_row_has_wide, render_row_has_wide, DVI_TEXT_MAX_ROWS);
+  dvi_text_write_scroll_offset = render_scroll_offset;
+  memcpy(dvi_text_write_vram, render_vram, sizeof(text_vram_a));
+  memcpy(dvi_text_write_row_has_wide, render_row_has_wide, DVI_TEXT_MAX_ROWS);
 }
 
-// ----------------------------------------------------------------------------
-// Extended text operations
-
-void
-dvi_text_scroll_up(int lines, uint8_t fill_attr)
-{
-  if (lines <= 0) return;
-  if (lines >= text_rows) {
-    dvi_text_clear(fill_attr);
-    return;
-  }
-  // Ring buffer: advance offset and clear the vacated rows.
-  for (int i = 0; i < lines; i++) {
-    int phys = physical_row(0, write_scroll_offset);
-    clear_physical_line(phys, fill_attr);
-    write_scroll_offset++;
-    if (write_scroll_offset >= text_rows) write_scroll_offset -= text_rows;
-  }
-}
-
-void
-dvi_text_scroll_down(int lines, uint8_t fill_attr)
-{
-  if (lines <= 0) return;
-  if (lines >= text_rows) {
-    dvi_text_clear(fill_attr);
-    return;
-  }
-  // Ring buffer: retreat offset and clear the vacated rows.
-  for (int i = 0; i < lines; i++) {
-    write_scroll_offset--;
-    if (write_scroll_offset < 0) write_scroll_offset += text_rows;
-    int phys = physical_row(0, write_scroll_offset);
-    clear_physical_line(phys, fill_attr);
-  }
-}
-
-void
-dvi_text_clear_range(int col, int row, int width, uint8_t attr)
-{
-  if (row < 0 || row >= text_rows) return;
-  if (col < 0) {
-    width += col;
-    col = 0;
-  }
-  if (col + width > text_cols) width = text_cols - col;
-  if (width <= 0) return;
-  int phys = physical_row(row, write_scroll_offset);
-  dvi_text_cell_t *line = &write_vram[phys * TEXT_VRAM_STRIDE + col];
-  for (int i = 0; i < width; i++) {
-    line[i].ch = ' ';
-    line[i].attr = attr;
-    line[i].flags = 0;
-  }
-}
-
-uint8_t
-dvi_text_get_attr(int col, int row)
-{
-  if (col < 0 || col >= text_cols || row < 0 || row >= text_rows) return 0;
-  int phys = physical_row(row, write_scroll_offset);
-  return write_vram[phys * TEXT_VRAM_STRIDE + col].attr;
-}
-
-void
-dvi_text_set_attr(int col, int row, uint8_t attr)
-{
-  if (col < 0 || col >= text_cols || row < 0 || row >= text_rows) return;
-  int phys = physical_row(row, write_scroll_offset);
-  write_vram[phys * TEXT_VRAM_STRIDE + col].attr = attr;
-}
-
-void
-dvi_text_read_line(int row, dvi_text_cell_t *dst)
-{
-  if (row < 0 || row >= text_rows || !dst) return;
-  int phys = physical_row(row, write_scroll_offset);
-  memcpy(dst, &write_vram[phys * TEXT_VRAM_STRIDE], text_cols * sizeof(dvi_text_cell_t));
-}
-
-void
-dvi_text_write_line(int row, const dvi_text_cell_t *src)
-{
-  if (row < 0 || row >= text_rows || !src) return;
-  int phys = physical_row(row, write_scroll_offset);
-  // Render wide glyphs before VRAM update so the bitmap is ready
-  // when the renderer sees the new cells.
-  uint8_t has_wide = 0;
-  for (int col = 0; col < text_cols; col++) {
-    if (src[col].flags & DVI_CELL_FLAG_WIDE_L) {
-      bool bold = src[col].flags & DVI_CELL_FLAG_BOLD;
-      render_wide_glyph_at(col, phys, src[col].ch, text_wide_font, bold);
-      has_wide = 1;
-    }
-  }
-  memcpy(&write_vram[phys * TEXT_VRAM_STRIDE], src, text_cols * sizeof(dvi_text_cell_t));
-  write_row_has_wide[phys] = has_wide;
-}
