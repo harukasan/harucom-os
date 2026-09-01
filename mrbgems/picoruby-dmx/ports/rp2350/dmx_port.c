@@ -180,7 +180,10 @@ dmx_init(const char *unit_name, int txd_pin)
 
   uart_init(unit, DMX_BAUDRATE);
   uart_set_format(unit, 8, 2, UART_PARITY_NONE);
-  gpio_set_function(txd_pin, GPIO_FUNC_UART);
+  /* On RP2350 a pin with bit 1 set reaches UART TX through the AUX
+   * funcsel. The plain UART funcsel would select CTS there, which
+   * leaves the UART transmitting into a pin that never drives. */
+  gpio_set_function(txd_pin, UART_FUNCSEL_NUM(unit, txd_pin));
 
   dma_channel_config config = dma_channel_get_default_config(channel);
   channel_config_set_transfer_data_size(&config, DMA_SIZE_8);
