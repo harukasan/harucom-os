@@ -29,3 +29,34 @@ describe("ls", () => {
     assert.ok(!out.includes(BLUE + "system.rb"), "and not coloured: " + JSON.stringify(out));
   });
 });
+
+// The long format asks the same question a different way. It used to go through
+// File::Stat for the size and the time and through mode_str for a permission
+// column, and mode_str has no implementation on any platform, so -l raised
+// wherever it was run.
+describe("ls -l", () => {
+  let h, out;
+  before(async () => {
+    h = await boot();
+    out = h.evalInIRB("ls -l", "=>");
+  });
+
+  it("marks a directory with d and a file with -", () => {
+    assert.ok(/^d\s+\d+\s+.*app/m.test(out.replace(/\u001b\[\d+m/g, "")),
+              "a directory row: " + JSON.stringify(out));
+    assert.ok(/^-\s+\d+\s+.*system\.rb/m.test(out), "a file row: " + JSON.stringify(out));
+  });
+
+  it("reports a size and a time for each entry", () => {
+    const plain = out.replace(/\u001b\[\d+m/g, "");
+    const row = plain.split("\n").find((l) => l.includes("system.rb"));
+    assert.ok(row, "the file is listed: " + JSON.stringify(out));
+    assert.ok(/\d{4}-\d{2}-\d{2}/.test(row), "with a timestamp: " + row);
+    assert.ok(/\s\d+\s/.test(row), "and a size: " + row);
+  });
+
+  it("works on a single file too, which took a separate path", () => {
+    const single = h.evalInIRB("ls -l /system.rb", "system.rb");
+    assert.ok(/^-\s+\d+\s/m.test(single), JSON.stringify(single));
+  });
+});

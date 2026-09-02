@@ -13,13 +13,34 @@ opts.banner = "Usage: ls [options] [path]"
 opts.on("-l", "Long format") { options[:l] = true }
 opts.parse!(ARGV)
 
+# Neither filesystem behind this carries POSIX permission bits, so the long
+# format shows what both can answer: the type, the size and the modification
+# time. File::Stat is deliberately not used, because it comes from the
+# filesystem gem and a platform without a VFS does not have it.
+def entry_type(path)
+  File.directory?(path) ? "d" : "-"
+end
+
+# File.mtime exists where a VFS provides it. Elsewhere the instance method does,
+# and the block form closes the descriptor either way.
+def entry_mtime(path)
+  if File.respond_to?(:mtime)
+    File.mtime(path)
+  else
+    File.open(path) { |f| f.mtime }
+  end
+end
+
+def long_entry(path, name)
+  "#{entry_type(path)} #{File.size(path).to_s.rjust(8)} #{entry_mtime(path)} #{name}"
+end
+
 path = ARGV[0] || "."
 
 # If path is a file, show just that file
 if File.exist?(path) && !File.directory?(path)
   if options[:l]
-    stat = File::Stat.new(path)
-    puts "#{stat.mode_str} #{stat.size.to_s.rjust(8)} #{stat.mtime} #{path}"
+    puts long_entry(path, path)
   else
     puts path
   end
@@ -40,9 +61,9 @@ begin
         # Not a LittleFS filesystem
       end
       while entry = dir.read
-        stat = File::Stat.new("#{path}/#{entry}")
-        name = stat.directory? ? "\e[34m#{entry}\e[0m" : entry
-        puts "#{stat.mode_str} #{stat.size.to_s.rjust(8)} #{stat.mtime} #{name}"
+        full = "#{path}/#{entry}"
+        name = File.directory?(full) ? "\e[34m#{entry}\e[0m" : entry
+        puts long_entry(full, name)
       end
     else
       while entry = dir.read
