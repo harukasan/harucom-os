@@ -11,15 +11,18 @@ const { boot } = require("./harness.cjs");
 
 const BLUE = "\u001b[34m"; // what ls emits for a directory
 
-describe("ls", () => {
-  let out;
-  before(async () => {
-    const h = await boot();
-    // Wait for the IRB prompt rather than the last listed name, so the app has
-    // finished being torn down before anything else types.
-    out = h.evalInIRB("ls", "=>");
-  });
+let h, out, longOut;
 
+before(async () => {
+  h = await boot();
+  // runApp, not evalInIRB: the shell prints no "=>" once an app is done, so
+  // waiting on one only spends the step budget. This waits for the output to go
+  // quiet instead.
+  out = h.runApp("ls");
+  longOut = h.runApp("ls -l");
+});
+
+describe("ls", () => {
   it("colours a directory", () => {
     assert.ok(out.includes(BLUE + "app"), JSON.stringify(out));
   });
@@ -35,28 +38,35 @@ describe("ls", () => {
 // column, and mode_str has no implementation on any platform, so -l raised
 // wherever it was run.
 describe("ls -l", () => {
-  let h, out;
-  before(async () => {
-    h = await boot();
-    out = h.evalInIRB("ls -l", "=>");
+  // The header has to name the columns the rows actually print. It once carried
+  // LittleFS's own label, which starts at the size and so was one column short.
+  it("heads the listing with the columns it prints", () => {
+    const plain = longOut.replace(/\u001b\[\d+m/g, "");
+    const header = plain.split("\n")[0];
+    assert.match(header, /^T\s+size\s+datetime\s+name$/, JSON.stringify(header));
+    const row = plain.split("\n").find((l) => l.includes("system.rb"));
+    assert.equal(header.indexOf("size") + 4, /^[d-] +\d+/.exec(row)[0].length,
+                 "size label ends where the size does: " + JSON.stringify([header, row]));
+    assert.equal(header.indexOf("datetime"), /^[d-] +\d+ /.exec(row)[0].length,
+                 "datetime label starts where the stamp does: " + JSON.stringify([header, row]));
   });
 
   it("marks a directory with d and a file with -", () => {
-    assert.ok(/^d\s+\d+\s+.*app/m.test(out.replace(/\u001b\[\d+m/g, "")),
-              "a directory row: " + JSON.stringify(out));
-    assert.ok(/^-\s+\d+\s+.*system\.rb/m.test(out), "a file row: " + JSON.stringify(out));
+    assert.ok(/^d\s+\d+\s+.*app/m.test(longOut.replace(/\u001b\[\d+m/g, "")),
+              "a directory row: " + JSON.stringify(longOut));
+    assert.ok(/^-\s+\d+\s+.*system\.rb/m.test(longOut), "a file row: " + JSON.stringify(longOut));
   });
 
   it("reports a size and a time for each entry", () => {
-    const plain = out.replace(/\u001b\[\d+m/g, "");
+    const plain = longOut.replace(/\u001b\[\d+m/g, "");
     const row = plain.split("\n").find((l) => l.includes("system.rb"));
-    assert.ok(row, "the file is listed: " + JSON.stringify(out));
+    assert.ok(row, "the file is listed: " + JSON.stringify(longOut));
     assert.ok(/\d{4}-\d{2}-\d{2}/.test(row), "with a timestamp: " + row);
     assert.ok(/\s\d+\s/.test(row), "and a size: " + row);
   });
 
   it("works on a single file too, which took a separate path", () => {
-    const single = h.evalInIRB("ls -l /system.rb", "system.rb");
+    const single = h.runApp("ls -l /system.rb");
     assert.ok(/^-\s+\d+\s/m.test(single), JSON.stringify(single));
   });
 });
