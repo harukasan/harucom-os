@@ -90,6 +90,12 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   # RubySyntax.analyze (Prism-based highlight/indent) used by the line editor.
   conf.gem File.expand_path("../mrbgems/picoruby-ruby-syntax", __dir__)
 
+  # PWM audio synth (PWMAudio). The synth, mixer and ring buffer in src/ are
+  # portable. The board port drives a PWM timer ISR. The browser port
+  # (ports/posix/pwm_audio_wasm.c) renders on demand into the ring instead, and
+  # JavaScript drains it into Web Audio.
+  conf.gem File.expand_path("../mrbgems/picoruby-pwm-audio", __dir__)
+
   # Harucom boot entry: deploys the rootfs into MEMFS and boots /system.rb.
   conf.gem File.expand_path("../mrbgems/harucom-os-wasm", __dir__)
 
