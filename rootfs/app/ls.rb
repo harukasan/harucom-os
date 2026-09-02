@@ -15,24 +15,34 @@ opts.parse!(ARGV)
 
 # Neither filesystem behind this carries POSIX permission bits, so the long
 # format shows what both can answer: the type, the size and the modification
-# time. File::Stat is deliberately not used, because it comes from the
-# filesystem gem and a platform without a VFS does not have it.
+# time. There is no permission column, because mode_str has no implementation
+# to read one from.
 def entry_type(path)
   File.directory?(path) ? "d" : "-"
 end
 
-# File.mtime exists where a VFS provides it. Elsewhere the instance method does,
-# and the block form closes the descriptor either way.
-def entry_mtime(path)
-  if File.respond_to?(:mtime)
-    File.mtime(path)
-  else
-    File.open(path) { |f| f.mtime }
-  end
+# Size and time come from opposite places on the two filesystems: a VFS puts
+# them on File::Stat and leaves File without them, while the posix File carries
+# File.size and answers mtime only through an open handle. File.directory? above
+# is the one both agree on.
+def entry_stat(path)
+  return File::Stat.new(path) if defined?(File::Stat)
+  nil
+end
+
+def entry_size(path, stat)
+  stat ? stat.size : File.size(path)
+end
+
+def entry_mtime(path, stat)
+  return stat.mtime if stat
+  File.open(path) { |f| f.mtime } # block form, so the descriptor closes
 end
 
 def long_entry(path, name)
-  "#{entry_type(path)} #{File.size(path).to_s.rjust(8)} #{entry_mtime(path)} #{name}"
+  stat = entry_stat(path)
+  size = entry_size(path, stat).to_s.rjust(8)
+  "#{entry_type(path)} #{size} #{entry_mtime(path, stat)} #{name}"
 end
 
 path = ARGV[0] || "."
