@@ -35,14 +35,20 @@ def entry_size(path, stat)
 end
 
 def entry_mtime(path, stat)
-  return stat.mtime if stat
-  File.open(path) { |f| f.mtime } # block form, so the descriptor closes
+  stat ? stat.mtime : File.open(path) { |f| f.mtime } # block form closes the fd
+end
+
+# A board with no clock stamps everything at the epoch, so every row would carry
+# the same 1970 date. Show that the time is unset instead of repeating it.
+def entry_time_str(path, stat)
+  time = entry_mtime(path, stat)
+  time.to_i.zero? ? "-" : time.to_s
 end
 
 def long_entry(path, name)
   stat = entry_stat(path)
   size = entry_size(path, stat).to_s.rjust(8)
-  "#{entry_type(path)} #{size} #{entry_mtime(path, stat)} #{name}"
+  "#{entry_type(path)} #{size} #{entry_time_str(path, stat)} #{name}"
 end
 
 path = ARGV[0] || "."
