@@ -46,13 +46,12 @@ begin
       end
     else
       while entry = dir.read
-        begin
-          if File::Stat.new("#{path}/#{entry}").directory?
-            puts "\e[34m#{entry}\e[0m"
-          else
-            puts entry
-          end
-        rescue
+        # File.directory? rather than File::Stat: the plain listing only needs
+        # this one predicate, and File::Stat comes from the filesystem gem, which
+        # a platform without a VFS does not have. Line 19 already uses this form.
+        if File.directory?("#{path}/#{entry}")
+          puts "\e[34m#{entry}\e[0m"
+        else
           puts entry
         end
       end
