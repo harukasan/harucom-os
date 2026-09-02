@@ -200,7 +200,7 @@ namespace :wasm do
       _harucom_dvi_framebuffer _harucom_dvi_width _harucom_dvi_height
       _harucom_dvi_frame_count
       _harucom_kbd_set_state
-      _harucom_audio_pull _harucom_audio_sample_rate
+      _harucom_audio_pull _harucom_audio_sample_rate _harucom_audio_report
       _harucom_pad_set
       _malloc _free
     ].join('","') + '"]'

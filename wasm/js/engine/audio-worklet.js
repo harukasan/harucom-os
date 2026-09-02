@@ -46,6 +46,12 @@ class HarucomAudio extends AudioWorkletProcessor {
         outL[i] = this.bl[s]; outR[i] = this.br[s]; this.rd++;
       } else { outL[i] = 0; outR[i] = 0; this.under++; }
     }
+    // Stay quiet until the first frames arrive. process() starts as soon as the
+    // node connects, which is a frame or more before the pump can post anything,
+    // and a level of zero there is not the consumer running dry, it is the
+    // consumer not having been fed yet. Reporting it would put a permanent
+    // "ran dry" in the running minimum that PWMAudio.stats keeps.
+    if (this.wr === 0) return true;
     if (++this.sinceReport >= this.quantaPerReport) {
       this.sinceReport = 0;
       this.port.postMessage({ lvl: this.wr - this.rd, under: this.under, dropped: this.dropped });

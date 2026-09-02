@@ -41,6 +41,17 @@ static float dcx_r = 0.0f, dcy_r = 0.0f; // DC-block state, R
 static uint64_t render_position = 0;
 static bool audio_running = false;
 
+/* What the consumer reports back. On the board the mixer can see how far ahead
+ * of the DMA reader it is. Here the only thing that knows is the AudioWorklet,
+ * on its own thread, so JavaScript forwards its buffer level and pwm_audio_stats
+ * reports that instead of guessing.
+ *
+ * WORKLET_LEVEL_UNKNOWN keeps "nothing has reported yet" distinct from "the
+ * consumer ran dry", which the contract spells as 0. Audio only arms on a user
+ * gesture, so a page can sit for a long time with nothing to report. */
+#define WORKLET_LEVEL_UNKNOWN INT32_MAX
+static int32_t worklet_level_min = WORKLET_LEVEL_UNKNOWN;
+
 /* Pack L in the high half-word and R in the low one, which is what
  * filter_sample unpacks. The mixer defaults to the other order, and the run
  * loop pulls from the first frame, so this cannot wait for pwm_audio_init: a
@@ -60,18 +71,47 @@ ensure_channel_order(void)
 uint32_t pwm_audio_lock(void) { return 0; }
 void pwm_audio_unlock(uint32_t state) { (void)state; }
 
+/* Where the next render starts, which is what scheduled events are compared
+ * against. Note this runs ahead of what is audible by whatever the worklet has
+ * buffered (see TARGET in engine/audio.js), unlike the board, where it is the
+ * played position. Scheduling is relative to this, so it is the right base for
+ * "play in N samples", but not for measuring output latency. */
 uint64_t pwm_audio_sample_clock(void) { return render_position; }
 
-// On-demand rendering cannot underrun and does not pace against a wall clock, so
-// report a healthy, drift-free state.
+/* Report what the consumer measured. min_lead is the worklet's lowest observed
+ * buffer level in output frames, the browser's analogue of the board's distance
+ * from the DMA reader: 0 means it ran dry. The gap and drift counters have no
+ * analogue here, because rendering happens on demand rather than being paced
+ * against a wall clock, so they stay zero. */
 void
 pwm_audio_stats(int32_t *min_lead, uint32_t *max_gap_us, int32_t *drift_now,
                 int32_t *drift_min)
 {
-  if (min_lead) *min_lead = (int32_t)PWM_AUDIO_BUF_SIZE;
+  if (min_lead) {
+    /* Before the first report there is nothing to say, so report the buffer as
+     * full rather than empty: 0 would read as an underrun that never happened,
+     * which is how the board reports a healthy pre-init state. */
+    *min_lead = (worklet_level_min == WORKLET_LEVEL_UNKNOWN)
+                  ? (int32_t)PWM_AUDIO_BUF_SIZE : worklet_level_min;
+  }
+  /* No wall-clock pacing here, so there is no pump gap and no drift to report.
+   * Underruns are deliberately not squeezed into max_gap_us: that slot is
+   * documented in microseconds, and a count there reads as a plausible
+   * duration. The browser console carries them instead. */
   if (max_gap_us) *max_gap_us = 0;
   if (drift_now) *drift_now = 0;
   if (drift_min) *drift_min = 0;
+}
+
+/* Called from JavaScript with each worklet report. The minimum is a running one,
+ * so pwm_audio_init clears it: the worklet unavoidably reports an empty buffer
+ * in the window between starting and the first pump landing, and without a reset
+ * that transient would latch and make every later reading claim a dry buffer. */
+EMSCRIPTEN_KEEPALIVE
+void
+harucom_audio_report(int level)
+{
+  if (level < worklet_level_min) worklet_level_min = level;
 }
 
 // No rendered-ahead lead to flush: an immediate change already takes effect on
@@ -103,6 +143,8 @@ pwm_audio_init(uint8_t l_pin, uint8_t r_pin)
   // make the DC blocker see a full-scale step, which is audible as a thump.
   pwm_audio_stop_all();
   pwm_audio_bias_fade(true);
+  /* Start a fresh measurement window, as the board does. */
+  worklet_level_min = WORKLET_LEVEL_UNKNOWN;
   audio_running = true;
 }
 
