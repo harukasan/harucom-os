@@ -41,6 +41,13 @@ static float dcx_r = 0.0f, dcy_r = 0.0f; // DC-block state, R
 static uint64_t render_position = 0;
 static bool audio_running = false;
 
+/* What the consumer reports back. On the board the mixer can see how far ahead
+ * of the DMA reader it is; here the only thing that knows is the AudioWorklet,
+ * on its own thread, so JavaScript forwards its buffer level and underrun count
+ * and pwm_audio_stats reports those instead of guessing. */
+static int32_t worklet_level_min = INT32_MAX;
+static uint32_t worklet_underruns = 0;
+
 /* Pack L in the high half-word and R in the low one, which is what
  * filter_sample unpacks. The mixer defaults to the other order, and the run
  * loop pulls from the first frame, so this cannot wait for pwm_audio_init: a
@@ -60,18 +67,37 @@ ensure_channel_order(void)
 uint32_t pwm_audio_lock(void) { return 0; }
 void pwm_audio_unlock(uint32_t state) { (void)state; }
 
+/* Where the next render starts, which is what scheduled events are compared
+ * against. Note this runs ahead of what is audible by whatever the worklet has
+ * buffered (see TARGET in engine/audio.js), unlike the board, where it is the
+ * played position. Scheduling is relative to this, so it is the right base for
+ * "play in N samples", but not for measuring output latency. */
 uint64_t pwm_audio_sample_clock(void) { return render_position; }
 
-// On-demand rendering cannot underrun and does not pace against a wall clock, so
-// report a healthy, drift-free state.
+/* Report what the consumer measured. min_lead is the worklet's lowest observed
+ * buffer level in output frames, the browser's analogue of the board's distance
+ * from the DMA reader: 0 means it ran dry. The gap and drift counters have no
+ * analogue here, because rendering happens on demand rather than being paced
+ * against a wall clock, so they stay zero. */
 void
 pwm_audio_stats(int32_t *min_lead, uint32_t *max_gap_us, int32_t *drift_now,
                 int32_t *drift_min)
 {
-  if (min_lead) *min_lead = (int32_t)PWM_AUDIO_BUF_SIZE;
-  if (max_gap_us) *max_gap_us = 0;
+  if (min_lead) {
+    *min_lead = (worklet_level_min == INT32_MAX) ? 0 : worklet_level_min;
+  }
+  if (max_gap_us) *max_gap_us = worklet_underruns;
   if (drift_now) *drift_now = 0;
   if (drift_min) *drift_min = 0;
+}
+
+/* Called from JavaScript with each worklet report. */
+EMSCRIPTEN_KEEPALIVE
+void
+harucom_audio_report(int level, int underruns)
+{
+  if (level < worklet_level_min) worklet_level_min = level;
+  worklet_underruns = (uint32_t)underruns;
 }
 
 // No rendered-ahead lead to flush: an immediate change already takes effect on
