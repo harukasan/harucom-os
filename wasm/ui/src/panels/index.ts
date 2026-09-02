@@ -5,10 +5,9 @@
 import { consolePanel } from "./ConsolePanel";
 import { filesPanel } from "./FilesPanel";
 import { keyboardPanel } from "./KeyboardPanel";
-import { keysPanel } from "./KeysPanel";
 import { padsPanel } from "./PadsPanel";
 import { statusPanel } from "./StatusPanel";
 import type { PanelDefinition } from "./types";
 
-export const PANELS: PanelDefinition[] = [consolePanel, filesPanel, keysPanel, keyboardPanel, padsPanel, statusPanel];
+export const PANELS: PanelDefinition[] = [consolePanel, filesPanel, keyboardPanel, padsPanel, statusPanel];
 export type { PanelDefinition, PanelProps } from "./types";

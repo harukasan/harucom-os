@@ -160,19 +160,28 @@ element, so re-creating it would freeze the display. Passing the element (rather
 than looking it up by id) is also what lets it survive a dock switch, which
 unmounts and remounts that part of the tree.
 
+The screen can also be shown fullscreen, which is what makes the browser build
+usable as a machine rather than a demo in a page: the OS gets the whole display,
+and focus returns to the canvas so the keyboard goes with it.
+
 Panels sit in a devtools-style tab strip that docks in one of three positions:
 undocked on a scrollable page, below the screen, or beside it. Only the active
-panel is mounted, so anything that must survive a tab switch lives in the engine
-rather than the panel. The console history is that case.
+panel is mounted, so anything that must survive a tab switch lives above the
+panels rather than inside one. The console history and the file transfer state
+are those cases.
+
+The on-screen keyboard is laid out on a grid of quarter-units, the way keyboard
+sizes are actually specified: a row is 15u wide, a plain key is 1u, and the wide
+keys take the standard ANSI sizes. Every row therefore comes to the same width
+and the columns line up down the board.
 
 | Panel | Shows |
 | --- | --- |
-| Console | stdout and stderr from the OS |
+| Console | stdout and stderr from the OS, with the SGR escapes it prints rendered as colour |
 | Files | files moved between the local machine and the browser's filesystem |
-| Keys | what the last DOM key event became: code, HID usage, whether the browser was stopped, and the resulting report |
 | Keyboard | an on-screen keyboard driving the same HID report as a physical one |
 | Pads | the two on-screen D-pads |
-| Status | the frame count and the audio worklet's health |
+| Status | the frame count, the audio worklet's health, and what the last DOM key event became: code, HID usage, whether the browser was stopped, and the resulting report |
 
 ### Run loop
 

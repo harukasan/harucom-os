@@ -127,7 +127,7 @@ describe("shell bundle, with a module that loads", () => {
 
   it("renders the panel host once the engine is up", () => {
     const tabs = [...document.querySelectorAll("#app button")].map((b) => b.textContent);
-    for (const title of ["Console", "Keys", "Keyboard", "Pads", "Status"]) {
+    for (const title of ["Console", "Files", "Keyboard", "Pads", "Status"]) {
       assert.ok(tabs.includes(title), `${title} is a tab: ${tabs.join(", ")}`);
     }
   });

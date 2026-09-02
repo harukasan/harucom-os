@@ -35,9 +35,9 @@ describe("Panels", () => {
   it("switches the body when another tab is chosen", () => {
     const { engine } = setup();
     act(() => {
-      screen.getByRole("button", { name: "Keys" }).click();
+      screen.getByRole("button", { name: "Status" }).click();
     });
-    expect(screen.getByText("(no key yet)")).toBeTruthy();
+    expect(screen.getByText("(none yet)")).toBeTruthy();
     act(() => engine.emit("keys", "code=KeyA usage=0x4"));
     expect(screen.getByText(/code=KeyA/)).toBeTruthy();
   });
