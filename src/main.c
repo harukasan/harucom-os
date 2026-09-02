@@ -281,9 +281,10 @@ static void harucom_main(void) {
     heap_size_g = heap_size - fb_size;
     printf("mruby heap: %u bytes at %p\n", (unsigned)heap_size_g, heap_pool_g);
 
-    /* Set up text mode fonts before launching DVI on core 1.
-     * Font data must be configured before dvi_start_mode() because the
-     * scanline renderer needs the font to be set. */
+    /* Set up text mode before launching DVI on core 1. The VRAM binding must
+     * come first so any cell write is safe, and the font must be configured
+     * before dvi_start_mode() because the scanline renderer needs it. */
+    dvi_text_init_buffers();
     dvi_text_set_font(&font_mplus_f12r);
     dvi_text_set_bold_font(&font_mplus_f12b);
     dvi_text_set_wide_font(&font_mplus_j12_combined);

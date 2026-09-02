@@ -56,15 +56,26 @@ extern uint8_t *dvi_text_write_row_has_wide;
 extern int dvi_text_write_scroll_offset;
 
 // Wide-glyph bitmap storage, provided by the platform (RP2350 unions it with the
-// graphics framebuffer). dvi_text_render_wide_glyph() writes here; the renderer
-// reads it. Layout: [(phys_row * 13 + glyph_y) * GLYPH_BITMAP_STRIDE + col].
+// graphics framebuffer). dvi_text_render_wide_glyph() writes here and the
+// renderer reads it. Layout: [(phys_row * 13 + glyph_y) * GLYPH_BITMAP_STRIDE + col].
 extern uint8_t *dvi_text_glyph_bitmap;
 
 // Reset the palette to the built-in default (called by the platform at init).
 void dvi_text_init_palette(void);
 
-// Map a logical text row to its physical row in the ring buffer.
-int dvi_text_physical_row(int logical_row, int offset);
+// Point the shared write-side pointers above at the platform's buffers. The
+// platform calls this before anything can write a cell.
+void dvi_text_bind_buffers(dvi_text_cell_t *vram, uint8_t *row_has_wide,
+                           uint8_t *glyph_bitmap);
+
+// Map a logical text row to its physical row in the ring buffer. Every cell
+// writer calls this, so it is inline rather than a call into the core.
+static inline int
+dvi_text_physical_row(int logical_row, int offset)
+{
+  int r = logical_row + offset;
+  return r >= dvi_text_rows ? r - dvi_text_rows : r;
+}
 
 // Rasterize a full-width glyph into dvi_text_glyph_bitmap at (col, phys_row).
 void dvi_text_render_wide_glyph(int col, int phys_row, uint16_t linear_jis,

@@ -911,6 +911,15 @@ void __scratch_x("") dma_irq_handler(void)
 // ----------------------------------------------------------------------------
 // Public API
 
+// Point the shared text core at this port's buffers. Core 0 calls this before
+// launching core 1, so a cell written before dvi_start_mode runs is safe. The
+// wide-glyph bitmap is unioned with the graphics framebuffer to save SRAM.
+void
+dvi_text_init_buffers(void)
+{
+  dvi_text_bind_buffers(text_vram_a, row_has_wide_a, screenbuf.glyph_bitmap);
+}
+
 void
 dvi_start_mode(dvi_mode_t mode)
 {
@@ -1005,16 +1014,11 @@ dvi_start_mode(dvi_mode_t mode)
   memset(text_vram_b, 0, sizeof(text_vram_b));
   memset(row_has_wide_a, 0, sizeof(row_has_wide_a));
   memset(row_has_wide_b, 0, sizeof(row_has_wide_b));
-  // Point the shared write-side pointers at this port's buffers.
-  dvi_text_write_vram = text_vram_a;
+  dvi_text_init_buffers();
   render_vram = text_vram_a;
-  dvi_text_write_row_has_wide = row_has_wide_a;
   render_row_has_wide = row_has_wide_a;
   dvi_text_write_scroll_offset = 0;
   render_scroll_offset = 0;
-  // The wide-glyph bitmap is unioned with the graphics framebuffer here; the
-  // shared renderer writes glyphs through this pointer.
-  dvi_text_glyph_bitmap = screenbuf.glyph_bitmap;
   memset(screenbuf.glyph_bitmap, 0, GLYPH_BITMAP_SIZE);
   swap_pending = false;
   memset(line_buf, 0, sizeof(line_buf));

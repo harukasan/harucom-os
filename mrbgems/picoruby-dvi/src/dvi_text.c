@@ -20,7 +20,7 @@ int dvi_text_cols = DVI_TEXT_MAX_COLS;
 int dvi_text_rows = DVI_TEXT_MAX_ROWS;
 
 // Runtime text scale and the per-scale grid dimensions precomputed in
-// dvi_text_set_font. Scale 1 is native (106x37 with the 12px font); scale 2 is
+// dvi_text_set_font. Scale 1 is native (106x37 with the 12px font). Scale 2 is
 // half-resolution scaled 2x to the DVI output (53x18). Index 0 is unused.
 int dvi_text_scale = 1;
 int dvi_text_cols_for_scale[3] = {0, DVI_TEXT_MAX_COLS, DVI_TEXT_MAX_COLS / 2};
@@ -68,11 +68,13 @@ update_palette32(void)
     dvi_text_palette32[i] = text_palette[i] * 0x01010101u;
 }
 
-int
-dvi_text_physical_row(int logical_row, int offset)
+void
+dvi_text_bind_buffers(dvi_text_cell_t *vram, uint8_t *row_has_wide,
+                      uint8_t *glyph_bitmap)
 {
-  int r = logical_row + offset;
-  return r >= dvi_text_rows ? r - dvi_text_rows : r;
+  dvi_text_write_vram = vram;
+  dvi_text_write_row_has_wide = row_has_wide;
+  dvi_text_glyph_bitmap = glyph_bitmap;
 }
 
 void
@@ -91,7 +93,8 @@ dvi_text_render_wide_glyph(int col, int phys_row, uint16_t linear_jis,
   }
 }
 
-// Decode one UTF-8 character; store the codepoint in *cp; return next pointer.
+// Decode one UTF-8 character. Stores the codepoint in *cp and returns the next
+// pointer.
 static const char *
 utf8_decode(const char *str, uint32_t *cp)
 {
@@ -153,7 +156,7 @@ dvi_text_set_font(const dvi_font_t *font)
   text_font = font;
   // Precompute the grid for each scale. Scale 1 keeps the partial bottom
   // row (ceil, matching the native 640x480 grid). Scale 2 uses only full
-  // rows (floor); the remaining source lines stay black.
+  // rows (floor). The remaining source lines stay black.
   for (int scale = 1; scale <= 2; scale++) {
     int cols = (DVI_GRAPHICS_MAX_WIDTH / scale) / font->glyph_width;
     int content_height = DVI_GRAPHICS_MAX_HEIGHT / scale;
@@ -314,7 +317,7 @@ dvi_text_put_wide_char_bold(int col, int row, uint16_t ch, uint8_t attr)
 // Shared body for put_string / put_string_bold: lay out a UTF-8 string into
 // cells, wrapping at the right edge and on '\n', mapping non-ASCII through JIS
 // to full-width glyphs (falling back to '?' when unmapped). The bold flag picks
-// the bold cell writers; this is a set-time path, so the extra branch has no
+// the bold cell writers. This is a set-time path, so the extra branch has no
 // effect on render timing.
 static void
 put_string_internal(int col, int row, const char *str, uint8_t attr, bool bold)

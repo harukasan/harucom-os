@@ -80,6 +80,8 @@ int dvi_text_get_rows(void);
 // 12px font), scale 2 = 320x240 scaled 2x to the DVI output (53x18 grid).
 // Blocks until the VSync IRQ applies the change.
 void dvi_set_text_scale(int scale);
+// Bind the text core to the platform's VRAM. Call before writing any cell.
+void dvi_text_init_buffers(void);
 void dvi_text_set_font(const dvi_font_t *font);
 void dvi_text_set_wide_font(const dvi_font_t *font);
 void dvi_text_set_bold_font(const dvi_font_t *font);

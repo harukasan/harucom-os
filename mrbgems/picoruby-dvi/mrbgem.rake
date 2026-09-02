@@ -5,6 +5,11 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
 
   spec.cc.include_paths << "#{dir}/src"
 
+  # The scanline renderer and the cell writers are timing critical, so build
+  # this gem at -O2 like the CMake picoruby-dvi library rather than the -Os
+  # picoruby applies to gem sources.
+  spec.cc.flags << "-O2"
+
   # Generate font headers from BDF sources into build_dir/include
   include_dir = "#{build_dir}/include"
   cc.include_paths << include_dir
