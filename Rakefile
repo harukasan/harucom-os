@@ -207,6 +207,7 @@ namespace :wasm do
 
   desc "Serve build/wasm/ over HTTP for browser testing (PORT=8000)"
   task :server do
+    require "webrick"
     unless File.exist?(WASM_WASM)
       abort "#{WASM_WASM} not found. Run `rake wasm:build` first."
     end
@@ -229,11 +230,25 @@ namespace :wasm do
       end
     end
     restager.abort_on_exception = false
-    port = ENV["PORT"] || "8000"
+    port = Integer(ENV["PORT"] || 8000)
+    # WEBrick has no .wasm type, and without application/wasm the browser
+    # refuses the streaming instantiation and falls back to a slower path.
+    mime = WEBrick::HTTPUtils::DefaultMimeTypes.merge(
+      "wasm" => "application/wasm", "js" => "text/javascript"
+    )
+    server = WEBrick::HTTPServer.new(
+      BindAddress: "127.0.0.1", Port: port, DocumentRoot: WASM_OUT,
+      MimeTypes: mime, Logger: WEBrick::Log.new($stderr, WEBrick::Log::WARN)
+    )
+    # Send no-store so a plain reload always picks up the restaged js / css.
+    # Without it the browser serves them from cache and edits appear to do
+    # nothing until a hard reload.
+    server.config[:RequestCallback] = proc do |_req, res|
+      res["Cache-Control"] = "no-store, max-age=0"
+    end
+    ["INT", "TERM"].each { |sig| trap(sig) { server.shutdown } }
     puts "Serving #{WASM_OUT} at http://localhost:#{port}/  (Ctrl-C to stop)"
-    # devserver.py sends Cache-Control: no-store so a plain reload always picks up
-    # the restaged js / css (stock http.server caches them).
-    sh "python3", File.join(WASM_DIR, "devserver.py"), port, WASM_OUT
+    server.start
   end
 
   desc "Smoke-test the wasm build headlessly under Node (node:test runner)"
