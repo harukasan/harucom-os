@@ -24,7 +24,7 @@ const STEPS_PER_FRAME = 16;
 
 // Start the rAF loop. blit, flushKeys and pump are the per-frame hooks from the
 // display, keyboard and audio modules.
-export function startRunLoop(Module, { blit, flushKeys, pump }) {
+export function startRunLoop(Module, { blit, flushKeys, pump, onFrame }) {
   let lastFrame = -1;
   let lastTick = performance.now();
 
@@ -47,6 +47,7 @@ export function startRunLoop(Module, { blit, flushKeys, pump }) {
     const frame = Module._harucom_dvi_frame_count();
     if (frame !== lastFrame) {
       lastFrame = frame;
+      if (onFrame) onFrame(frame);
       blit();
     }
   }

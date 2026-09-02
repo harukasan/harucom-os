@@ -12,7 +12,7 @@
 // drains the synth silently until the worklet is running). Audio arms itself
 // from a user gesture, a canvas click or any keydown, which is what the autoplay
 // policy requires.
-export function installAudio(Module, canvas) {
+export function installAudio(Module, canvas, { onDiag } = {}) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let audioCtx = null, audioNode = null; // kept alive so the node is not GC'd
 
@@ -206,6 +206,10 @@ export function installAudio(Module, canvas) {
                        " frames dropped in the last second (level=" + workletLevel + ")");
           lastDropped = workletDropped;
         }
+        // The status panel reads the same numbers the warnings above are built
+        // from. Once a second is enough for a readout, and it costs nothing on
+        // the audio path: this interval already runs.
+        if (onDiag) onDiag({ level: workletLevel, underruns: workletUnder, dropped: workletDropped });
         pumpCount = 0; maxWant = 0;
       }, 1000);
     }).catch((e) => {

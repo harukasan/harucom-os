@@ -1,16 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { Pads } from "./Pads";
-import type { Engine } from "./engine";
-
-function stubEngine() {
-  return {
-    start: vi.fn(),
-    setPad: vi.fn(),
-    releasePads: vi.fn(),
-    armAudio: vi.fn(),
-  } satisfies Engine;
-}
+import { stubEngine } from "./test-engine";
 
 // The arrow order follows KEYS: up, left, right, down.
 function buttons(container: HTMLElement) {

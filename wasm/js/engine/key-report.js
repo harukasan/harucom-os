@@ -14,7 +14,8 @@
 // releasing Ctrl-Alt before Delete would report the reboot chord).
 export function createKeyReport(setState) {
   const held = [];   // HID usages currently down, in press order (max 6)
-  let modifier = 0;  // HID modifier bitmask from the modifier keys
+  let modifier = 0;  // HID modifier bitmask from the physical modifier keys
+  let overlay = 0;   // HID modifier bitmask latched by the on-screen keyboard
   const queue = [];  // states awaiting a frame, oldest first
   let published = [0, []]; // the last state handed to setState
 
@@ -28,7 +29,7 @@ export function createKeyReport(setState) {
   // own repeat from the held state, so those repeats carry nothing new. Queueing
   // them would grow the queue faster than the one-per-frame drain empties it.
   function record() {
-    const state = [modifier, held.slice(0, 6)];
+    const state = [modifier | overlay, held.slice(0, 6)];
     const latest = queue.length ? queue[queue.length - 1] : published;
     if (same(state, latest)) return;
     queue.push(state);
@@ -65,7 +66,24 @@ export function createKeyReport(setState) {
     reset() {
       held.length = 0;
       modifier = 0;
+      // The overlay is not touched: it is a set of on-screen toggles that stay
+      // lit across a focus change, and clearing it here would leave the report
+      // disagreeing with what the keyboard panel shows.
       record();
+    },
+
+    // Latch the on-screen keyboard's modifiers. They are held separately from
+    // the physical ones and OR'd in, so a panel latch and a held physical key
+    // combine instead of overwriting each other.
+    setOverlayModifier(mask) {
+      overlay = mask;
+      record();
+    },
+
+    // The live report, for the keyboard debug readout. Copies so a reader
+    // cannot mutate the state machine.
+    snapshot() {
+      return { held: held.slice(), modifier: modifier | overlay };
     },
 
     // Publish the next queued state. The run loop calls this once per frame,
