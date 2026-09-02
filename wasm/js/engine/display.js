@@ -1,6 +1,6 @@
 // DVI framebuffer (RGB332) -> canvas blitter.
 //
-// The wasm framebuffer is a static C array of RGB332 bytes; createDisplay caches
+// The wasm framebuffer is a static C array of RGB332 bytes. createDisplay caches
 // its address once (stable across memory growth) and blit() converts it into the
 // canvas ImageData each call. Module.HEAPU8 is re-read every blit because the
 // heap view can be replaced when wasm memory grows.

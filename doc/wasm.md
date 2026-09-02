@@ -5,7 +5,7 @@ Harucom OS also builds for the browser. The same C sources and the same
 [picoruby-wasm][picoruby-wasm], so one mruby VM runs the OS in a page: the DVI
 text and graphics modes paint a canvas, DOM key events arrive as USB HID
 reports, and the filesystem is the emscripten in-memory filesystem (MEMFS).
-The board build is unaffected; the browser only adds `ports/posix` sources and
+The board build is unaffected. The browser only adds `ports/posix` sources and
 a separate build config.
 
 ## Build
@@ -113,10 +113,12 @@ the tab. Instead the VM's per-opcode `code_fetch_hook` counts opcodes and
 requests a task switch after a budget, which makes the wasm scheduler preemptive
 like the board.
 
-The hook only switches when the whole call stack is pure Ruby. A task switch
-yields by returning from `mrb_vm_exec`, so switching inside a re-entrant call
-from C would corrupt the C caller and, under emscripten setjmp/longjmp, escape
-as a fatal throw. `Task.pass` guards the same way.
+The hook only requests the switch. The VM decides when to take it: a pending
+switch is deferred while execution is across a C call boundary, while an
+exception is in flight and during an ObjectSpace walk. That matters here because
+a task switch yields by returning from `mrb_vm_exec`, and returning from a
+re-entrant call would corrupt the C caller and, under emscripten
+setjmp/longjmp, escape as a fatal throw.
 
 ### Yielding for the display
 
@@ -124,6 +126,14 @@ The browser has no vsync, so `DVI.wait_vsync` sleeps about one frame instead
 (`mrblib/dvi_wasm.rb`). `DVI::Text.commit` and `DVI::Graphics.commit` yield the
 same way, so a render loop that commits every iteration runs at the display rate
 rather than starving the rest of the page.
+
+### Not ported yet
+
+Three gems have no `ports/posix` implementation, so the browser build leaves
+them out: the IME dictionary (`harucom-os-dict`), PWM audio
+(`picoruby-pwm-audio`) and the ADC pads. Romaji input works, but a conversion
+that reaches `InputMethod.skk_lookup` or `InputMethod.dict_available?` raises
+`NoMethodError`, and the audio and pad demos are unavailable.
 
 ### Differences from the board
 

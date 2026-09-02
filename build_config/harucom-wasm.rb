@@ -10,17 +10,8 @@
 # ports/common sources (see lib/picoruby/lib/picoruby/build.rb), which is what
 # provides the Machine_*/hal I/O, the task scheduler HAL, the io-console / env /
 # rng / mbedtls ports and the picoruby-wasm runtime. The filesystem is the
-# emscripten in-memory filesystem (MEMFS) via mruby-io; harucom_init deploys the
+# emscripten in-memory filesystem (MEMFS) via mruby-io. harucom_init deploys the
 # rootfs into it (mrbgems/harucom-os-wasm).
-
-# picoruby detects a wasm build via `wasm?`, which checks ENV['CONFIG'] /
-# ENV['MRUBY_CONFIG'] against the literal "picoruby-wasm" (lib/picoruby/lib/
-# picoruby/build.rb). Our config is named "harucom-wasm", so set ENV['CONFIG']
-# to make `wasm?` true, which makes the stdlib gembox exclude
-# picoruby-regexp_light (it conflicts with picoruby-wasm's own regexp).
-# MRUBY_CONFIG is always passed explicitly, so this does not affect config-path
-# resolution.
-ENV['CONFIG'] = 'picoruby-wasm'
 
 MRuby::CrossBuild.new("harucom-wasm") do |conf|
   toolchain :clang
@@ -30,12 +21,15 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   conf.archiver.command = "emar"
 
   conf.cc.defines << "PICORB_PLATFORM_POSIX"
+  # picoruby's `wasm?` reads this define (lib/picoruby/lib/picoruby/build.rb),
+  # which is what makes the stdlib gembox below exclude picoruby-regexp_light
+  # (it conflicts with picoruby-wasm's own regexp).
   conf.cc.defines << "PICORB_PLATFORM_WASM"
   conf.cc.defines << "MRB_TICK_UNIT=4"
   conf.cc.defines << "MRB_TIMESLICE_TICK_COUNT=1"
   conf.cc.defines << "MRB_32BIT"
   conf.cc.defines << "MRB_INT64"
-  # wasm is a 32-bit target, where a 64-bit mrb_int does not fit a boxed word;
+  # wasm is a 32-bit target, where a 64-bit mrb_int does not fit a boxed word, so
   # picoruby requires MRB_NO_BOXING for MRB_INT64 there (as harucom-os-pico2.rb
   # and the host-test config do). This also keeps full Float precision.
   conf.cc.defines << "MRB_NO_BOXING"
@@ -44,7 +38,7 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
 
   # Enable the per-opcode code_fetch_hook so harucom_wasm.c can install an
   # opcode-budget preemption hook. The board preempts tasks with a timer
-  # interrupt; the browser main thread cannot be interrupted, so the hook
+  # interrupt. The browser main thread cannot be interrupted, so the hook
   # simulates the timeslice and keeps busy Ruby loops from freezing the tab.
   conf.cc.defines << "MRB_USE_DEBUG_HOOK"
 
@@ -74,7 +68,7 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   conf.gem core: "picoruby-sandbox"
 
   # DVI text/graphics. The portable text core (src/dvi_text.c) and graphics
-  # drawing compile here; the browser renderer lives in ports/posix/dvi_wasm.c
+  # drawing compile here. The browser renderer lives in ports/posix/dvi_wasm.c
   # (auto-compiled under POSIX) and blits the framebuffer to a canvas.
   conf.gem File.expand_path("../mrbgems/picoruby-dvi", __dir__)
 

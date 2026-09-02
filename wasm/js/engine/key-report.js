@@ -39,6 +39,15 @@ export function createKeyReport(setState) {
       push();
     },
 
+    // Drop every held key and modifier at once. The keyboard calls this when
+    // the page loses focus, where the browser stops delivering keyup.
+    reset() {
+      held.length = 0;
+      modifier = 0;
+      pendingRelease.clear();
+      push();
+    },
+
     // Apply deferred releases. Called once per frame by the run loop after the
     // scheduler batch (and the keyboard poll) has run.
     applyReleases() {

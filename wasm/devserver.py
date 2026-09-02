@@ -2,7 +2,7 @@
 # Dev server for the wasm build with caching disabled, so a plain browser reload
 # always fetches the freshly staged style.css / js (no hard-reload dance).
 # Python's stock http.server sends Last-Modified but no Cache-Control, so browsers
-# serve stale dev assets on a normal reload; this adds no-store.
+# serve stale dev assets on a normal reload. This adds no-store.
 import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 

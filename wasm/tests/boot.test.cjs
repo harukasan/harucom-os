@@ -2,7 +2,7 @@
 // console / IME / line editor / keyboard / IRB libraries) and reach the IRB
 // banner. The Console mirrors its DVI output to STDOUT (fd 1), so the banner is
 // captured here even though it is really painted on the text surface. Reaching
-// the banner means every require resolved and IRB started; a failed require or a
+// the banner means every require resolved and IRB started. A failed require or a
 // raised exception would stop before it.
 const { describe, it, before } = require("node:test");
 const assert = require("node:assert/strict");

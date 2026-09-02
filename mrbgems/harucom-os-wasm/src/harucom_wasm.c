@@ -104,20 +104,12 @@ preempt_hook(mrb_state *mrb, const struct mrb_irep *irep, const mrb_code *pc, mr
   (void)regs;
   static uint32_t ops = 0;
   if (++ops < PREEMPT_OP_BUDGET) return;
-
-  /* Only switch at a safe point: never across a C function boundary. A task
-   * switch yields by returning from mrb_vm_exec (RETURN_IF_TASK_STOPPED). When
-   * mrb_vm_exec was entered re-entrantly from a C function, that early return
-   * corrupts the C caller and, under emscripten setjmp/longjmp, escapes as a
-   * fatal throw. Task.pass guards the same way ("can't pass across C function
-   * boundary"). Ruby called back from JS runs through such a re-entrant call, so
-   * without this guard a preempt landing there crashes. Keep ops at the budget
-   * and retry once we unwind to pure Ruby. */
-  for (mrb_callinfo *ci = mrb->c->ci; ci >= mrb->c->cibase; ci--) {
-    if (ci->cci > 0) return;
-  }
   ops = 0;
-  mrb->task.switching = TRUE; /* yield at the next opcode, like the timer tick */
+  /* Ask for a switch at the next opcode, like the board's timer tick. The VM
+   * decides when it is safe to take it: a pending switch is deferred while
+   * execution is across a C call boundary, while an exception is in flight and
+   * during an ObjectSpace walk (RETURN_IF_TASK_STOPPED in vm.c). */
+  mrb->task.switching = TRUE;
 }
 
 EMSCRIPTEN_KEEPALIVE

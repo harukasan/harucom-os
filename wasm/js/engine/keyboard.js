@@ -1,6 +1,6 @@
 // Keyboard: DOM key events -> HID report (key-report.js) -> wasm.
 //
-// The HID/MOD tables and usageFor live in hid.js (pure, testable); the report
+// The HID/MOD tables and usageFor live in hid.js (pure, testable). The report
 // state machine lives in key-report.js (pure, testable). This module only
 // translates DOM events into report calls and owns the canvas focus. The OS does
 // its own key repeat from the held state, so browser auto-repeat keydowns for an
@@ -20,10 +20,10 @@ export function installKeyboard(canvas, report) {
     const usage = usageFor(e);
     if (usage === undefined) return;
     // Capture keys for the OS so the browser does not steal its shortcuts (the OS
-    // uses Ctrl-J for SKK, Ctrl-C/D/L, etc.; Firefox would otherwise open
-    // Downloads on Ctrl-J). Leave Meta/Cmd combos and the function keys to the
+    // uses Ctrl-J for SKK, Ctrl-C/D/L, and so on, so Firefox would otherwise
+    // open Downloads on Ctrl-J). Leave Meta/Cmd combos and the function keys to the
     // browser so it keeps usable escapes (F5 reload, F12 devtools, macOS Cmd-*
-    // shortcuts); the OS still receives them via the report.
+    // shortcuts). The OS still receives them via the report.
     const isFunctionKey = usage >= 0x3A && usage <= 0x45; // F1..F12
     if (!e.metaKey && !isFunctionKey) e.preventDefault();
     report.keyDown(usage);
@@ -40,4 +40,13 @@ export function installKeyboard(canvas, report) {
   // which element currently holds focus (and so space never scrolls the page).
   window.addEventListener("keydown", onKeyDown, true);
   window.addEventListener("keyup", onKeyUp, true);
+
+  // A modifier held while focus leaves the window never gets its keyup, so it
+  // would stay latched and turn every later keystroke into a chord. Drop the
+  // whole report when the page loses focus or is hidden.
+  const releaseAll = () => report.reset();
+  window.addEventListener("blur", releaseAll);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) releaseAll();
+  });
 }

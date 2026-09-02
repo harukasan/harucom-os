@@ -12,7 +12,7 @@
 #include "usb_host.h"
 
 // Mirror of the live HID keyboard report, written by JS between Ruby polls.
-// Held keys are non-zero HID usages in slots 0..5; modifier is the HID modifier
+// Held keys are non-zero HID usages in slots 0..5. modifier is the HID modifier
 // bitmask. JS calls in synchronously, so plain statics suffice.
 static bool keyboard_connected_flag = true;
 static uint8_t keyboard_modifier_state = 0;
@@ -62,7 +62,7 @@ harucom_kbd_set_state(uint8_t modifier, uint8_t k0, uint8_t k1, uint8_t k2,
   keyboard_keycodes_state[4] = k4;
   keyboard_keycodes_state[5] = k5;
 
-  // Ctrl-Alt-Delete reboots. The board watchdog_reboots; the browser reboots by
+  // Ctrl-Alt-Delete reboots. The board watchdog_reboots. The browser reboots by
   // reloading the page (window.__harucomReboot, set in main.js), which recreates
   // the wasm Module and reruns harucom_init from scratch.
   if ((modifier & HID_MOD_CTRL) && (modifier & HID_MOD_ALT)) {

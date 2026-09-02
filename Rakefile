@@ -199,7 +199,7 @@ namespace :wasm do
        "-sEXPORTED_FUNCTIONS=#{exported}",
        "-sINITIAL_MEMORY=32MB", "-sALLOW_MEMORY_GROWTH=1", "-sSTACK_SIZE=2MB",
        "-sENVIRONMENT=web,node", "-sWASM_ASYNC_COMPILATION=1",
-       "-sERROR_ON_UNDEFINED_SYMBOLS=0", "--no-entry",
+       "--no-entry",
        WASM_LIBMRUBY, "-o", WASM_JS
     stage_page!
     puts "Built #{WASM_WASM} (#{File.size(WASM_WASM)} bytes)"

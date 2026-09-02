@@ -87,7 +87,10 @@ render_text(void)
           // char, must still render a 12px glyph and advance the row two cells,
           // not leave a 6px gap.
           uint8_t b0 = grow[col];
-          uint8_t b1 = grow[col + 1];
+          // The partner cell is the next column. In the last column there is
+          // none, so the right half renders as background rather than reading
+          // the next row (or past the bitmap on the last row).
+          uint8_t b1 = (col + 1 < dvi_text_cols) ? grow[col + 1] : 0;
           for (int px = 0; px < 8; px++) line[x++] = (b0 & (0x80 >> px)) ? fg : bg;
           for (int px = 0; px < 4; px++) line[x++] = (b1 & (0x80 >> px)) ? fg : bg;
           col++; // consume the partner cell
@@ -125,7 +128,7 @@ render_text(void)
 // ---------------------------------------------------------------------------
 
 // Switch the displayed surface. No hardware VSync to defer to, so apply
-// immediately. Switching to text repaints the VRAM; switching to graphics keeps
+// immediately. Switching to text repaints the VRAM. Switching to graphics keeps
 // the last frame until the first graphics commit.
 void
 dvi_set_mode(dvi_mode_t mode)
@@ -142,7 +145,7 @@ void dvi_set_blanking(bool enable) { (void)enable; }
 uint8_t *dvi_get_framebuffer(void) { return graphics_buf; }
 uint32_t dvi_get_frame_count(void) { return frame_count; }
 
-// No-op here; DVI.wait_vsync is overridden in dvi_wasm.rb.
+// No-op here. DVI.wait_vsync is overridden in dvi_wasm.rb.
 void dvi_wait_vsync(void) {}
 
 // Render the current VRAM into the displayed framebuffer. Skipped in graphics
@@ -162,7 +165,7 @@ int dvi_graphics_get_height(void) { return FB_HEIGHT / graphics_scale; }
 void dvi_set_graphics_scale(int scale) { if (scale == 1 || scale == 2) graphics_scale = scale; }
 
 // Apply a text scale change immediately (no hardware VSync to defer to). The
-// per-scale grid tables are filled by dvi_text_set_font; select the active grid
+// per-scale grid tables are filled by dvi_text_set_font. Select the active grid
 // and clamp the scroll offset into the (possibly smaller) row range, then
 // repaint if text is on screen.
 void
@@ -182,10 +185,10 @@ dvi_set_text_scale(int scale)
 }
 
 // No browser back buffer: drawing already targets graphics_buf via
-// dvi_get_framebuffer(). Kept so the platform contract links; never called here.
+// dvi_get_framebuffer(). Kept so the platform contract links, never called here.
 void dvi_graphics_set_back_buffer(uint8_t *bb) { (void)bb; }
 
-// Present the graphics drawing buffer. At scale 1 a straight copy; at scale 2
+// Present the graphics drawing buffer. At scale 1 a straight copy, at scale 2
 // the 320x240 logical image is nearest-neighbor doubled to 640x480.
 void
 dvi_graphics_commit(void)
