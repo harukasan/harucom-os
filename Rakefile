@@ -153,22 +153,43 @@ namespace :wasm do
     abort "emcc not found on PATH. Activate emscripten first (source emsdk_env.sh)."
   end
 
-  # Copy the static page and its ES modules next to the built module so
-  # build/wasm/ is a self-contained directory the server can host.
+  # npm ci when the installed tree is missing or older than the lockfile, so a
+  # fresh worktree installs once and a dependency change is picked up, without
+  # reinstalling on every build.
+  def npm_install!(dir)
+    stamp = File.join(dir, "node_modules", ".package-lock.json")
+    lock = File.join(dir, "package-lock.json")
+    return if File.exist?(stamp) && File.exist?(lock) && File.mtime(stamp) >= File.mtime(lock)
+    return if File.exist?(stamp) && !File.exist?(lock)
+    # ci for a pinned tree, install where there is no lockfile to honour.
+    sh "npm", File.exist?(lock) ? "ci" : "install", "--prefix", dir
+  end
+
+  # Build the React shell into wasm/ui/dist.
+  def build_ui!
+    ui = File.join(WASM_DIR, "ui")
+    npm_install!(ui)
+    sh "npm", "run", "--prefix", ui, "build"
+  end
+
+  # Copy the static page, the engine modules and the built shell next to the
+  # wasm module so build/wasm/ is a self-contained directory the server can host.
   def stage_page!
     mkdir_p WASM_OUT
     cp File.join(WASM_DIR, "index.html"), File.join(WASM_OUT, "index.html")
-    cp File.join(WASM_DIR, "style.css"), File.join(WASM_OUT, "style.css")
     rm_rf File.join(WASM_OUT, "js")
     cp_r File.join(WASM_DIR, "js"), File.join(WASM_OUT, "js")
+    rm_rf File.join(WASM_OUT, "ui")
+    cp_r File.join(WASM_DIR, "ui", "dist"), File.join(WASM_OUT, "ui")
   end
 
   # A coarse mtime signature of the staged sources, so the dev server can restage
   # when an index.html / style.css / js edit changes them.
   def stage_signature
     Dir.glob([File.join(WASM_DIR, "index.html"),
-              File.join(WASM_DIR, "style.css"),
-              File.join(WASM_DIR, "js", "**", "*")]).sort.map do |f|
+              File.join(WASM_DIR, "js", "**", "*"),
+              File.join(WASM_DIR, "ui", "src", "**", "*"),
+              File.join(WASM_DIR, "ui", "index.html")]).sort.map do |f|
       File.file?(f) ? File.mtime(f).to_f : 0.0
     end
   end
@@ -216,8 +237,22 @@ namespace :wasm do
        # no XIP, so embed the image and let dict_wasm_init load it from MEMFS.
        "--embed-file", "#{DICT_BIN}@/dict.bin",
        WASM_LIBMRUBY, "-o", WASM_JS
+    build_ui!
     stage_page!
     puts "Built #{WASM_WASM} (#{File.size(WASM_WASM)} bytes)"
+  end
+
+  desc "Build the React shell into wasm/ui/dist (no emcc needed)"
+  task :ui do
+    build_ui!
+  end
+
+  desc "Type-check and unit-test the React shell"
+  task :ui_test do
+    ui = File.join(WASM_DIR, "ui")
+    npm_install!(ui)
+    sh "npm", "run", "--prefix", ui, "typecheck"
+    sh "npm", "run", "--prefix", ui, "test"
   end
 
   desc "Serve build/wasm/ over HTTP for browser testing (PORT=8000)"
@@ -226,7 +261,8 @@ namespace :wasm do
     unless File.exist?(WASM_WASM)
       abort "#{WASM_WASM} not found. Run `rake wasm:build` first."
     end
-    stage_page! # pick up any index.html / style.css / js edits without a full rebuild
+    build_ui!   # the shell bundle is derived output, so build before the first stage
+    stage_page! # pick up any index.html / js / ui edits without a full rebuild
     # Restage on change, so editing the browser glue shows up on a plain reload
     # (no emcc rebuild, no restart).
     restager = Thread.new do
@@ -237,8 +273,9 @@ namespace :wasm do
         next if now == sig
         sig = now
         begin
+          build_ui!
           stage_page!
-          puts "Restaged wasm/ (js / index.html / style.css change)"
+          puts "Restaged wasm/ (js / index.html / ui change)"
         rescue => e
           warn "Restage failed: #{e.message}"
         end
@@ -269,6 +306,7 @@ namespace :wasm do
   desc "Smoke-test the wasm build headlessly under Node (node:test runner)"
   task :test do
     abort "#{WASM_WASM} not found. Run `rake wasm:build` first." unless File.exist?(WASM_WASM)
+    npm_install!(WASM_DIR) # jsdom, which the harness builds its page in
     # node --test expands the glob itself (a bare directory arg is treated as a
     # module path, not a discovery root).
     sh "node", "--test", File.join(WASM_DIR, "tests", "*.test.cjs")
