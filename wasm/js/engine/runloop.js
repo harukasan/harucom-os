@@ -11,21 +11,29 @@
 // Steps: run a batch of task slices so the always-ready keyboard task polls every
 // frame and any woken task runs to its next yield. More steps beyond draining the
 // ready queue does not help smoothness (the work tasks are gated by the clock,
-// not the step count) and only spins the Task.pass loops. applyReleases() then
-// drops keys released this frame, after the batch polled them, so a same-frame
-// key down+up is still seen once.
+// not the step count) and only spins the Task.pass loops.
+//
+// Keys: flushKeys() runs before the batch, so the OS polls the state published
+// for this frame. key-report.js queues the states and one is published per
+// frame, which is how a key pressed and released between two frames is still
+// seen.
 
 const MRB_TICK_UNIT = 4;     // ms per tick; must match build_config/harucom-wasm.rb
 const MAX_CATCHUP_TICKS = 8; // cap clock catch-up after a stall / background tab
 const STEPS_PER_FRAME = 16;
 
-// Start the rAF loop. blit and applyReleases are the per-frame hooks from the
+// Start the rAF loop. blit and flushKeys are the per-frame hooks from the
 // display and keyboard modules.
-export function startRunLoop(Module, { blit, applyReleases }) {
+export function startRunLoop(Module, { blit, flushKeys }) {
   let lastFrame = -1;
   let lastTick = performance.now();
 
   function step() {
+    // Re-arm first: a throw below (a stale build where an export is missing, a
+    // wasm trap) would otherwise leave the tab with no ticks, no VM steps, no
+    // keyboard and no blit, and only a console error to show for it.
+    requestAnimationFrame(step);
+    flushKeys(); // publish this frame's key state before the VM polls it
     const now = performance.now();
     let ticks = 0;
     while (now - lastTick >= MRB_TICK_UNIT && ticks < MAX_CATCHUP_TICKS) {
@@ -35,13 +43,11 @@ export function startRunLoop(Module, { blit, applyReleases }) {
     }
     if (now - lastTick >= MRB_TICK_UNIT) lastTick = now; // fell too far behind; resync
     for (let s = 0; s < STEPS_PER_FRAME; s++) Module._mrb_run_step();
-    applyReleases();
     const frame = Module._harucom_dvi_frame_count();
     if (frame !== lastFrame) {
       lastFrame = frame;
       blit();
     }
-    requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
 }

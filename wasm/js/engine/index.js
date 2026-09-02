@@ -29,8 +29,8 @@ export function createEngine(Module, { canvas }) {
     started = true;
     if (Module._harucom_init() !== 0) throw new Error("harucom_init failed");
     pruneRuntimeDirs(Module); // drop the emscripten-only /home /tmp /proc dirs
-    startRunLoop(Module, { blit: display.blit, applyReleases: report.applyReleases });
+    startRunLoop(Module, { blit: display.blit, flushKeys: report.flush });
   }
 
-  return { canvas, start };
+  return { start };
 }
