@@ -29,7 +29,11 @@ extern int picorb_create_task(const char *code);
  * load the fonts (mrbgems/picoruby-dvi/ports/posix/dvi_wasm.c). */
 extern void dvi_wasm_init(void);
 
-/* This gem has no Ruby-visible classes of its own; the boot entry below is
+/* IME dictionary browser port: load the emcc-embedded /dict.bin
+ * (mrbgems/harucom-os-dict/ports/posix/dict_region.c). */
+extern void dict_wasm_init(void);
+
+/* This gem has no Ruby-visible classes of its own. The boot entry below is
  * called from JavaScript. */
 void
 mrb_harucom_os_wasm_gem_init(mrb_state *mrb)
@@ -141,6 +145,7 @@ harucom_init(void)
   mrb->code_fetch_hook = preempt_hook; /* preempt yield-less loops (see preempt_hook) */
 
   dvi_wasm_init(); /* DVI text surface ready before the Console draws */
+  dict_wasm_init(); /* IME dictionary ready before the line editor starts */
 
   mrb_define_global_const(mrb, "HARUCOM_VERSION", mrb_str_new_cstr(mrb, "wasm"));
   mrb_define_global_const(mrb, "HARUCOM_BUILD_DATE", mrb_str_new_cstr(mrb, "wasm"));

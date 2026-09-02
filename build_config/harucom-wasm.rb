@@ -72,6 +72,11 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   # (auto-compiled under POSIX) and blits the framebuffer to a canvas.
   conf.gem File.expand_path("../mrbgems/picoruby-dvi", __dir__)
 
+  # Japanese IME dictionary (InputMethod.dict_available?/skk_lookup/tcode_lookup).
+  # The board reads the HCDK image from flash via XIP. The browser port
+  # (ports/posix/dict_region.c) loads it from the emcc-embedded /dict.bin.
+  conf.gem File.expand_path("../mrbgems/harucom-os-dict", __dir__)
+
   # Userland support gems pulled in by rootfs/system.rb. picoruby-editor is an
   # upstream pure-Ruby gem (Editor / Editor::Buffer, used by line_editor.rb).
   conf.gem core: "picoruby-editor"

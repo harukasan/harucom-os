@@ -127,13 +127,23 @@ The browser has no vsync, so `DVI.wait_vsync` sleeps about one frame instead
 same way, so a render loop that commits every iteration runs at the display rate
 rather than starving the rest of the page.
 
+### IME dictionary
+
+The board reads the HCDK dictionary image in place from a separate flash region
+through XIP. The browser has no XIP, so `rake wasm:build` builds the raw image
+(`vendor/harucom-os-dict/build/dict.bin`), emcc embeds it into MEMFS with
+`--embed-file`, and `dict_wasm_init` loads it into one heap buffer at boot. The
+image is position independent (every offset is relative to the header), so the
+lookup code is the same on both platforms and only the base pointer differs.
+
+If the image is missing, `dict_available()` reports false rather than failing,
+and the IME behaves as it does on a board with no dictionary flashed.
+
 ### Not ported yet
 
-Three gems have no `ports/posix` implementation, so the browser build leaves
-them out: the IME dictionary (`harucom-os-dict`), PWM audio
-(`picoruby-pwm-audio`) and the ADC pads. Romaji input works, but a conversion
-that reaches `InputMethod.skk_lookup` or `InputMethod.dict_available?` raises
-`NoMethodError`, and the audio and pad demos are unavailable.
+PWM audio (`picoruby-pwm-audio`) and the ADC pads have no `ports/posix`
+implementation, so those gems are left out of the browser build and the audio
+and pad demos are unavailable.
 
 ### Differences from the board
 

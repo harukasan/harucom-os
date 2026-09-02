@@ -9,6 +9,7 @@ export function createKeyReport(setState) {
   const held = [];          // HID usages currently down, in press order (max 6)
   let modifier = 0;         // HID modifier bitmask from the modifier keys
   const pendingRelease = new Set(); // keyups deferred until after the next poll
+  let pendingModifierClear = 0;     // modifier keyups deferred the same way
 
   function push() {
     setState(modifier, held.slice(0, 6));
@@ -29,14 +30,19 @@ export function createKeyReport(setState) {
       pendingRelease.add(usage);
     },
 
-    // Modifier key down/up (e.g. Shift, Ctrl).
+    // Modifier key down. Cancels a deferred release of the same bit, for a
+    // modifier re-pressed before the frame ended.
     modifierDown(bit) {
+      pendingModifierClear &= ~bit;
       modifier |= bit;
       push();
     },
+
+    // Modifier key up. Deferred to applyReleases exactly like a key release: a
+    // modifier cleared here would be gone before the Ruby keyboard task polls,
+    // so a shifted keystroke typed inside one frame would arrive unshifted.
     modifierUp(bit) {
-      modifier &= ~bit;
-      push();
+      pendingModifierClear |= bit;
     },
 
     // Drop every held key and modifier at once. The keyboard calls this when
@@ -45,18 +51,21 @@ export function createKeyReport(setState) {
       held.length = 0;
       modifier = 0;
       pendingRelease.clear();
+      pendingModifierClear = 0;
       push();
     },
 
     // Apply deferred releases. Called once per frame by the run loop after the
     // scheduler batch (and the keyboard poll) has run.
     applyReleases() {
-      if (pendingRelease.size === 0) return;
+      if (pendingRelease.size === 0 && pendingModifierClear === 0) return;
       for (const usage of pendingRelease) {
         const i = held.indexOf(usage);
         if (i >= 0) held.splice(i, 1);
       }
       pendingRelease.clear();
+      modifier &= ~pendingModifierClear;
+      pendingModifierClear = 0;
       push();
     },
   };

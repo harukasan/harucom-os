@@ -117,7 +117,7 @@ set_target_properties(mruby PROPERTIES
 
 # --- DVI driver library (timing-critical, always -O2) ---
 # The Unicode-to-JIS table (uni2jis_table.c) is compiled into libmruby via
-# src/uni2jis_table_data.c on every platform, so it is not listed here; the
+# src/uni2jis_table_data.c on every platform, so it is not listed here. The
 # uni2jis_direct symbol resolves from libmruby at the final link.
 add_library(picoruby-dvi
     mrbgems/picoruby-dvi/ports/rp2350/dvi_clock.c

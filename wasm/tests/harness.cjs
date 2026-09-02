@@ -122,8 +122,18 @@ async function boot() {
     }
   }
 
+  // Type a line into IRB (string + Enter) and drive until its result is echoed.
+  // Returns only the output produced since the line was typed.
+  function evalInIRB(line, expect, maxSteps = 40000) {
+    const start = output.length;
+    typeString(line);
+    hidType(ENTER);
+    driveUntil(expect, maxSteps);
+    return output.slice(start).join("\n");
+  }
+
   const bootSteps = driveUntil("Powered by PicoRuby", 200000);
-  return { Module, output, printed, bootSteps, drive, driveUntil, hidType, typeString, ENTER };
+  return { Module, output, printed, bootSteps, drive, driveUntil, hidType, typeString, evalInIRB, ENTER };
 }
 
 module.exports = { boot };

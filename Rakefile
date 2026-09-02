@@ -4,6 +4,7 @@ PROJECT_DIR = __dir__
 BUILD_DIR   = File.join(PROJECT_DIR, "build")
 DICT_DIR    = File.join(PROJECT_DIR, "vendor", "harucom-os-dict")
 DICT_UF2    = File.join(DICT_DIR, "build", "dict.uf2")
+DICT_BIN    = File.join(DICT_DIR, "build", "dict.bin")
 HARUCOM_UF2 = File.join(BUILD_DIR, "harucom_os.uf2")
 FULL_UF2    = File.join(BUILD_DIR, "harucom_os_full.uf2")
 MERGE_SCRIPT = File.join(PROJECT_DIR, "scripts", "merge_uf2.rb")
@@ -39,6 +40,11 @@ end
 desc "Build dictionary UF2 (vendor/harucom-os-dict)"
 task dict_uf2: :dict_submodule do
   sh "rake uf2", chdir: DICT_DIR
+end
+
+# Build just the raw HCDK image (no UF2 wrapper) for the wasm --embed-file step.
+file DICT_BIN => :dict_submodule do
+  sh "rake build/dict.bin", chdir: DICT_DIR
 end
 
 desc "Build combined UF2 (harucom-os + dict)"
@@ -117,7 +123,7 @@ WASM_DIR      = File.join(PROJECT_DIR, "wasm")        # source: index.html, js, 
 WASM_OUT      = File.join(BUILD_DIR, "wasm")          # build output (build/ is gitignored)
 WASM_CONFIG   = File.join(PROJECT_DIR, "build_config", "harucom-wasm.rb")
 WASM_BUILD    = File.join(PICORUBY_DIR, "build", "harucom-wasm")
-WASM_HOST     = File.join(PICORUBY_DIR, "build", "host")
+WASM_HOST     = File.join(PICORUBY_DIR, "build", "mrbc") # host tools (mrbc)
 WASM_LIBMRUBY = File.join(WASM_BUILD, "lib", "libmruby.a")
 WASM_JS       = File.join(WASM_OUT, "harucom.js")
 WASM_WASM     = File.join(WASM_OUT, "harucom.wasm")
@@ -138,8 +144,12 @@ file ROOTFS_DATA =>
 end
 
 namespace :wasm do
+  # Probe outside the bundler env, the same way the build runs emcc: the bundler
+  # env breaks emcc's bundled Python, so probing inside it would report a
+  # missing emcc on a machine where emsdk_env.sh has been sourced.
   def require_emcc!
-    return if system("emcc --version > /dev/null 2>&1")
+    ok = Bundler.with_unbundled_env { system("emcc --version > /dev/null 2>&1") }
+    return if ok
     abort "emcc not found on PATH. Activate emscripten first (source emsdk_env.sh)."
   end
 
@@ -167,7 +177,7 @@ namespace :wasm do
   task rootfs: ROOTFS_DATA
 
   desc "Build build/wasm/harucom.{js,wasm} (CLEAN=1 to rebuild presym/host from scratch)"
-  task build: :rootfs do
+  task build: [:rootfs, DICT_BIN] do
     require_emcc!
     if %w[1 true yes].include?(ENV["CLEAN"].to_s.downcase)
       rm_rf WASM_BUILD
@@ -200,6 +210,9 @@ namespace :wasm do
        "-sINITIAL_MEMORY=32MB", "-sALLOW_MEMORY_GROWTH=1", "-sSTACK_SIZE=2MB",
        "-sENVIRONMENT=web,node", "-sWASM_ASYNC_COMPILATION=1",
        "--no-entry",
+       # The board reads the dictionary from flash through XIP. The browser has
+       # no XIP, so embed the image and let dict_wasm_init load it from MEMFS.
+       "--embed-file", "#{DICT_BIN}@/dict.bin",
        WASM_LIBMRUBY, "-o", WASM_JS
     stage_page!
     puts "Built #{WASM_WASM} (#{File.size(WASM_WASM)} bytes)"
