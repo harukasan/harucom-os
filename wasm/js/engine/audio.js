@@ -77,7 +77,25 @@ export function installAudio(Module, canvas) {
     const TARGET = 3072;
     const PULL = 1024;
     const lPtr = Module._malloc(PULL * 4), rPtr = Module._malloc(PULL * 4);
+    // Pulling into address 0 would write floats over the null page.
+    if (!lPtr || !rPtr) {
+      console.error("Harucom audio: cannot allocate the pull buffers");
+      releaseAudio(ctx);
+      return;
+    }
     let workletLevel = 0, workletUnder = 0, workletDropped = 0; // worklet reports
+
+    // Give the context, its node and the buffers back. Every gesture retries, so
+    // holding them would burn through the handful of contexts a page may open
+    // and leak the buffers once per attempt.
+    function releaseAudio(context) {
+      context.close().catch(() => {});
+      if (lPtr) Module._free(lPtr);
+      if (rPtr) Module._free(rPtr);
+      audioNode = null;
+      audioCtx = null; // let a later gesture retry
+      pumpFn = discardPump; // keep the sample clock on real time
+    }
 
     // Source FIFO for continuous resampling: pulled synth frames awaiting
     // consumption. srcPos is the fractional read position (integer at ratio 1).
@@ -85,16 +103,31 @@ export function installAudio(Module, canvas) {
     const sfL = new Float32Array(SF_CAP), sfR = new Float32Array(SF_CAP);
     let sfWr = 0, srcPos = 0;
 
+    // AudioWorklet needs a secure context, so serving build/wasm over plain HTTP
+    // to another device leaves this undefined and the call below would throw
+    // synchronously, outside the promise chain that cleans up.
+    if (!ctx.audioWorklet) {
+      console.error("Harucom audio: no AudioWorklet (needs https or localhost), running silent");
+      releaseAudio(ctx);
+      return;
+    }
     ctx.audioWorklet.addModule(new URL("./audio-worklet.js", import.meta.url)).then(() => {
       const node = new AudioWorkletNode(ctx, "harucom-audio", { numberOfInputs: 0, outputChannelCount: [2] });
       audioNode = node;
+      // rake wasm:server restages the JavaScript without relinking, so a reload
+      // can pair this file with a module built before the export existed.
+      const report = Module._harucom_audio_report;
+      if (!report) {
+        console.warn("Harucom audio: harucom_audio_report is missing, so " +
+                     "PWMAudio.stats will not see the consumer. Rebuild the wasm.");
+      }
       node.port.onmessage = (e) => {
         workletLevel = e.data.lvl;
         workletUnder = e.data.under;
         workletDropped = e.data.dropped;
         // Only the worklet knows how the consumer is doing, so hand it to the
         // port for PWMAudio.stats.
-        Module._harucom_audio_report(workletLevel, workletUnder);
+        if (report) report(workletLevel);
       };
       node.connect(ctx.destination);
       ctx.resume();
@@ -176,17 +209,9 @@ export function installAudio(Module, canvas) {
         pumpCount = 0; maxWant = 0;
       }, 1000);
     }).catch((e) => {
-      // The worklet module failed to load (a stale build/wasm/js, a wrong MIME
-      // type, a syntax error). Say so and keep the discard pump running, so the
-      // sample clock stays honest even though nothing is audible. Release the
-      // context and the buffers first: every gesture retries, and a page can
-      // only hold a handful of contexts before construction itself throws.
+      // A stale build/wasm/js, a wrong MIME type, a syntax error.
       console.error("Harucom audio: worklet failed to load, running silent: " + e.message);
-      ctx.close().catch(() => {});
-      Module._free(lPtr);
-      Module._free(rPtr);
-      audioCtx = null; // let a later gesture retry
-      pumpFn = discardPump;
+      releaseAudio(ctx);
     });
   }
 

@@ -77,6 +77,18 @@ sample clock by what it produced. Rendering is on demand, so it always produces
 resample from. Defined in
 [pwm_audio_wasm.c](../mrbgems/picoruby-pwm-audio/ports/posix/pwm_audio_wasm.c).
 
+### harucom_audio_report
+
+```c
+void harucom_audio_report(int level);
+```
+
+Tell the port how many frames the consumer still has buffered. Only the
+AudioWorklet knows, on its own thread, so JavaScript forwards each report and
+`PWMAudio.stats` returns the lowest level seen since the last
+`PWMAudio.init`. Defined in
+[pwm_audio_wasm.c](../mrbgems/picoruby-pwm-audio/ports/posix/pwm_audio_wasm.c).
+
 ### harucom_pad_set
 
 ```c
@@ -168,8 +180,10 @@ output stage differs. The board renders ahead of a PWM timer ISR that consumes
 the ring at a fixed rate. The browser has no such ISR, so
 `ports/posix/pwm_audio_wasm.c` renders on demand: `harucom_audio_pull` asks
 `pwm_audio_render_block` for exactly the frames JavaScript wants and advances
-the sample clock by what it produced. Rendering therefore cannot underrun, and
-`pwm_audio_stats` reports a healthy, drift-free state.
+the sample clock by what it produced. Rendering therefore cannot underrun. What can run dry is the worklet, so it
+reports its buffer level back and `pwm_audio_stats` returns the lowest level
+seen rather than a fixed figure. There is no wall-clock pacing here, so the gap
+and drift counters stay zero.
 
 On the JavaScript side an AudioWorklet plays on the audio thread, so a long VM
 frame cannot interrupt playback. `engine/audio.js` pulls from the synth ring
