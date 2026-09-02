@@ -7,6 +7,18 @@ scanline is rendered by the DMA IRQ handler on Core 1, converting text
 VRAM cells into RGB332 pixels via inline ARM Thumb-2 assembly (native)
 or plain C (scaled).
 
+The mode is split across two files. The cell semantics (the writers, the
+scroll ring, the narrow font cache, the palette and wide-glyph
+rasterization) are platform independent and live in
+[src/dvi_text.c](../../mrbgems/picoruby-dvi/src/dvi_text.c), with the
+boundary declared in
+[include/dvi_text_internal.h](../../mrbgems/picoruby-dvi/include/dvi_text_internal.h).
+The platform owns the VRAM storage, the double-buffer swap and the
+scanline renderer; on RP2350 that is
+[ports/rp2350/dvi_output.c](../../mrbgems/picoruby-dvi/ports/rp2350/dvi_output.c).
+A port binds its buffers with `dvi_text_init_buffers()` before anything
+writes a cell.
+
 ## Text VRAM
 
 106 columns x 37 rows of 4-byte cells, double-buffered:
@@ -26,7 +38,7 @@ For wide characters, `ch` holds the linear JIS index directly (used by
 
 Physical rows always use the fixed `TEXT_VRAM_STRIDE` (106 cells), so
 cell addressing is independent of the active column count. The active
-grid (`text_cols` x `text_rows`) bounds writes, string wrapping, and the
+grid (`dvi_text_cols` x `dvi_text_rows`) bounds writes, string wrapping, and the
 scroll ring modulus; in scaled mode only the first 53 cells of each of
 the first 18 physical rows are active.
 
@@ -36,12 +48,12 @@ defaults).
 ## Ring Buffer Scroll
 
 VRAM rows are accessed via a ring buffer offset rather than memmove.
-`scroll_offset` maps logical row N to physical row
-`(N + scroll_offset) % text_rows`. Scroll up/down adjusts the offset and
+The scroll offset maps logical row N to physical row
+`(N + offset) % dvi_text_rows` (`dvi_text_physical_row()`). Scroll up/down adjusts the offset and
 clears only the vacated row, making scroll O(1) regardless of screen size.
 
 The scroll offset is double-buffered alongside the VRAM pointers: Core 0
-writes `write_scroll_offset`, and Core 1 reads `render_scroll_offset`
+writes `dvi_text_write_scroll_offset`, and Core 1 reads `render_scroll_offset`
 (swapped at VBlank).
 
 ## Font: 12px M+
@@ -78,7 +90,7 @@ safe because glyph bitmap bytes do not affect the renderer's control flow.
 The worst case is a partial glyph update (some scanlines showing the old
 glyph, some the new) visible for 1 frame.
 
-Populated by `render_wide_glyph_at()`, called from `dvi_text_put_wide_char()`
+Populated by `dvi_text_render_wide_glyph()`, called from `dvi_text_put_wide_char()`
 and `dvi_text_write_line()` on Core 0.
 
 ## Scanline Renderer

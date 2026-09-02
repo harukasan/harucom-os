@@ -131,7 +131,11 @@ target_include_directories(picoruby-dvi PUBLIC
     mrbgems/picoruby-dvi/ports/rp2350
     ${PICORUBY_ROOT}/build/${PICORUBY_BUILD_CONFIG}/mrbgems/picoruby-dvi/include
 )
-target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_dma)
+# mruby is listed because the port calls into the shared text core
+# (src/dvi_text.c), which picoruby builds into libmruby. Declaring it makes the
+# linker see mruby after this library instead of relying on something else
+# having pulled dvi_text.o in during an earlier archive scan.
+target_link_libraries(picoruby-dvi pico_stdlib hardware_clocks hardware_dma mruby)
 target_compile_options(picoruby-dvi PRIVATE -O2)
 # target_compile_definitions(picoruby-dvi PUBLIC DVI_DIAGNOSTICS)
 

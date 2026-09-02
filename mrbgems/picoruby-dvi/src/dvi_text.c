@@ -6,6 +6,7 @@
 // column count), not the active dvi_text_cols, so a runtime scale change that
 // shrinks the grid leaves existing cell addresses valid.
 
+#include <assert.h>
 #include <string.h>
 
 #include "dvi.h"
@@ -28,7 +29,6 @@ int dvi_text_rows_for_scale[3] = {0, DVI_TEXT_MAX_ROWS, DVI_TEXT_MAX_ROWS / 2};
 
 static uint8_t text_palette[16];
 uint32_t dvi_text_palette32[16];
-static const dvi_font_t *text_font;
 static const dvi_font_t *text_wide_font;
 uint8_t dvi_text_narrow_cache[TEXT_GLYPH_HEIGHT_12WIDE * NARROW_CACHE_STRIDE];
 
@@ -153,13 +153,12 @@ dvi_text_init_palette(void)
 void
 dvi_text_set_font(const dvi_font_t *font)
 {
-  text_font = font;
   // Precompute the grid for each scale. Scale 1 keeps the partial bottom
   // row (ceil, matching the native 640x480 grid). Scale 2 uses only full
   // rows (floor). The remaining source lines stay black.
   for (int scale = 1; scale <= 2; scale++) {
-    int cols = (DVI_GRAPHICS_MAX_WIDTH / scale) / font->glyph_width;
-    int content_height = DVI_GRAPHICS_MAX_HEIGHT / scale;
+    int cols = (DVI_ACTIVE_WIDTH / scale) / font->glyph_width;
+    int content_height = DVI_ACTIVE_HEIGHT / scale;
     int rows = (scale == 1) ? (content_height + font->glyph_height - 1) / font->glyph_height
                             : content_height / font->glyph_height;
     if (cols > DVI_TEXT_MAX_COLS) cols = DVI_TEXT_MAX_COLS;
@@ -386,6 +385,7 @@ dvi_text_put_string_bold(int col, int row, const char *str, uint8_t attr)
 void
 dvi_text_clear(uint8_t attr)
 {
+  assert(dvi_text_write_vram && "dvi_text_bind_buffers() must run before any cell write");
   // Clear the full physical buffer, not just the active grid, so cells beyond
   // the active columns hold no stale content after a scale change.
   for (int i = 0; i < DVI_TEXT_MAX_ROWS * DVI_TEXT_MAX_COLS; i++) {
@@ -486,12 +486,15 @@ void
 dvi_text_write_line(int row, const dvi_text_cell_t *src)
 {
   if (row < 0 || row >= dvi_text_rows || !src) return;
+  assert(dvi_text_write_vram && "dvi_text_bind_buffers() must run before any cell write");
   int phys = dvi_text_physical_row(row, dvi_text_write_scroll_offset);
   // Render wide glyphs before the VRAM update so the bitmap is ready when the
   // renderer sees the new cells.
   uint8_t has_wide = 0;
   for (int col = 0; col < dvi_text_cols; col++) {
-    if (src[col].flags & DVI_CELL_FLAG_WIDE_L) {
+    // A WIDE_L in the last column has no partner cell to hold its right half,
+    // and rasterizing it would write one byte past the glyph bitmap.
+    if ((src[col].flags & DVI_CELL_FLAG_WIDE_L) && col + 1 < dvi_text_cols) {
       bool bold = src[col].flags & DVI_CELL_FLAG_BOLD;
       dvi_text_render_wide_glyph(col, phys, src[col].ch, text_wide_font, bold);
       has_wide = 1;
