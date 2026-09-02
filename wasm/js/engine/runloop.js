@@ -22,9 +22,9 @@ const MRB_TICK_UNIT = 4;     // ms per tick; must match build_config/harucom-was
 const MAX_CATCHUP_TICKS = 8; // cap clock catch-up after a stall / background tab
 const STEPS_PER_FRAME = 16;
 
-// Start the rAF loop. blit and flushKeys are the per-frame hooks from the
-// display and keyboard modules.
-export function startRunLoop(Module, { blit, flushKeys }) {
+// Start the rAF loop. blit, flushKeys and pump are the per-frame hooks from the
+// display, keyboard and audio modules.
+export function startRunLoop(Module, { blit, flushKeys, pump }) {
   let lastFrame = -1;
   let lastTick = performance.now();
 
@@ -43,6 +43,7 @@ export function startRunLoop(Module, { blit, flushKeys }) {
     }
     if (now - lastTick >= MRB_TICK_UNIT) lastTick = now; // fell too far behind; resync
     for (let s = 0; s < STEPS_PER_FRAME; s++) Module._mrb_run_step();
+    pump(); // hand the worklet more audio
     const frame = Module._harucom_dvi_frame_count();
     if (frame !== lastFrame) {
       lastFrame = frame;

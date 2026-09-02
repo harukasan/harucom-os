@@ -65,6 +65,28 @@ The RGB332 framebuffer the canvas blits, its 640x480 dimensions, and a counter
 bumped on every commit so the run loop can skip unchanged frames. Defined in
 [dvi_wasm.c](../mrbgems/picoruby-dvi/ports/posix/dvi_wasm.c).
 
+### harucom_audio_pull
+
+```c
+int harucom_audio_pull(float *out_l, float *out_r, int frames);
+```
+
+Render `frames` stereo frames into two planar float channels and advance the
+sample clock by what it produced. Rendering is on demand, so it always produces
+`frames`. `harucom_audio_sample_rate()` returns the synth rate the caller should
+resample from. Defined in
+[pwm_audio_wasm.c](../mrbgems/picoruby-pwm-audio/ports/posix/pwm_audio_wasm.c).
+
+### harucom_pad_set
+
+```c
+void harucom_pad_set(int pad, int raw);
+```
+
+Set what pad 0 or 1 reads, as a 12-bit ADC value. Out-of-range values are
+ignored. Defined in
+[harucom_wasm.c](../mrbgems/harucom-os-wasm/src/mruby/harucom_wasm.c).
+
 ## Architecture
 
 ### Boot
@@ -139,11 +161,31 @@ lookup code is the same on both platforms and only the base pointer differs.
 If the image is missing, `dict_available()` reports false rather than failing,
 and the IME behaves as it does on a board with no dictionary flashed.
 
+### Audio
+
+The synth, mixer and ring buffer are portable and compile unchanged. Only the
+output stage differs. The board renders ahead of a PWM timer ISR that consumes
+the ring at a fixed rate. The browser has no such ISR, so
+`ports/posix/pwm_audio_wasm.c` renders on demand: `harucom_audio_pull` asks
+`pwm_audio_render_block` for exactly the frames JavaScript wants and advances
+the sample clock by what it produced. Rendering therefore cannot underrun, and
+`pwm_audio_stats` reports a healthy, drift-free state.
+
+On the JavaScript side an AudioWorklet plays on the audio thread, so a long VM
+frame cannot interrupt playback. `engine/audio.js` pulls from the synth ring
+once per rAF frame, resamples with a continuous fractional position when the
+AudioContext will not run at the synth rate, and posts frames to keep the
+worklet buffered. Supply is paced by wall clock rather than by the worklet's
+reported level, because those reports arrive late when the main thread is busy
+and a level-only scheme then starves the worklet.
+
+An AudioContext can only start from a user gesture, so audio arms itself on a
+canvas click or the first keystroke.
+
 ### Not ported yet
 
-PWM audio (`picoruby-pwm-audio`) and the ADC pads have no `ports/posix`
-implementation, so those gems are left out of the browser build and the audio
-and pad demos are unavailable.
+The ADC pads have no `ports/posix` implementation, so `Board::Pad` and the pad
+demo are unavailable in the browser.
 
 ### Differences from the board
 
@@ -152,6 +194,7 @@ and pad demos are unavailable.
 | Filesystem | LittleFS on flash, mounted through VFS | MEMFS, redeployed from the embedded rootfs on every load |
 | Display | HSTX and DMA scanline renderer | `render_text` into an RGB332 framebuffer, blitted to a canvas |
 | Keyboard | PIO-USB HID host | DOM key events converted to a HID report |
+| Audio | PWM timer ISR consumes the ring | AudioWorklet, drained on demand |
 | Reboot | Watchdog | Page reload (`window.__harucomReboot`) |
 | Preemption | 1 ms timer interrupt | Opcode budget in `code_fetch_hook` |
 
