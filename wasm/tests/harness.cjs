@@ -90,11 +90,13 @@ async function boot() {
 
   // Drive until `marker` appears in the output (or maxSteps elapse). Returns the
   // number of steps taken. Used to wait for the IRB banner and echoed results.
-  function driveUntil(marker, maxSteps) {
+  // `from` bounds the search to output produced after that index, so a marker
+  // that already appeared earlier in the session does not return immediately.
+  function driveUntil(marker, maxSteps, from = 0) {
     for (let i = 0; i < maxSteps; i++) {
       Module._mrb_tick_wasm();
       Module._mrb_run_step();
-      if (i % 64 === 0 && printed().includes(marker)) return i + 1;
+      if (i % 64 === 0 && output.slice(from).join("\n").includes(marker)) return i + 1;
     }
     return maxSteps;
   }
@@ -128,7 +130,7 @@ async function boot() {
     const start = output.length;
     typeString(line);
     hidType(ENTER);
-    driveUntil(expect, maxSteps);
+    driveUntil(expect, maxSteps, start);
     return output.slice(start).join("\n");
   }
 

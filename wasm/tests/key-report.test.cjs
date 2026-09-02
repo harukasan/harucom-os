@@ -1,89 +1,104 @@
 // Unit tests for the HID report state machine (key-report.js). Pure: no DOM, no
-// wasm. A recording fake setState captures each [modifier, usages] push so the
-// held / modifier / deferred-release logic can be asserted in isolation.
+// wasm. A recording fake setState captures each [modifier, usages] push, and
+// flush() is called the way the run loop calls it, once per simulated frame.
 const { describe, it, before } = require("node:test");
 const assert = require("node:assert/strict");
 
 let createKeyReport;
 before(async () => { ({ createKeyReport } = await import("../js/engine/key-report.js")); });
 
-// Build a fresh report plus the list of pushes it produced.
 function make() {
   const calls = [];
   const report = createKeyReport((modifier, usages) => calls.push([modifier, usages.slice()]));
-  return { report, calls, last: () => calls[calls.length - 1] };
+  // Drain every queued state, as successive frames would.
+  const drain = () => { while (report.pending()) report.flush(); };
+  return { report, calls, drain, last: () => calls[calls.length - 1] };
 }
 
 describe("key-report", () => {
-  it("pushes a held key, and keeps it held until applyReleases", () => {
+  it("publishes one state per flush, not the latest", () => {
     const { report, calls, last } = make();
     report.keyDown(0x04);
-    assert.deepEqual(last(), [0, [0x04]]);
-    const n = calls.length;
     report.keyUp(0x04);
-    assert.equal(calls.length, n, "keyUp does not push (key stays reported held)");
-    assert.deepEqual(last(), [0, [0x04]], "still held before applyReleases (same-frame tap is poll-safe)");
+    assert.equal(calls.length, 0, "nothing is published until the run loop flushes");
+    report.flush();
+    assert.deepEqual(last(), [0, [0x04]], "the press is seen first");
+    report.flush();
+    assert.deepEqual(last(), [0, []], "the release is seen on the next frame");
   });
 
-  it("removes a deferred release on applyReleases, then no-ops", () => {
-    const { report, calls, last } = make();
+  it("keeps a key pressed and released between frames from being lost", () => {
+    const { report, calls } = make();
     report.keyDown(0x04);
     report.keyUp(0x04);
-    report.applyReleases();
-    assert.deepEqual(last(), [0, []]);
-    const n = calls.length;
-    report.applyReleases();
-    assert.equal(calls.length, n, "applyReleases with nothing pending does not push");
+    report.flush();
+    assert.deepEqual(calls[0], [0, [0x04]], "the OS still gets a frame with the key held");
   });
 
   it("caps held keys at 6", () => {
-    const { report, last } = make();
+    const { report, drain, last } = make();
     [0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a].forEach((u) => report.keyDown(u));
+    drain();
     const [, usages] = last();
     assert.equal(usages.length, 6, "at most 6 usages");
     assert.ok(!usages.includes(0x0a), "the 7th key is dropped");
   });
 
-  it("ORs modifier bits, and clears them only on applyReleases", () => {
-    const { report, last } = make();
-    report.modifierDown(0x02);            // Shift
-    report.modifierDown(0x01);            // Ctrl
-    assert.deepEqual(last(), [0x03, []]);
+  it("shifts only the key that was pressed while the modifier was down", () => {
+    const { report, calls, drain } = make();
+    // Typing "Hi" fast: Shift, H, release both, then i, all inside one frame.
+    report.modifierDown(0x02);
+    report.keyDown(0x0B);   // H
+    report.keyUp(0x0B);
+    report.modifierUp(0x02);
+    report.keyDown(0x0C);   // i
+    drain();
+    const shifted = calls.filter(([mod, keys]) => mod === 0x02 && keys.includes(0x0B));
+    const bare = calls.filter(([mod, keys]) => mod === 0 && keys.includes(0x0C));
+    assert.ok(shifted.length > 0, "H is reported with Shift held");
+    assert.ok(bare.length > 0, "i is reported with no modifier");
+    assert.ok(!calls.some(([mod, keys]) => mod === 0x02 && keys.includes(0x0C)),
+              "i must never be reported as shifted, or fast typing capitalizes it");
+  });
+
+  it("never reports Ctrl-Alt together with Delete when they were released first", () => {
+    const { report, calls, drain } = make();
+    const CTRL = 0x01, ALT = 0x04, DELETE = 0x4C;
+    report.modifierDown(CTRL);
+    report.modifierDown(ALT);
+    report.modifierUp(CTRL);
+    report.modifierUp(ALT);
+    report.keyDown(DELETE);
+    drain();
+    // usb_host_wasm.c reboots the page on this combination, so a collapsed
+    // report here would throw the session away.
+    assert.ok(!calls.some(([mod, keys]) =>
+      (mod & CTRL) && (mod & ALT) && keys.includes(DELETE)), "no spurious reboot chord");
+  });
+
+  it("collapses a repeat keydown, so holding a key cannot outrun the drain", () => {
+    const { report } = make();
     report.keyDown(0x04);
-    assert.deepEqual(last(), [0x03, [0x04]]);
-    report.modifierUp(0x02);
-    assert.deepEqual(last(), [0x03, [0x04]], "still shifted before applyReleases");
-    report.applyReleases();
-    assert.deepEqual(last(), [0x01, [0x04]]);
+    for (let i = 0; i < 50; i++) report.keyDown(0x04); // browser auto-repeat
+    assert.equal(report.pending(), 1, "the repeats carry no new state");
   });
 
-  it("keeps a shifted keystroke shifted when it is typed inside one frame", () => {
-    const { report, last } = make();
-    // Shift down, A down, A up, Shift up, all before the run loop polls.
-    report.modifierDown(0x02);
-    report.keyDown(0x04);
-    report.keyUp(0x04);
-    report.modifierUp(0x02);
-    assert.deepEqual(last(), [0x02, [0x04]],
-                     "the poll must still see Shift held with A, or it types 'a'");
-    report.applyReleases();
-    assert.deepEqual(last(), [0, []]);
-  });
-
-  it("cancels a deferred modifier release when it is pressed again", () => {
-    const { report, last } = make();
-    report.modifierDown(0x02);
-    report.modifierUp(0x02);
-    report.modifierDown(0x02);
-    report.applyReleases();
-    assert.deepEqual(last(), [0x02, []], "the re-press survives the pending clear");
-  });
-
-  it("drops everything on reset, so a modifier held across a blur cannot latch", () => {
-    const { report, last } = make();
-    report.modifierDown(0x04);            // Alt down, then focus leaves
-    report.keyDown(0x2B);                 // Tab
+  it("keeps queued keystrokes on reset, which the OS has not seen yet", () => {
+    const { report, calls, drain } = make();
+    report.keyDown(0x04);   // typed, then focus leaves in the same frame
     report.reset();
+    drain();
+    assert.ok(calls.some(([, keys]) => keys.includes(0x04)),
+              "the keystroke must still reach the OS");
+    assert.deepEqual(calls[calls.length - 1], [0, []], "and the release lands after it");
+  });
+
+  it("releases everything on reset, so a modifier held across a blur cannot latch", () => {
+    const { report, drain, last } = make();
+    report.modifierDown(0x04);  // Alt down, then focus leaves
+    report.keyDown(0x2B);       // Tab
+    report.reset();
+    drain();
     assert.deepEqual(last(), [0, []]);
   });
 });

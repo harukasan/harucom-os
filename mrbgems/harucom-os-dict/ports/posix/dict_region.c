@@ -55,6 +55,10 @@ dict_wasm_init(void)
     fprintf(stderr, "dict: failed to read /dict.bin (%ld bytes)\n", size);
   }
   fclose(f);
+  // Drop the MEMFS copy: the image is in the heap buffer now, and leaving it
+  // would keep 1.3 MB resident twice and put a file in the root that the board's
+  // filesystem does not have.
+  remove("/dict.bin");
   fprintf(stderr, "dict: loaded %ld bytes, available=%d\n", size, dict_available());
 }
 

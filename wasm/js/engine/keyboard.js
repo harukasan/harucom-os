@@ -4,7 +4,7 @@
 // state machine lives in key-report.js (pure, testable). This module only
 // translates DOM events into report calls and owns the canvas focus. The OS does
 // its own key repeat from the held state, so browser auto-repeat keydowns for an
-// already-held key are harmless no-ops.
+// already-held key carry no new state, which key-report.js drops.
 
 import { MOD, usageFor } from "./hid.js";
 
