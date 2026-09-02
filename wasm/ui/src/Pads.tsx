@@ -75,7 +75,7 @@ export function Pads({ engine }: { engine: Engine }) {
   }, [engine]);
 
   return (
-    <div className="flex gap-8">
+    <div className="flex gap-8 mt-4">
       <Pad pad={0} engine={engine} />
       <Pad pad={1} engine={engine} />
     </div>

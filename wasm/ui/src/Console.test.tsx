@@ -19,6 +19,18 @@ describe("Console", () => {
     expect(container.textContent).toBe("later");
   });
 
+  // The lazy initial state covers the first mount. This covers the other way in:
+  // a different log arriving as a prop, where the initialiser does not re-run.
+  it("follows a log it is handed later", () => {
+    const first = createConsoleLog();
+    first.write("old");
+    const second = createConsoleLog();
+    second.write("new");
+    const { container, rerender } = render(<Console log={first} />);
+    rerender(<Console log={second} />);
+    expect(container.textContent).toBe("new");
+  });
+
   // The buffer is capped, and the panel renders all of it, so the oldest lines
   // have to fall off the top rather than grow without bound.
   it("shows only the lines the log still holds", () => {
