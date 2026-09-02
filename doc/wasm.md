@@ -182,10 +182,41 @@ and a level-only scheme then starves the worklet.
 An AudioContext can only start from a user gesture, so audio arms itself on a
 canvas click or the first keystroke.
 
+### Pads
+
+The board reads two 4-way pads as resistor ladders on ADC pins 28 and 29. The
+browser has no ADC, so `harucom-os-wasm` supplies an `ADC` class whose
+`read_raw` returns a value JavaScript injects, and the page draws two on-screen
+D-pads that write it. `engine/pad-ladder.js` computes what the ladder would read
+for a set of pressed directions, using the same parallel-resistance formula and
+calibration values as `Board::Pad`, so the Ruby decoder sees exactly what it
+sees on hardware and needs no browser-specific path.
+
+Those calibration values therefore exist twice, in `rootfs/lib/board/pad.rb` and
+in `pad-ladder.js`. A unit test reads the Ruby file and compares the two, so
+changing one without the other fails rather than silently decoding a press as
+the wrong direction.
+
+The `ADC` class the shim installs covers only what `Board::Pad` uses: it takes
+an integer pin in the 26 to 29 range and answers `read_raw`. It is not a
+substitute for picoruby-adc, which also has `read`, `read_voltage` and `input`
+and accepts pin names.
+
 ### Not ported yet
 
-The ADC pads have no `ports/posix` implementation, so `Board::Pad` and the pad
-demo are unavailable in the browser.
+These gems are in the board build but not the browser build, so what depends on
+them is unavailable:
+
+| Gem | What is missing |
+| --- | --- |
+| `picoruby-flash-file` | `PWMAudio::Stream`, which reads samples straight from flash |
+| `picoruby-dmx` | DMX output, and the johakyu lighting paths that drive it |
+| `picoruby-uart`, `picoruby-gpio`, `picoruby-pwm` | The peripherals themselves |
+| `picoruby-adc` | Analog input. A narrow `ADC` stand-in exists for the pads, described above |
+| `picoruby-synth-native` | The native synth kernels |
+
+`PWMAudio` itself is present, so tones and in-memory samples work. Only
+`PWMAudio::Stream` raises, because its constructor calls `FlashFile.extents`.
 
 ### Differences from the board
 

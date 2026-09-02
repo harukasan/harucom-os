@@ -201,6 +201,7 @@ namespace :wasm do
       _harucom_dvi_frame_count
       _harucom_kbd_set_state
       _harucom_audio_pull _harucom_audio_sample_rate
+      _harucom_pad_set
       _malloc _free
     ].join('","') + '"]'
     runtime  = '["' + %w[ccall UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8 HEAPF32 FS].join('","') + '"]'

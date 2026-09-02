@@ -9,6 +9,7 @@ import { createDisplay } from "./display.js";
 import { createKeyReport } from "./key-report.js";
 import { installKeyboard } from "./keyboard.js";
 import { installAudio } from "./audio.js";
+import { createPads } from "./pads.js";
 import { startRunLoop } from "./runloop.js";
 import { pruneRuntimeDirs } from "./fs.js";
 
@@ -23,6 +24,7 @@ export function createEngine(Module, { canvas }) {
   installKeyboard(canvas, report);
   // Web Audio needs a user gesture, so this only arms the listeners here.
   const audio = installAudio(Module, canvas);
+  const pads = createPads(Module);
 
   let started = false;
   // Init the VM, drop the emscripten-only dirs, and start the run loop. Throws
@@ -39,5 +41,13 @@ export function createEngine(Module, { canvas }) {
     });
   }
 
-  return { start };
+  return {
+    start,
+    setPad: pads.setPad,
+    releasePads: pads.releaseAll,
+    // Any gesture can arm audio. The canvas and the keyboard do it themselves,
+    // but the on-screen pads are the only input on a touch device, so the page
+    // has to arm from them too.
+    armAudio: audio.arm,
+  };
 }

@@ -30,6 +30,34 @@ body {
   outline: none;
 }
 
+/* Two 4-way pads side by side, each laid out as a plus. */
+#pads {
+  display: flex;
+  gap: 48px;
+}
+
+.pad {
+  display: grid;
+  grid-template-areas: ". up ." "left . right" ". down .";
+  gap: 4px;
+}
+
+.pad button {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  touch-action: none; /* pointer capture handles the drag, not the browser */
+}
+
+.pad button:active {
+  background: var(--border);
+}
+
 #log {
   width: 640px;
   max-width: 100%;

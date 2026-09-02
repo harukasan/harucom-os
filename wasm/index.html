@@ -10,6 +10,8 @@
   <!-- #screen is the DVI framebuffer, blitted every committed frame. #log
        collects stdout and stderr, which the Console mirrors to fd 1. -->
   <canvas id="screen" width="640" height="480"></canvas>
+  <!-- Stand-ins for the board's two resistor-ladder pads, built by pad-ui.js. -->
+  <div id="pads"></div>
   <pre id="log"></pre>
 
   <!-- harucom.js (classic script) defines the global createHarucomModule
