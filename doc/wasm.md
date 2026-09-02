@@ -193,8 +193,14 @@ calibration values as `Board::Pad`, so the Ruby decoder sees exactly what it
 sees on hardware and needs no browser-specific path.
 
 Those calibration values therefore exist twice, in `rootfs/lib/board/pad.rb` and
-in `pad-ladder.js`. A unit test asserts that a single direction reproduces its
-calibration value, which catches the two drifting apart.
+in `pad-ladder.js`. A unit test reads the Ruby file and compares the two, so
+changing one without the other fails rather than silently decoding a press as
+the wrong direction.
+
+The `ADC` class the shim installs covers only what `Board::Pad` uses: it takes
+an integer pin in the 26 to 29 range and answers `read_raw`. It is not a
+substitute for picoruby-adc, which also has `read`, `read_voltage` and `input`
+and accepts pin names.
 
 ### Not ported yet
 
@@ -205,7 +211,8 @@ them is unavailable:
 | --- | --- |
 | `picoruby-flash-file` | `PWMAudio::Stream`, which reads samples straight from flash |
 | `picoruby-dmx` | DMX output, and the johakyu lighting paths that drive it |
-| `picoruby-uart`, `picoruby-gpio`, `picoruby-pwm`, `picoruby-adc` | The peripherals themselves. `Board::Pad` works through the shim above instead |
+| `picoruby-uart`, `picoruby-gpio`, `picoruby-pwm` | The peripherals themselves |
+| `picoruby-adc` | Analog input. A narrow `ADC` stand-in exists for the pads, described above |
 | `picoruby-synth-native` | The native synth kernels |
 
 `PWMAudio` itself is present, so tones and in-memory samples work. Only

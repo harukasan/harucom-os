@@ -28,17 +28,32 @@ export function installPadUI(root, engine) {
       // Pointer capture keeps the release on this button even if the finger
       // slides off, so a direction cannot stay latched.
       button.addEventListener("pointerdown", (e) => {
+        // Only the primary button. A right-click opens the context menu, which
+        // can swallow the matching pointerup and leave the direction latched.
+        if (e.button !== 0) return;
         button.setPointerCapture(e.pointerId);
         engine.setPad(pad, dir, true);
+        // On a touch device these buttons are the only input, and audio.js only
+        // listens on the canvas and the keyboard, so arm from here as well or
+        // audio_demo runs silently.
+        engine.armAudio();
         e.preventDefault(); // do not steal focus from the screen
       });
       const release = () => engine.setPad(pad, dir, false);
       button.addEventListener("pointerup", release);
       button.addEventListener("pointercancel", release);
+      // The context menu can appear without a pointerup reaching the page.
+      button.addEventListener("contextmenu", (e) => e.preventDefault());
       el.appendChild(button);
     }
     root.appendChild(el);
   }
-  // A page blur can swallow the release entirely.
-  window.addEventListener("blur", () => engine.releasePads());
+  // Losing the page can swallow the release entirely. Switching apps on a phone
+  // fires visibilitychange without a window blur, so watch both, as the
+  // keyboard does.
+  const releaseAll = () => engine.releasePads();
+  window.addEventListener("blur", releaseAll);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) releaseAll();
+  });
 }

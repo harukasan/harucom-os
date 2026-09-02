@@ -13,7 +13,7 @@ describe("ADC pad", () => {
     h.Module._harucom_pad_set(0, 2760); // PAD0 raw for a single UP press
     const out = h.evalInIRB(
       'require "board/pad";b=Board::Pad.new(28);b.read;puts [b.right?,b.up?,b.down?,b.left?].inspect',
-      "[false", 30000);
+      "[false");
     assert.ok(out.includes("[false, true, false, false]"), out);
   });
 });

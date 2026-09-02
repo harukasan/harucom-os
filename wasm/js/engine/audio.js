@@ -170,5 +170,5 @@ export function installAudio(Module, canvas) {
   canvas.addEventListener("mousedown", armAudio);
   window.addEventListener("keydown", armAudio, true);
 
-  return { pump: () => pumpFn() };
+  return { pump: () => pumpFn(), arm: armAudio };
 }

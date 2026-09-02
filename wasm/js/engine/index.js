@@ -41,5 +41,13 @@ export function createEngine(Module, { canvas }) {
     });
   }
 
-  return { start, setPad: pads.setPad, releasePads: pads.releaseAll };
+  return {
+    start,
+    setPad: pads.setPad,
+    releasePads: pads.releaseAll,
+    // Any gesture can arm audio. The canvas and the keyboard do it themselves,
+    // but the on-screen pads are the only input on a touch device, so the page
+    // has to arm from them too.
+    armAudio: audio.arm,
+  };
 }
