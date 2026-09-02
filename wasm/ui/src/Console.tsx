@@ -3,7 +3,8 @@
 // The lines live in the engine's console log, not in this component, so the
 // history survives being unmounted (switching tabs or dock modes tears the
 // panel down) and so output from before the first mount is not lost.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { parseAnsi } from "./ansi";
 import type { ConsoleLog } from "./engine";
 
 export function Console({ log }: { log: ConsoleLog }) {
@@ -25,12 +26,20 @@ export function Console({ log }: { log: ConsoleLog }) {
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) el.scrollTop = el.scrollHeight;
   }, [lines]);
 
+  // Parsed once per batch of lines rather than per render, since the pane also
+  // re-renders when it is resized or re-docked.
+  const spans = useMemo(() => parseAnsi(lines.join("\n")), [lines]);
+
   return (
     <pre
       ref={pane}
       className="bg-base text-console font-mono text-xs leading-relaxed h-full overflow-y-auto m-0 p-2 whitespace-pre-wrap break-all"
     >
-      {lines.join("\n")}
+      {spans.map((span, index) => (
+        span.className
+          ? <span key={index} className={span.className}>{span.text}</span>
+          : span.text
+      ))}
     </pre>
   );
 }
