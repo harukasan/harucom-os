@@ -193,6 +193,7 @@ add_executable(harucom_os
     ${PICORUBY_ROOT}/mrbgems/picoruby-pwm/ports/rp2040/pwm.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-io-console/ports/rp2040/io-console.c
     ${PICORUBY_ROOT}/mrbgems/picoruby-watchdog/ports/rp2040/watchdog.c
+    ${PICORUBY_ROOT}/mrbgems/picoruby-i2c/ports/rp2040/i2c.c
     mrbgems/picoruby-usb-host/ports/rp2350/usb_host.c
     mrbgems/harucom-os-dict/ports/rp2350/dict_region.c
     mrbgems/picoruby-flash-file/ports/rp2350/flash_file.c
@@ -279,6 +280,7 @@ target_link_libraries(harucom_os
     pico_rand
     hardware_sync
     hardware_watchdog
+    hardware_i2c
     tinyusb_host
     tinyusb_pico_pio_usb
     mruby
