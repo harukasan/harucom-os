@@ -84,24 +84,28 @@ describe("file transfer", () => {
 
   it("round-trips bytes that are not text", () => {
     const bytes = new Uint8Array([0x00, 0x01, 0x7f, 0x80, 0xff, 0x00, 0xfe]);
-    fs.writeFileBytes(h.Module, "/data/nested/blob.bin", bytes);
-    assert.deepEqual(Array.from(fs.readFileBytes(h.Module, "/data/nested/blob.bin")),
+    fs.writeFileBytes(h.Module, "/data/blob.bin", bytes);
+    assert.deepEqual(Array.from(fs.readFileBytes(h.Module, "/data/blob.bin")),
                      Array.from(bytes));
   });
 
   it("reads back a file the OS wrote", () => {
-    h.typeString('f = File.open("/data/from_os.txt", "w"); f.write("out"); f.close');
+    // The marker has to be unique: an earlier case already left "=> nil" in the
+    // output, and driveUntil would return without waiting for this eval.
+    h.typeString('f = File.open("/data/from_os.txt", "w"); f.write("out"); f.close; "WROTE-OK"');
     h.hidType(h.ENTER);
-    h.driveUntil("=> nil", 20000);
+    h.driveUntil('=> "WROTE-OK"', 20000);
+    assert.ok(h.printed().includes('=> "WROTE-OK"'), "the OS write did not finish");
     const bytes = fs.readFileBytes(h.Module, "/data/from_os.txt");
     assert.equal(new TextDecoder().decode(bytes), "out");
   });
 });
 
 describe("files panel", () => {
-  let h, files, panel;
+  let h, fs, files, panel;
   before(async () => {
     h = await boot();
+    fs = await import("../js/engine/fs.js");
     files = await import("../js/engine/files.js");
     // Build the panel from index.html itself, so a renamed id there fails here
     // instead of silently breaking the page.
@@ -123,6 +127,26 @@ describe("files panel", () => {
       .map((span) => span.textContent);
     assert.ok(rows.includes("/system.rb"));
     assert.ok(rows.length > 1);
+  });
+
+  it("announces it is ready only once the drop handlers are installed", () => {
+    // index.html ships a neutral status, because a drop before createFiles runs
+    // would still hit the browser default and navigate the page away.
+    const markup = nodeFs.readFileSync(INDEX_HTML, "utf8");
+    assert.ok(!markup.includes("Drop files on the page"), "index.html invites a drop too early");
+    assert.match(panel.querySelector("#file-status").textContent, /Drop files on the page/);
+  });
+
+  it("reports a download of a file the OS already removed", () => {
+    const panelFiles = files.createFiles(h.Module, panel);
+    fs.writeFileBytes(h.Module, "/data/vanishing.txt", new TextEncoder().encode("x"));
+    panelFiles.refresh();
+    const row = Array.from(panel.querySelectorAll("#file-list li"))
+      .find((li) => li.querySelector(".file-path").textContent === "/data/vanishing.txt");
+    assert.ok(row, "the new file is missing from the listing");
+    h.Module.FS.unlink("/data/vanishing.txt"); // the listing is now stale, as it may be
+    row.querySelector("button").click();
+    assert.match(panel.querySelector("#file-status").textContent, /Could not download/);
   });
 
   it("is a no-op without a panel", () => {

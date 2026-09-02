@@ -72,19 +72,6 @@ export function normalizeDestination(directory, name) {
   return "/" + [...segments, name].join("/");
 }
 
-// Create every parent directory of an absolute path. A directory that already
-// exists raises EEXIST, which is the normal case here. Any other failure is left
-// for the write itself to report, where the message names the file.
-function ensureDirectories(Module, path) {
-  const segments = path.split("/").filter((segment) => segment !== "");
-  segments.pop(); // the file name itself
-  let current = "";
-  for (const segment of segments) {
-    current += "/" + segment;
-    try { Module.FS.mkdir(current); } catch { /* already there */ }
-  }
-}
-
 export function fileExists(Module, path) {
   try {
     return Module.FS.isFile(Module.FS.stat(path).mode);
@@ -93,10 +80,10 @@ export function fileExists(Module, path) {
   }
 }
 
-// Write raw bytes, creating the parent directories first. An existing file is
-// replaced.
+// Write raw bytes, replacing an existing file. The parent directory has to
+// exist: an upload can only target a directory the listing already found, so
+// there is nothing here to create. Use Module.FS.mkdirTree if that changes.
 export function writeFileBytes(Module, path, bytes) {
-  ensureDirectories(Module, path);
   Module.FS.writeFile(path, bytes);
 }
 

@@ -31,8 +31,14 @@ export function createEngine(Module, { canvas, filesPanel }) {
     started = true;
     if (Module._harucom_init() !== 0) throw new Error("harucom_init failed");
     pruneRuntimeDirs(Module); // drop the emscripten-only /home /tmp /proc dirs
-    files.refresh();          // list only after the rootfs is deployed
     startRunLoop(Module, { blit: display.blit, applyReleases: report.applyReleases });
+    // The file panel is not part of the machine. List the rootfs after the run
+    // loop is going, and let a failure here leave a booted OS behind.
+    try {
+      files.refresh();
+    } catch (e) {
+      console.error("files: initial listing failed", e);
+    }
   }
 
   return { canvas, start };

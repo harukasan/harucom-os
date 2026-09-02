@@ -143,14 +143,22 @@ returns both the files and the directories. `/dev` is left out of the listing,
 because it is an emscripten device mount rather than part of the board's
 filesystem.
 
-The destination is a `<select>` rather than a text field. `keyboard.js` listens
-on `window` in the capture phase and calls `preventDefault` on nearly every key
-so the OS keeps its shortcuts, which would swallow anything typed into a text
-field.
+The panel is mouse driven. `keyboard.js` listens on `window` in the capture
+phase and calls `preventDefault` on nearly every key so the OS keeps its
+shortcuts, which also swallows Tab, the arrows and Enter before they reach these
+controls. That is why the destination is a `<select>` rather than a text field:
+it stays usable with the mouse, where a text field would not be usable at all.
+Reaching the panel from the keyboard would need a guard in `keyboard.js` for the
+focused element.
 
-The listing is rebuilt on upload and by the Refresh button. The OS writes files
-too (saving from `app/edit.rb`, `mkdir`), and nothing in the VM notifies the
-page, so those appear on the next refresh.
+The listing is rebuilt on upload and by the Refresh button. The OS writes and
+deletes files too (saving from `app/edit.rb`, `mkdir`, `rm`), and nothing in the
+VM notifies the page, so those show up on the next refresh and a row can name a
+file that is already gone.
+
+The panel is not part of the machine. Its first listing runs after the run loop
+has started, and a failure there is logged rather than raised, so the OS boots
+even when the panel does not.
 
 ### Not ported yet
 
