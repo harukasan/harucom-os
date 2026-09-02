@@ -108,3 +108,160 @@ end
 
 desc "Clean everything"
 task distclean: [:clean, :clean_picoruby, :clean_dict]
+
+# ---------------------------------------------------------------------------
+# WebAssembly build (run Harucom OS in the browser via picoruby.wasm)
+# ---------------------------------------------------------------------------
+# PICORUBY_DIR is defined above with the host-test paths.
+WASM_DIR      = File.join(PROJECT_DIR, "wasm")        # source: index.html, js, tests
+WASM_OUT      = File.join(BUILD_DIR, "wasm")          # build output (build/ is gitignored)
+WASM_CONFIG   = File.join(PROJECT_DIR, "build_config", "harucom-wasm.rb")
+WASM_BUILD    = File.join(PICORUBY_DIR, "build", "harucom-wasm")
+WASM_HOST     = File.join(PICORUBY_DIR, "build", "host")
+WASM_LIBMRUBY = File.join(WASM_BUILD, "lib", "libmruby.a")
+WASM_JS       = File.join(WASM_OUT, "harucom.js")
+WASM_WASM     = File.join(WASM_OUT, "harucom.wasm")
+ROOTFS_DIR    = File.join(PROJECT_DIR, "rootfs")
+# Generated into build/, the same path the board's CMake build uses
+# (CMAKE_BINARY_DIR/ruby_scripts.h), so the header lives in one place and not in
+# the gem source tree. harucom-os-wasm/mrbgem.rake adds build/ to its include
+# path so harucom_wasm.c can #include it.
+ROOTFS_DATA   = File.join(BUILD_DIR, "ruby_scripts.h")
+GEN_RUBY_SCRIPTS = File.join(PROJECT_DIR, "scripts", "gen_ruby_scripts.rb")
+
+# Regenerate ruby_scripts.h only when a rootfs source (or the generator) is
+# newer, so an unchanged rootfs does not force harucom_wasm.c to recompile.
+file ROOTFS_DATA =>
+     (FileList["#{ROOTFS_DIR}/**/*"].exclude { |f| File.directory?(f) } << GEN_RUBY_SCRIPTS) do
+  mkdir_p BUILD_DIR
+  sh "ruby", GEN_RUBY_SCRIPTS, ROOTFS_DIR, ROOTFS_DATA
+end
+
+namespace :wasm do
+  def require_emcc!
+    return if system("emcc --version > /dev/null 2>&1")
+    abort "emcc not found on PATH. Activate emscripten first (source emsdk_env.sh)."
+  end
+
+  # Copy the static page and its ES modules next to the built module so
+  # build/wasm/ is a self-contained directory the server can host.
+  def stage_page!
+    mkdir_p WASM_OUT
+    cp File.join(WASM_DIR, "index.html"), File.join(WASM_OUT, "index.html")
+    cp File.join(WASM_DIR, "style.css"), File.join(WASM_OUT, "style.css")
+    rm_rf File.join(WASM_OUT, "js")
+    cp_r File.join(WASM_DIR, "js"), File.join(WASM_OUT, "js")
+  end
+
+  # A coarse mtime signature of the staged sources, so the dev server can restage
+  # when an index.html / style.css / js edit changes them.
+  def stage_signature
+    Dir.glob([File.join(WASM_DIR, "index.html"),
+              File.join(WASM_DIR, "style.css"),
+              File.join(WASM_DIR, "js", "**", "*")]).sort.map do |f|
+      File.file?(f) ? File.mtime(f).to_f : 0.0
+    end
+  end
+
+  desc "Generate rootfs C arrays (ruby_scripts.h) when rootfs/ changes"
+  task rootfs: ROOTFS_DATA
+
+  desc "Build build/wasm/harucom.{js,wasm} (CLEAN=1 to rebuild presym/host from scratch)"
+  task build: :rootfs do
+    require_emcc!
+    if %w[1 true yes].include?(ENV["CLEAN"].to_s.downcase)
+      rm_rf WASM_BUILD
+      rm_rf WASM_HOST
+    end
+    mkdir_p WASM_OUT
+    # Build libmruby.a with emscripten outside this project's bundler env: the
+    # bundler env breaks emcc's bundled Python. The picoruby-dvi font generation
+    # still works because freetype is installed as a system gem.
+    Bundler.with_unbundled_env do
+      sh({ "MRUBY_CONFIG" => WASM_CONFIG }, "rake", chdir: PICORUBY_DIR)
+    end
+    # Link libmruby.a into the browser module. This intentionally differs from
+    # the picoruby-wasm gem's own link task: it exports harucom_init (not
+    # picorb_init) and targets web,node without EXPORT_ES6 so the node tests
+    # (wasm/tests/) can require() it. harucom_init / mrb_run_step / mrb_tick_wasm
+    # are driven by the run loop in wasm/js/engine/runloop.js.
+    exported = '["' + %w[
+      _harucom_init _mrb_run_step _mrb_tick_wasm
+      _harucom_dvi_framebuffer _harucom_dvi_width _harucom_dvi_height
+      _harucom_dvi_frame_count
+      _harucom_kbd_set_state
+      _malloc _free
+    ].join('","') + '"]'
+    runtime  = '["' + %w[ccall UTF8ToString stringToUTF8 lengthBytesUTF8 HEAPU8 FS].join('","') + '"]'
+    sh "emcc", "-g0", "-O2",
+       "-sWASM=1", "-sMODULARIZE=1", "-sEXPORT_NAME=createHarucomModule",
+       "-sEXPORTED_RUNTIME_METHODS=#{runtime}",
+       "-sEXPORTED_FUNCTIONS=#{exported}",
+       "-sINITIAL_MEMORY=32MB", "-sALLOW_MEMORY_GROWTH=1", "-sSTACK_SIZE=2MB",
+       "-sENVIRONMENT=web,node", "-sWASM_ASYNC_COMPILATION=1",
+       "--no-entry",
+       WASM_LIBMRUBY, "-o", WASM_JS
+    stage_page!
+    puts "Built #{WASM_WASM} (#{File.size(WASM_WASM)} bytes)"
+  end
+
+  desc "Serve build/wasm/ over HTTP for browser testing (PORT=8000)"
+  task :server do
+    require "webrick"
+    unless File.exist?(WASM_WASM)
+      abort "#{WASM_WASM} not found. Run `rake wasm:build` first."
+    end
+    stage_page! # pick up any index.html / style.css / js edits without a full rebuild
+    # Restage on change, so editing the browser glue shows up on a plain reload
+    # (no emcc rebuild, no restart).
+    restager = Thread.new do
+      sig = stage_signature
+      loop do
+        sleep 1
+        now = stage_signature
+        next if now == sig
+        sig = now
+        begin
+          stage_page!
+          puts "Restaged wasm/ (js / index.html / style.css change)"
+        rescue => e
+          warn "Restage failed: #{e.message}"
+        end
+      end
+    end
+    restager.abort_on_exception = false
+    port = Integer(ENV["PORT"] || 8000)
+    # WEBrick has no .wasm type, and without application/wasm the browser
+    # refuses the streaming instantiation and falls back to a slower path.
+    mime = WEBrick::HTTPUtils::DefaultMimeTypes.merge(
+      "wasm" => "application/wasm", "js" => "text/javascript"
+    )
+    server = WEBrick::HTTPServer.new(
+      BindAddress: "127.0.0.1", Port: port, DocumentRoot: WASM_OUT,
+      MimeTypes: mime, Logger: WEBrick::Log.new($stderr, WEBrick::Log::WARN)
+    )
+    # Send no-store so a plain reload always picks up the restaged js / css.
+    # Without it the browser serves them from cache and edits appear to do
+    # nothing until a hard reload.
+    server.config[:RequestCallback] = proc do |_req, res|
+      res["Cache-Control"] = "no-store, max-age=0"
+    end
+    ["INT", "TERM"].each { |sig| trap(sig) { server.shutdown } }
+    puts "Serving #{WASM_OUT} at http://localhost:#{port}/  (Ctrl-C to stop)"
+    server.start
+  end
+
+  desc "Smoke-test the wasm build headlessly under Node (node:test runner)"
+  task :test do
+    abort "#{WASM_WASM} not found. Run `rake wasm:build` first." unless File.exist?(WASM_WASM)
+    # node --test expands the glob itself (a bare directory arg is treated as a
+    # module path, not a discovery root).
+    sh "node", "--test", File.join(WASM_DIR, "tests", "*.test.cjs")
+  end
+
+  desc "Remove the wasm build output"
+  task :clean do
+    rm_rf WASM_BUILD
+    rm_rf WASM_OUT
+  end
+end

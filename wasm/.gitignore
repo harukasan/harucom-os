@@ -1,0 +1,3 @@
+# Node test harness dependencies (jsdom). Build artifacts live in build/wasm/.
+node_modules/
+package-lock.json
