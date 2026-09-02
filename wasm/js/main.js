@@ -24,7 +24,10 @@ function printLine(text) {
 }
 
 window.createHarucomModule({ print: printLine, printErr: printLine }).then((Module) => {
-  const engine = createEngine(Module, { canvas: document.getElementById("screen") });
+  const engine = createEngine(Module, {
+    canvas: document.getElementById("screen"),
+    filesPanel: document.getElementById("files"),
+  });
 
   // Ctrl-Alt-Delete reboot: the wasm shim (usb_host_wasm.c) calls this when that
   // chord appears in the HID report. The board watchdog_reboots. The browser

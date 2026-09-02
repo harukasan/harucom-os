@@ -41,3 +41,65 @@ body {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* The files panel: same 640px column as the screen and the log. */
+#files {
+  width: 640px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  padding: 8px;
+}
+
+#files.dragging {
+  border-color: var(--fg);
+}
+
+.files-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#files button,
+#files select {
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+}
+
+#files button:hover {
+  border-color: var(--fg);
+}
+
+#file-status {
+  margin: 8px 0 0;
+  opacity: 0.7;
+}
+
+#file-list {
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 12em;
+  overflow-y: auto;
+  list-style: none;
+}
+
+#file-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.file-path {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.file-size {
+  opacity: 0.7;
+  white-space: nowrap;
+}

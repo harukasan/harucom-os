@@ -91,7 +91,8 @@ modules so the page never calls `Module._harucom_*` itself.
 | `key-report.js` | HID report state machine, held keys and deferred releases (DOM free) |
 | `keyboard.js` | DOM key events to report calls, canvas focus |
 | `runloop.js` | Clock ticks and scheduler steps from `requestAnimationFrame` |
-| `fs.js` | MEMFS cleanup so `ls /` matches the board |
+| `fs.js` | MEMFS helpers: root cleanup, path checks, reads, writes, listing (DOM free) |
+| `files.js` | Upload and download UI over those helpers |
 
 ### Run loop
 
@@ -127,6 +128,30 @@ The browser has no vsync, so `DVI.wait_vsync` sleeps about one frame instead
 same way, so a render loop that commits every iteration runs at the display rate
 rather than starving the rest of the page.
 
+### Files
+
+The `#files` panel moves files between the local machine and MEMFS. Dropping
+files anywhere on the page, or picking them with the button, writes them into
+the directory chosen in the picker. Each row of the listing downloads that file
+as a Blob. MEMFS is redeployed from the embedded rootfs on every page load, so
+an uploaded file lives for the session only.
+
+`fs.js` holds the DOM free half: `normalizeDestination` rejects a name or a
+destination that would escape the chosen directory, `writeFileBytes` and
+`readFileBytes` move raw bytes, and `readTree` walks the filesystem once and
+returns both the files and the directories. `/dev` is left out of the listing,
+because it is an emscripten device mount rather than part of the board's
+filesystem.
+
+The destination is a `<select>` rather than a text field. `keyboard.js` listens
+on `window` in the capture phase and calls `preventDefault` on nearly every key
+so the OS keeps its shortcuts, which would swallow anything typed into a text
+field.
+
+The listing is rebuilt on upload and by the Refresh button. The OS writes files
+too (saving from `app/edit.rb`, `mkdir`), and nothing in the VM notifies the
+page, so those appear on the next refresh.
+
 ### Not ported yet
 
 Three gems have no `ports/posix` implementation, so the browser build leaves
@@ -139,7 +164,7 @@ that reaches `InputMethod.skk_lookup` or `InputMethod.dict_available?` raises
 
 | Area | Board | Browser |
 | --- | --- | --- |
-| Filesystem | LittleFS on flash, mounted through VFS | MEMFS, redeployed from the embedded rootfs on every load |
+| Filesystem | LittleFS on flash, mounted through VFS | MEMFS, redeployed from the embedded rootfs on every load, so an upload or an edit is lost on reload |
 | Display | HSTX and DMA scanline renderer | `render_text` into an RGB332 framebuffer, blitted to a canvas |
 | Keyboard | PIO-USB HID host | DOM key events converted to a HID report |
 | Reboot | Watchdog | Page reload (`window.__harucomReboot`) |
@@ -156,8 +181,9 @@ supplies only the VRAM storage and the renderer.
 banner appears, and exposes helpers to inject HID reports. picoruby-wasm
 initializes its JS interop against `window` and `document`, so the harness
 installs a jsdom DOM first. The tests cover the boot path (every `require`
-resolved), the rendered framebuffer, and a keystroke evaluated end to end
-through the keyboard pipeline into IRB.
+resolved), the rendered framebuffer, a keystroke evaluated end to end through
+the keyboard pipeline into IRB, and a file uploaded into MEMFS and read back by
+the OS.
 
 ## References
 

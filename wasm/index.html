@@ -12,6 +12,20 @@
   <canvas id="screen" width="640" height="480"></canvas>
   <pre id="log"></pre>
 
+  <!-- #files moves files in and out of MEMFS. Uploads land in the directory
+       picked here. The drop target is the whole page. -->
+  <section id="files">
+    <div class="files-bar">
+      <label for="file-destination">Upload to</label>
+      <select id="file-destination"></select>
+      <button type="button" id="file-pick">Choose files</button>
+      <button type="button" id="file-refresh">Refresh</button>
+      <input type="file" id="file-input" multiple hidden>
+    </div>
+    <p id="file-status">Drop files on the page to upload them.</p>
+    <ul id="file-list"></ul>
+  </section>
+
   <!-- harucom.js (classic script) defines the global createHarucomModule
        factory; main.js (ES module) boots the VM and wires up the page. -->
   <script src="harucom.js"></script>

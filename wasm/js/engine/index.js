@@ -1,17 +1,18 @@
 // Engine facade: the single window onto the wasm runtime and its devices.
 //
 // createEngine wraps an already-created emscripten Module and composes the
-// device modules (display, keyboard, run loop). start() then inits the VM,
-// prunes the runtime-only dirs, and starts the run loop. The page drives it
+// device modules (display, keyboard, files, run loop). start() then inits the
+// VM, prunes the runtime-only dirs, and starts the run loop. The page drives it
 // through this surface and never touches Module._harucom_* directly.
 
 import { createDisplay } from "./display.js";
+import { createFiles } from "./files.js";
 import { createKeyReport } from "./key-report.js";
 import { installKeyboard } from "./keyboard.js";
 import { startRunLoop } from "./runloop.js";
 import { pruneRuntimeDirs } from "./fs.js";
 
-export function createEngine(Module, { canvas }) {
+export function createEngine(Module, { canvas, filesPanel }) {
   // None of these touch the VM yet (createDisplay only reads the static
   // framebuffer address and the constant dimensions), so composing them before
   // start() is safe.
@@ -20,6 +21,7 @@ export function createEngine(Module, { canvas }) {
     Module._harucom_kbd_set_state(modifier,
       codes[0]||0, codes[1]||0, codes[2]||0, codes[3]||0, codes[4]||0, codes[5]||0));
   installKeyboard(canvas, report);
+  const files = createFiles(Module, filesPanel);
 
   let started = false;
   // Init the VM, drop the emscripten-only dirs, and start the run loop. Throws
@@ -29,6 +31,7 @@ export function createEngine(Module, { canvas }) {
     started = true;
     if (Module._harucom_init() !== 0) throw new Error("harucom_init failed");
     pruneRuntimeDirs(Module); // drop the emscripten-only /home /tmp /proc dirs
+    files.refresh();          // list only after the rootfs is deployed
     startRunLoop(Module, { blit: display.blit, applyReleases: report.applyReleases });
   }
 
