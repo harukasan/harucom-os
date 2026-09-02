@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, act, screen } from "@testing-library/react";
 import { Panels } from "./Panels";
 import { stubEngine } from "./test-engine";
 import { createConsoleLog } from "./engine";
 
-function setup() {
+function setup(onDock = vi.fn()) {
   const log = createConsoleLog();
   const engine = stubEngine(log);
-  return { engine, log, ...render(<Panels engine={engine} log={log} />) };
+  return { engine, log, onDock, ...render(<Panels engine={engine} log={log} dock="undocked" onDock={onDock} />) };
 }
 
 describe("Panels", () => {
@@ -88,5 +88,21 @@ describe("Panels", () => {
     act(() => engine.emit("audio", { level: 2048, underruns: 0, dropped: 0 }));
     expect(screen.getByText("running")).toBeTruthy();
     expect(screen.getByText("2048")).toBeTruthy();
+  });
+
+  // The host draws the dock buttons but does not act on them: the layout around
+  // it belongs to the App, so the choice is reported upward.
+  it("reports a dock choice rather than acting on it", () => {
+    const { onDock } = setup();
+    act(() => {
+      screen.getByRole("button", { name: "Dock the panels below" }).click();
+    });
+    expect(onDock).toHaveBeenCalledWith("bottom");
+  });
+
+  it("marks the current dock position", () => {
+    setup();
+    expect(screen.getByRole("button", { name: "Undock the panels" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Dock the panels below" }).getAttribute("aria-pressed")).toBe("false");
   });
 });

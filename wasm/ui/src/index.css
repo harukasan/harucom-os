@@ -43,6 +43,21 @@
     image-rendering: pixelated;
   }
 
+  /* The undocked panel box resizes by its bottom-right corner, which the browser
+   * does natively. resize needs overflow other than visible, and the host scrolls
+   * its own body, so nothing is lost by hiding it here. The bounds are here
+   * rather than in the component because the browser, not React, applies them. */
+  .undock-box {
+    resize: both;
+    overflow: hidden;
+    width: 640px;
+    height: 320px;
+    min-width: 240px;
+    min-height: 120px;
+    max-width: min(1280px, 100%);
+    max-height: 80vh;
+  }
+
   /* Thin dark scrollbars to match the devtools look. */
   ::-webkit-scrollbar {
     width: 10px;
