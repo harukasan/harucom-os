@@ -49,6 +49,13 @@ typedef struct {
   uint32_t key_count; /* 40 for standard T-Code */
 } dict_tcode_header_t;
 
+/*
+ * Base of the dictionary image, supplied by the platform. On RP2350 this is the
+ * XIP-mapped flash region above, so it is always mapped. A platform that has to
+ * load the image returns NULL until it has, which the lookups below tolerate.
+ */
+const uint8_t *dict_region_base(void);
+
 /* Check whether the dictionary region contains valid data */
 int dict_available(void);
 
