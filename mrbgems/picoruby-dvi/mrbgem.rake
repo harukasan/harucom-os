@@ -5,10 +5,19 @@ MRuby::Gem::Specification.new('picoruby-dvi') do |spec|
 
   spec.cc.include_paths << "#{dir}/src"
 
-  # The scanline renderer and the cell writers are timing critical, so build
-  # this gem at -O2 like the CMake picoruby-dvi library rather than the -Os
-  # picoruby applies to gem sources.
-  spec.cc.flags << "-O2"
+  # The text cell writers (src/dvi_text.c) run on core 0 for every character the
+  # console and the editor draw, and they lived in the CMake picoruby-dvi library
+  # at -O2 before they moved here, where picoruby builds gem sources at -Os. Pin
+  # this gem back to -O2 so they keep that budget. This covers the whole gem, so
+  # the graphics sources are optimized here too.
+  #
+  # Skipped under PICORB_DEBUG: picoruby sets -O0 -g3 -fno-inline there, and this
+  # flag comes last, so it would silently re-optimize this one gem while
+  # debugging it.
+  #
+  # NOTE: changing this flag does not invalidate already-built objects. Run
+  # `rake distclean` after touching it or the previous -Os objects are relinked.
+  spec.cc.flags << "-O2" unless ENV["PICORB_DEBUG"]
 
   # Generate font headers from BDF sources into build_dir/include
   include_dir = "#{build_dir}/include"

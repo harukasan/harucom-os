@@ -8,10 +8,16 @@
 extern "C" {
 #endif
 
+// Active video resolution. The text grid and the graphics buffers both derive
+// from this, so a port's video timing cannot drift from the grid the shared
+// text core computes. A port checks its own timing against these.
+#define DVI_ACTIVE_WIDTH  640
+#define DVI_ACTIVE_HEIGHT 480
+
 // Maximum graphics resolution (used for buffer allocation only).
 // Runtime resolution is controlled by dvi_set_graphics_scale().
-#define DVI_GRAPHICS_MAX_WIDTH  640
-#define DVI_GRAPHICS_MAX_HEIGHT 480
+#define DVI_GRAPHICS_MAX_WIDTH  DVI_ACTIVE_WIDTH
+#define DVI_GRAPHICS_MAX_HEIGHT DVI_ACTIVE_HEIGHT
 #define DVI_GRAPHICS_HALF_SIZE  ((DVI_GRAPHICS_MAX_WIDTH / 2) * (DVI_GRAPHICS_MAX_HEIGHT / 2))
 
 // Compile-time default scale (kept for backward compatibility).

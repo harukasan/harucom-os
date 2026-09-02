@@ -700,7 +700,7 @@ layout, line buffer design, and measured performance.
 | Region | Size | Contents |
 |---|---|---|
 | Flash (XIP) | ~920 KB | Firmware, font data (~400 KB), mruby library |
-| Main SRAM | ~177 KB | text_vram x2 (31.4 KB), narrow_row_cache (6.6 KB), line_buf (5.2 KB), screenbuf (300 KB, framebuffer / glyph_bitmap union), stacks, BSS |
+| Main SRAM | ~177 KB | text_vram x2 (31.4 KB), dvi_text_narrow_cache (6.6 KB), line_buf (5.2 KB), screenbuf (300 KB, framebuffer / glyph_bitmap union), stacks, BSS |
 | SCRATCH_X | ~3.6 KB | IRQ handler + render code |
 | SCRATCH_Y | 4 KB | font_byte_mask (2 KB) + pico-sdk default stack (2 KB, unused after BSS stack switch) |
 | PSRAM (QMI CS1) | 8 MB | mruby heap |

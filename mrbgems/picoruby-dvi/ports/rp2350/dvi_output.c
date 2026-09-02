@@ -68,6 +68,9 @@
 #define MODE_V_SYNC_WIDTH    2
 #define MODE_V_BACK_PORCH    33
 #define MODE_V_ACTIVE_LINES  480
+_Static_assert(MODE_H_ACTIVE_PIXELS == DVI_ACTIVE_WIDTH &&
+               MODE_V_ACTIVE_LINES == DVI_ACTIVE_HEIGHT,
+               "video timing must match the resolution the text core derives its grid from");
 #define MODE_V_TOTAL_LINES                                                                         \
   (MODE_V_ACTIVE_LINES + MODE_V_FRONT_PORCH + MODE_V_SYNC_WIDTH + MODE_V_BACK_PORCH)
 
@@ -230,7 +233,6 @@ static int line_buf_next = 0;
 
 
 // 12px renderer constants (TEXT_GLYPH_HEIGHT_12WIDE comes from dvi_text_internal.h)
-#define TEXT_12WIDE_COLS         (MODE_H_ACTIVE_PIXELS / 6) // 106
 
 
 // Per-row wide character flag for narrow-only / mixed path dispatch
@@ -300,8 +302,8 @@ static void __scratch_x("") render_text_scanline_12wide(int scanline, uint8_t *o
   int phys_row = text_row + render_scroll_offset;
   if (phys_row >= dvi_text_rows) phys_row -= dvi_text_rows;
 
-  const uint32_t *cell = (const uint32_t *)&render_vram[phys_row * TEXT_12WIDE_COLS];
-  const uint32_t *end = cell + TEXT_12WIDE_COLS;
+  const uint32_t *cell = (const uint32_t *)&render_vram[phys_row * TEXT_VRAM_STRIDE];
+  const uint32_t *end = cell + dvi_text_cols;
   uint8_t *out_end = out + MODE_H_ACTIVE_PIXELS;
 
   // SRAM cache row: regular at [0..255], bold at [256..511].
@@ -399,7 +401,7 @@ static void __scratch_x("") render_text_scanline_12wide(int scanline, uint8_t *o
     // Narrow uses dvi_text_narrow_cache. glyph_ptr advances by 1 for narrow,
     // 2 for wide to stay synchronized with cell position.
     const uint8_t *glyph_ptr =
-        screenbuf.glyph_bitmap +
+        dvi_text_glyph_bitmap +
         (phys_row * TEXT_GLYPH_HEIGHT_12WIDE + glyph_y) * GLYPH_BITMAP_STRIDE;
     const uint32_t *exp = (const uint32_t *)font_byte_mask;
 
@@ -527,7 +529,7 @@ static void __not_in_flash_func(render_text_scanline_12wide_scaled)(int src_line
   const dvi_text_cell_t *cells = &render_vram[phys_row * TEXT_VRAM_STRIDE];
   const uint8_t *narrow_row = dvi_text_narrow_cache + (glyph_y * NARROW_CACHE_STRIDE);
   const uint8_t *glyph_row =
-      screenbuf.glyph_bitmap +
+      dvi_text_glyph_bitmap +
       (phys_row * TEXT_GLYPH_HEIGHT_12WIDE + glyph_y) * GLYPH_BITMAP_STRIDE;
 
   uint32_t prev_attr = 0x100; // out of attr range, forces first lookup

@@ -63,8 +63,11 @@ extern uint8_t *dvi_text_glyph_bitmap;
 // Reset the palette to the built-in default (called by the platform at init).
 void dvi_text_init_palette(void);
 
-// Point the shared write-side pointers above at the platform's buffers. The
-// platform calls this before anything can write a cell.
+// Point the shared write-side pointers above at the platform's buffers. They
+// start NULL, so the platform must call this before anything writes a cell:
+// dvi_text_clear() alone would otherwise write the whole grid through a NULL
+// pointer. The cell writers assert on it in debug builds and do not check in
+// release, where the cost would land on the per-character set-time path.
 void dvi_text_bind_buffers(dvi_text_cell_t *vram, uint8_t *row_has_wide,
                            uint8_t *glyph_bitmap);
 

@@ -30,13 +30,17 @@ drag-and-drop. The dictionary is built from the
 it on first run.
 
 **When changing `build_config/*.rb` (adding/removing gems, changing defines),
-adding new `MRB_SYM()` identifiers in C code, or updating the `lib/picoruby`
-submodule, you must run `rake distclean` before `rake`.** `rake clean` only
+changing a gem's compile flags in `mrbgem.rake`, adding new `MRB_SYM()`
+identifiers in C code, or updating the `lib/picoruby` submodule, you must run
+`rake distclean` before `rake`.** `rake clean` only
 removes the CMake build directory; it does not rebuild `libmruby.a` or
 regenerate the presym table. The PicoRuby build cache is separate and only
 cleared by `distclean`. CMake has no dependency edge from the submodule to
 `libmruby.a`, so an incremental `rake` after a submodule update links the
-previously built archive and silently ships the old VM.
+previously built archive and silently ships the old VM. Compile flags are the
+same class of trap: mruby's object tasks depend on sources and headers, never on
+the flags, so a changed `spec.cc.flags` relinks the objects built with the old
+ones.
 
 ## Testing
 
