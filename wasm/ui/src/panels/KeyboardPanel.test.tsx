@@ -109,5 +109,27 @@ describe("KeyboardPanel", () => {
     unmount();
     expect(engine.keyUp).toHaveBeenCalledWith(0x04);
     expect(engine.keyUp).toHaveBeenCalledWith(0x05);
+
+  // Every row is 15u wide, which is what makes the columns line up down the
+  // board. A width that does not add up shows as a ragged right edge, and is
+  // easy to introduce by changing one key.
+  it("lays every row out to the same width", () => {
+    const { container } = setup();
+    const rows = [...container.querySelectorAll<HTMLElement>(".grid")];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const spans = [...row.children].map((cell) =>
+        Number(/span (\d+)/.exec((cell as HTMLElement).style.gridColumn)?.[1] ?? 0));
+      expect(spans.reduce((total, span) => total + span, 0)).toBe(60);
+    }
+  });
+
+  // A gap is a spacer, not a key: clicking where the F-row breaks must not send
+  // a keystroke.
+  it("leaves the gaps in the rows inert", () => {
+    const { container } = setup();
+    const spacers = [...container.querySelectorAll("div.grid > div")];
+    expect(spacers.length).toBeGreaterThan(0);
+    for (const spacer of spacers) expect(spacer.tagName).toBe("DIV");
   });
 });
