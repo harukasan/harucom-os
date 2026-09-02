@@ -6,6 +6,7 @@
 // #screen canvas. stdout and stderr go to the #log element below it.
 
 import { createEngine } from "./engine/index.js";
+import { installPadUI } from "./pad-ui.js";
 
 const log = document.getElementById("log");
 
@@ -36,6 +37,8 @@ window.createHarucomModule({ print: printLine, printErr: printLine }).then((Modu
   // chord appears in the HID report. The board watchdog_reboots. The browser
   // reloads, which recreates the Module and reruns harucom_init from scratch.
   window.__harucomReboot = () => location.reload();
+
+  installPadUI(document.getElementById("pads"), engine);
 
   try {
     engine.start();
