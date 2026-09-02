@@ -189,10 +189,13 @@ dvi_set_text_scale(int scale)
 void dvi_graphics_set_back_buffer(uint8_t *bb) { (void)bb; }
 
 // Present the graphics drawing buffer. At scale 1 a straight copy, at scale 2
-// the 320x240 logical image is nearest-neighbor doubled to 640x480.
+// the 320x240 logical image is nearest-neighbor doubled to 640x480. Skipped in
+// text mode, the mirror of dvi_text_commit: a script that draws before
+// switching modes would otherwise paint over the console.
 void
 dvi_graphics_commit(void)
 {
+  if (active_mode != DVI_MODE_GRAPHICS) return;
   if (graphics_scale == 1) {
     memcpy(framebuffer, graphics_buf, (size_t)FB_WIDTH * FB_HEIGHT);
   } else {
@@ -222,9 +225,7 @@ EMSCRIPTEN_KEEPALIVE
 void
 dvi_wasm_init(void)
 {
-  dvi_text_write_vram = vram;
-  dvi_text_write_row_has_wide = row_has_wide;
-  dvi_text_glyph_bitmap = glyph_bitmap;
+  dvi_text_bind_buffers(vram, row_has_wide, glyph_bitmap);
   memset(vram, 0, sizeof(vram));
   memset(row_has_wide, 0, sizeof(row_has_wide));
   memset(glyph_bitmap, 0, sizeof(glyph_bitmap));

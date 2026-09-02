@@ -123,7 +123,7 @@ WASM_DIR      = File.join(PROJECT_DIR, "wasm")        # source: index.html, js, 
 WASM_OUT      = File.join(BUILD_DIR, "wasm")          # build output (build/ is gitignored)
 WASM_CONFIG   = File.join(PROJECT_DIR, "build_config", "harucom-wasm.rb")
 WASM_BUILD    = File.join(PICORUBY_DIR, "build", "harucom-wasm")
-WASM_HOST     = File.join(PICORUBY_DIR, "build", "host")
+WASM_HOST     = File.join(PICORUBY_DIR, "build", "mrbc") # host tools (mrbc)
 WASM_LIBMRUBY = File.join(WASM_BUILD, "lib", "libmruby.a")
 WASM_JS       = File.join(WASM_OUT, "harucom.js")
 WASM_WASM     = File.join(WASM_OUT, "harucom.wasm")
@@ -144,8 +144,12 @@ file ROOTFS_DATA =>
 end
 
 namespace :wasm do
+  # Probe outside the bundler env, the same way the build runs emcc: the bundler
+  # env breaks emcc's bundled Python, so probing inside it would report a
+  # missing emcc on a machine where emsdk_env.sh has been sourced.
   def require_emcc!
-    return if system("emcc --version > /dev/null 2>&1")
+    ok = Bundler.with_unbundled_env { system("emcc --version > /dev/null 2>&1") }
+    return if ok
     abort "emcc not found on PATH. Activate emscripten first (source emsdk_env.sh)."
   end
 

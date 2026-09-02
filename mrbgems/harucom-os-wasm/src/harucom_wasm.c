@@ -33,7 +33,7 @@ extern void dvi_wasm_init(void);
  * (mrbgems/harucom-os-dict/ports/posix/dict_region.c). */
 extern void dict_wasm_init(void);
 
-/* This gem has no Ruby-visible classes of its own; the boot entry below is
+/* This gem has no Ruby-visible classes of its own. The boot entry below is
  * called from JavaScript. */
 void
 mrb_harucom_os_wasm_gem_init(mrb_state *mrb)

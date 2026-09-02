@@ -44,7 +44,7 @@ describe("key-report", () => {
     assert.ok(!usages.includes(0x0a), "the 7th key is dropped");
   });
 
-  it("ORs modifier bits and clears them on keyup", () => {
+  it("ORs modifier bits, and clears them only on applyReleases", () => {
     const { report, last } = make();
     report.modifierDown(0x02);            // Shift
     report.modifierDown(0x01);            // Ctrl
@@ -52,7 +52,31 @@ describe("key-report", () => {
     report.keyDown(0x04);
     assert.deepEqual(last(), [0x03, [0x04]]);
     report.modifierUp(0x02);
+    assert.deepEqual(last(), [0x03, [0x04]], "still shifted before applyReleases");
+    report.applyReleases();
     assert.deepEqual(last(), [0x01, [0x04]]);
+  });
+
+  it("keeps a shifted keystroke shifted when it is typed inside one frame", () => {
+    const { report, last } = make();
+    // Shift down, A down, A up, Shift up, all before the run loop polls.
+    report.modifierDown(0x02);
+    report.keyDown(0x04);
+    report.keyUp(0x04);
+    report.modifierUp(0x02);
+    assert.deepEqual(last(), [0x02, [0x04]],
+                     "the poll must still see Shift held with A, or it types 'a'");
+    report.applyReleases();
+    assert.deepEqual(last(), [0, []]);
+  });
+
+  it("cancels a deferred modifier release when it is pressed again", () => {
+    const { report, last } = make();
+    report.modifierDown(0x02);
+    report.modifierUp(0x02);
+    report.modifierDown(0x02);
+    report.applyReleases();
+    assert.deepEqual(last(), [0x02, []], "the re-press survives the pending clear");
   });
 
   it("drops everything on reset, so a modifier held across a blur cannot latch", () => {

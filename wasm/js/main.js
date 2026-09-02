@@ -13,13 +13,19 @@ const log = document.getElementById("log");
 // emscripten routes to Module.print / Module.printErr per line (no trailing
 // newline). Those handlers must be set at construction time, so init-time output
 // is captured before the engine exists.
+// The console mirrors every line the OS prints to fd 1, so this runs often and
+// on the same thread as the VM and the canvas blit. Append one text node and
+// trim from the front only when the cap is exceeded, rather than rebuilding the
+// whole log and forcing a layout on each line.
 const LOG_MAX_LINES = 500;
-const lines = [];
+let lineCount = 0;
 
 function printLine(text) {
-  lines.push(text);
-  if (lines.length > LOG_MAX_LINES) lines.splice(0, lines.length - LOG_MAX_LINES);
-  log.textContent = lines.join("\n");
+  log.appendChild(document.createTextNode(text + "\n"));
+  if (++lineCount > LOG_MAX_LINES) {
+    log.removeChild(log.firstChild);
+    lineCount--;
+  }
   log.scrollTop = log.scrollHeight;
 }
 
