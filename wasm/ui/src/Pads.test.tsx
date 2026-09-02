@@ -8,6 +8,10 @@ function buttons(container: HTMLElement) {
   return Array.from(container.querySelectorAll("button"));
 }
 
+// Each button names the pad it belongs to, so the two pads are distinguishable
+// to a screen reader and to a test.
+
+
 describe("Pads", () => {
   it("presses and releases the direction the button stands for", () => {
     const engine = stubEngine();

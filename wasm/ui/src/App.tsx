@@ -1,6 +1,5 @@
 // The page shell: the screen, the pads, then the panel host.
 import { Screen } from "./Screen";
-import { Pads } from "./Pads";
 import { Panels } from "./Panels";
 import { Console } from "./Console";
 import type { ConsoleLog, Engine } from "./engine";
@@ -11,7 +10,6 @@ export function App({ canvas, engine, log }: { canvas: HTMLCanvasElement; engine
   return (
     <div className="min-h-screen w-full bg-base text-fg flex flex-col items-center py-8">
       <Screen canvas={canvas} />
-      {engine && <Pads engine={engine} />}
       <div className="mt-10 w-[640px] max-w-full h-80 border border-border rounded-md bg-panel-bg flex flex-col overflow-hidden">
         {engine ? <Panels engine={engine} log={log} /> : <Console log={log} />}
       </div>

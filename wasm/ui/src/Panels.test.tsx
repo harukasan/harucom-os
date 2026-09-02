@@ -41,6 +41,20 @@ describe("Panels", () => {
     expect(screen.getByText("printed while away")).toBeTruthy();
   });
 
+  // The pads are the only input on a touch device, so losing them from the tab
+  // list would leave such a device with no way to drive an app that reads them.
+  it("offers the pads as a tab", () => {
+    const { engine } = setup();
+    act(() => {
+      screen.getByRole("button", { name: "Pads" }).click();
+    });
+    act(() => {
+      screen.getByRole("button", { name: "PAD0 up" }).dispatchEvent(
+        new window.PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 }));
+    });
+    expect(engine.setPad).toHaveBeenCalledWith(0, 1, true);
+  });
+
   it("shows the frame count the engine reports", () => {
     const { engine } = setup();
     act(() => {

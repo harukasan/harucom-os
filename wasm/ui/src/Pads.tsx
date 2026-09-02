@@ -7,11 +7,11 @@ import { useEffect } from "react";
 import type { Engine } from "./engine";
 
 // dir values are the engine's: RIGHT=0 UP=1 DOWN=2 LEFT=3. Laid out as a cross.
-const KEYS: { dir: number; label: string; column: number; row: number }[] = [
-  { dir: 1, label: "↑", column: 2, row: 1 },
-  { dir: 3, label: "←", column: 1, row: 2 },
-  { dir: 0, label: "→", column: 3, row: 2 },
-  { dir: 2, label: "↓", column: 2, row: 3 },
+const KEYS: { dir: number; label: string; name: string; column: number; row: number }[] = [
+  { dir: 1, label: "↑", name: "up", column: 2, row: 1 },
+  { dir: 3, label: "←", name: "left", column: 1, row: 2 },
+  { dir: 0, label: "→", name: "right", column: 3, row: 2 },
+  { dir: 2, label: "↓", name: "down", column: 2, row: 3 },
 ];
 
 const KEY_CLASS =
@@ -24,11 +24,12 @@ function Pad({ pad, engine }: { pad: number; engine: Engine }) {
     <div className="flex flex-col items-center gap-1">
       <div className="text-fg-dim text-xs">PAD{pad}</div>
       <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(3, 2.5rem)", gridAutoRows: "2.5rem" }}>
-        {KEYS.map(({ dir, label, column, row }) => (
+        {KEYS.map(({ dir, label, name, column, row }) => (
           <button
             key={dir}
             type="button"
             className={KEY_CLASS}
+            aria-label={`PAD${pad} ${name}`}
             style={{ gridColumn: column, gridRow: row }}
             onPointerDown={(e) => {
               // Only the primary button. A right-click opens the context menu,
@@ -75,7 +76,7 @@ export function Pads({ engine }: { engine: Engine }) {
   }, [engine]);
 
   return (
-    <div className="flex gap-8 mt-4">
+    <div className="flex gap-8 p-3">
       <Pad pad={0} engine={engine} />
       <Pad pad={1} engine={engine} />
     </div>
