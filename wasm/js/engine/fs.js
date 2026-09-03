@@ -93,7 +93,14 @@ export function readFileBytes(Module, path) {
   return Module.FS.readFile(path);
 }
 
-function walk(Module, path, skip, files, directories) {
+// A depth this far down is a loop, not a filesystem: FS.stat follows symlinks,
+// and a link back to an ancestor would recurse until the stack gives out. This
+// runs on the main thread from the panel's mount and from every upload, so that
+// would take the shell down rather than just the listing.
+const MAX_DEPTH = 32;
+
+function walk(Module, path, skip, files, directories, depth = 0) {
+  if (depth >= MAX_DEPTH) return;
   for (const name of Module.FS.readdir(path)) {
     if (name === "." || name === "..") continue;
     const child = path === "/" ? "/" + name : path + "/" + name;
@@ -102,7 +109,7 @@ function walk(Module, path, skip, files, directories) {
     try { stat = Module.FS.stat(child); } catch { continue; }
     if (Module.FS.isDir(stat.mode)) {
       directories.push(child);
-      walk(Module, child, skip, files, directories);
+      walk(Module, child, skip, files, directories, depth + 1);
     } else if (Module.FS.isFile(stat.mode)) {
       files.push({ path: child, size: stat.size });
     }

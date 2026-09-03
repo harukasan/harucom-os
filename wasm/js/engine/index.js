@@ -58,7 +58,17 @@ export function createEngine(Module, { canvas, log = null }) {
     // here: it does not depend on the run loop, and tying it to that would hide
     // a working filesystem behind an unrelated failure.
     ready = true;
-    for (const callback of waiting.splice(0)) callback();
+    // Guarded: these are the shell's callbacks, and one of them throwing must
+    // not stop the run loop below from starting. That would leave a black
+    // screen with no ticks, no key flush and no audio, and start() cannot be
+    // called again because it is already marked started.
+    for (const callback of waiting.splice(0)) {
+      try {
+        callback();
+      } catch (e) {
+        console.error("harucom: a ready callback failed", e);
+      }
+    }
     startRunLoop(Module, {
       blit: display.blit,
       flushKeys: report.flush,
