@@ -1,4 +1,16 @@
-// MEMFS cleanup: make the wasm filesystem root match the board.
+// MEMFS helpers: the DOM-free half of the browser filesystem.
+//
+// MEMFS is the whole filesystem in the browser build (the board mounts LittleFS
+// through VFS instead), and harucom_init deploys the embedded rootfs into it on
+// every page load. Everything here talks to the emscripten FS API and nothing
+// else, so it can be driven from a test against a plain Module. The DOM glue
+// that uses it lives in files.js, mirroring the hid.js / keyboard.js split.
+
+// Paths left out of the listings. /dev is an emscripten device mount, not part
+// of the board's filesystem, and reading /dev/urandom would never end.
+const SKIP_DEFAULT = ["/dev"];
+
+// Make the wasm filesystem root match the board.
 //
 // The emscripten runtime creates directories the board's LittleFS root does not
 // have (/home, /tmp, /proc). Remove them so `ls /` in the browser looks like the
@@ -34,4 +46,78 @@ export function pruneRuntimeDirs(Module) {
   for (const path of ["/proc/self/fd", "/proc/self", "/proc"]) {
     try { FS.rmdir(path); } catch { /* ignore */ }
   }
+}
+
+// Join a destination directory and a file name into an absolute MEMFS path.
+// A name that arrives with a dropped file is not trusted, so this throws rather
+// than guessing: a separator or a .. segment would otherwise let an upload land
+// outside the chosen directory.
+export function normalizeDestination(directory, name) {
+  if (typeof directory !== "string" || !directory.startsWith("/")) {
+    throw new Error(`destination must be an absolute path: ${directory}`);
+  }
+  const segments = directory.split("/").filter((segment) => segment !== "");
+  if (segments.some((segment) => segment === "." || segment === "..")) {
+    throw new Error(`destination must not contain . or ..: ${directory}`);
+  }
+  if (typeof name !== "string" || name === "") {
+    throw new Error("file name is empty");
+  }
+  if (name.includes("/") || name.includes("\\")) {
+    throw new Error(`file name must not contain a path separator: ${name}`);
+  }
+  if (name === "." || name === "..") {
+    throw new Error(`invalid file name: ${name}`);
+  }
+  return "/" + [...segments, name].join("/");
+}
+
+export function fileExists(Module, path) {
+  try {
+    return Module.FS.isFile(Module.FS.stat(path).mode);
+  } catch {
+    return false;
+  }
+}
+
+// Write raw bytes, replacing an existing file. The parent directory has to
+// exist: an upload can only target a directory the listing already found, so
+// there is nothing here to create. Use Module.FS.mkdirTree if that changes.
+export function writeFileBytes(Module, path, bytes) {
+  Module.FS.writeFile(path, bytes);
+}
+
+// Read a file back as bytes. FS.readFile defaults to binary, so this is a
+// Uint8Array and survives non-UTF-8 content (samples, bitmaps).
+export function readFileBytes(Module, path) {
+  return Module.FS.readFile(path);
+}
+
+function walk(Module, path, skip, files, directories) {
+  for (const name of Module.FS.readdir(path)) {
+    if (name === "." || name === "..") continue;
+    const child = path === "/" ? "/" + name : path + "/" + name;
+    if (skip.includes(child)) continue;
+    let stat;
+    try { stat = Module.FS.stat(child); } catch { continue; }
+    if (Module.FS.isDir(stat.mode)) {
+      directories.push(child);
+      walk(Module, child, skip, files, directories);
+    } else if (Module.FS.isFile(stat.mode)) {
+      files.push({ path: child, size: stat.size });
+    }
+  }
+}
+
+// Walk the whole tree once and return both halves sorted by path: files as
+// { path, size } and directories as paths (always including the root). One walk
+// serves both the file list and the destination picker.
+export function readTree(Module, { skip = SKIP_DEFAULT } = {}) {
+  const files = [];
+  const directories = ["/"];
+  walk(Module, "/", skip, files, directories);
+  const byPath = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  files.sort((a, b) => byPath(a.path, b.path));
+  directories.sort(byPath);
+  return { files, directories };
 }

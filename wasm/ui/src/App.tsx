@@ -10,16 +10,18 @@
 // The screen is remounted when the position changes. That is safe because the
 // canvas is an element passed down rather than one React builds: the engine's 2D
 // context is on that element and survives being moved.
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Screen } from "./Screen";
 import { Panels } from "./Panels";
 import { Console } from "./Console";
+import { FileTransferProvider } from "./useFileTransfer";
 import { clampDock, useDockResize } from "./useDockResize";
 import type { ConsoleLog, Engine } from "./engine";
 import type { DockPosition } from "./dock";
 
 export function App({ canvas, engine, log }: { canvas: HTMLCanvasElement; engine: Engine | null; log: ConsoleLog }) {
   const [dock, setDock] = useState<DockPosition>("undocked");
+  const [active, setActive] = useState("console");
   const [width, setWidth] = useState(384);   // right dock
   const [height, setHeight] = useState(256); // bottom dock
   const dockElement = useRef<HTMLDivElement>(null);
@@ -29,8 +31,17 @@ export function App({ canvas, engine, log }: { canvas: HTMLCanvasElement; engine
 
   // engine is null when the wasm module failed to load. The shell still renders
   // so the console can say why, but there is nothing for the panels to read.
+  // A dropped file lands wherever the page is, so bring its panel forward:
+  // otherwise the result would be reported on a tab nobody is looking at.
+  const showFiles = useCallback(() => setActive("files"), []);
+
   const body = engine
-    ? <Panels engine={engine} log={log} dock={dock} onDock={setDock} />
+    ? (
+      <FileTransferProvider engine={engine} onDrop={showFiles}>
+        <Panels engine={engine} log={log} dock={dock} onDock={setDock}
+                active={active} onActive={setActive} />
+      </FileTransferProvider>
+    )
     : <Console log={log} />;
 
   if (dock === "undocked") {

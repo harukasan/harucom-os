@@ -29,6 +29,38 @@ export interface ConsoleLog {
   subscribe(callback: (lines: readonly string[]) => void): () => void;
 }
 
+/** One file in the MEMFS tree. */
+export interface FileEntry {
+  path: string;
+  size: number;
+}
+
+export interface FileTree {
+  files: FileEntry[];
+  directories: string[];
+}
+
+/** What a batch of uploads did. */
+export interface AddResult {
+  written: string[];
+  replaced: string[];
+  failed: string[];
+}
+
+/** Anything with a name and bytes. A DOM File satisfies it, and so can a test. */
+export interface UploadCandidate {
+  name: string;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+export interface Files {
+  /** Write files into a directory, reporting what landed and what did not. */
+  add(directory: string, files: UploadCandidate[]): Promise<AddResult>;
+  tree(): FileTree;
+  // Typed over a plain ArrayBuffer so the bytes can go straight into a Blob.
+  read(path: string): Uint8Array<ArrayBuffer>;
+}
+
 export interface Engine {
   /** Init the VM, prune the emscripten-only dirs and start the run loop. */
   start(): void;
@@ -42,6 +74,7 @@ export interface Engine {
   keyUp(usage: number): void;
   /** Latch the on-screen keyboard's modifier bits (HID mask). */
   setKeyModifier(mask: number): void;
+  files: Files;
 }
 
 /** The emscripten Module. Only the engine touches its internals. */

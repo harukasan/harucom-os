@@ -2,7 +2,7 @@
 // unless a test emits one. Shared so a new method on Engine is added in one
 // place rather than in every test file.
 import { vi, type Mock } from "vitest";
-import type { Engine, EngineEvents, ConsoleLog } from "./engine";
+import type { Engine, EngineEvents, ConsoleLog, Files } from "./engine";
 
 // The commands are vitest mocks, so a test can read what the component asked
 // the engine to do.
@@ -20,7 +20,13 @@ export interface StubEngine extends Engine {
   emit<E extends keyof EngineEvents>(event: E, value: EngineEvents[E]): void;
 }
 
-export function stubEngine(log: ConsoleLog | null = null): StubEngine {
+const NO_FILES: Files = {
+  add: async () => ({ written: [], replaced: [], failed: [] }),
+  tree: () => ({ files: [], directories: ["/"] }),
+  read: () => new Uint8Array(new ArrayBuffer(0)),
+};
+
+export function stubEngine(log: ConsoleLog | null = null, files: Files = NO_FILES): StubEngine {
   const listeners = new Map<string, ((value: never) => void)[]>();
   return {
     start: vi.fn(),
@@ -31,6 +37,7 @@ export function stubEngine(log: ConsoleLog | null = null): StubEngine {
     keyUp: vi.fn(),
     setKeyModifier: vi.fn(),
     log,
+    files,
     on(event, callback) {
       const list = listeners.get(event) ?? [];
       list.push(callback as (value: never) => void);

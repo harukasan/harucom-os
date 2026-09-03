@@ -12,15 +12,21 @@
 // Console output does not go through the bus. It starts before the engine
 // exists, so it is buffered by a console log the caller creates first and hands
 // in (see createConsoleLog).
+//
+// The filesystem is reached through engine.files rather than the shell calling
+// into MEMFS: the path checks that keep a dropped name inside the chosen
+// directory belong with the machine, not with the panel that draws the list.
 
 import { createEventBus } from "./events.js";
 import { createDisplay } from "./display.js";
+import { createFiles } from "./files.js";
 import { createKeyReport } from "./key-report.js";
 import { installKeyboard } from "./keyboard.js";
 import { installAudio } from "./audio.js";
 import { createPads } from "./pads.js";
 import { startRunLoop } from "./runloop.js";
-import { pruneRuntimeDirs } from "./fs.js";
+import { addFiles } from "./files.js";
+import { pruneRuntimeDirs, readFileBytes, readTree } from "./fs.js";
 
 export function createEngine(Module, { canvas, log = null }) {
   const bus = createEventBus();
@@ -69,5 +75,10 @@ export function createEngine(Module, { canvas, log = null }) {
     keyDown: report.keyDown,
     keyUp: report.keyUp,
     setKeyModifier: report.setOverlayModifier,
+    files: {
+      add: (directory, files) => addFiles(Module, directory, files),
+      tree: () => readTree(Module),
+      read: (path) => readFileBytes(Module, path),
+    },
   };
 }
