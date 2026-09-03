@@ -5,6 +5,7 @@
 #   ls /app
 #   ls -l
 
+require "console"
 require "option_parser"
 require "ls_format"
 
@@ -19,6 +20,7 @@ path = ARGV[0] || "."
 # If path is a file, show just that file
 if File.exist?(path) && !File.directory?(path)
   if options[:l]
+    puts "#{Console::CYAN}#{LsFormat::HEADER}#{Console::RESET}"
     puts LsFormat.row(path, path, false) # the guard above already settled this
   else
     puts path
@@ -34,8 +36,6 @@ end
 begin
   Dir.open(path) do |dir|
     if options[:l]
-      # The header names these columns, not the ones LittleFS::Stat::LABEL was
-      # written for: that one starts at size and this row starts at the type.
       puts "#{Console::CYAN}#{LsFormat::HEADER}#{Console::RESET}"
       while entry = dir.read
         full = "#{path}/#{entry}"
@@ -45,7 +45,7 @@ begin
         begin
           puts LsFormat.row(full, name, directory)
         rescue => e
-          puts "#{name} (#{e.message})"
+          puts LsFormat.error_row(name, e.message)
         end
       end
     else

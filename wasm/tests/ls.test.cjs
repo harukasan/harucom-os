@@ -45,6 +45,7 @@ describe("ls -l", () => {
     const header = plain.split("\n")[0];
     assert.match(header, /^T\s+size\s+datetime\s+name$/, JSON.stringify(header));
     const row = plain.split("\n").find((l) => l.includes("system.rb"));
+    assert.ok(row, "the file is listed: " + JSON.stringify(longOut));
     assert.equal(header.indexOf("size") + 4, /^[d-] +\d+/.exec(row)[0].length,
                  "size label ends where the size does: " + JSON.stringify([header, row]));
     assert.equal(header.indexOf("datetime"), /^[d-] +\d+ /.exec(row)[0].length,
@@ -66,7 +67,11 @@ describe("ls -l", () => {
   });
 
   it("works on a single file too, which took a separate path", () => {
-    const single = h.runApp("ls -l /system.rb");
+    const single = h.runApp("ls -l /system.rb").replace(/\u001b\[\d+m/g, "");
     assert.ok(/^-\s+\d+\s/m.test(single), JSON.stringify(single));
+    // The same header as a directory listing: one -l should not print two
+    // different formats depending on what it was pointed at.
+    assert.ok(single.split("\n").some((l) => /^T\s+size\s+datetime\s+name$/.test(l)),
+              "headed like a directory listing: " + JSON.stringify(single));
   });
 });

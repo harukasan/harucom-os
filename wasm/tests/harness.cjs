@@ -54,6 +54,8 @@ function hidForChar(ch) {
     "[": [0, 0x2f], "]": [0, 0x30], "\\": [0, 0x31], ";": [0, 0x33], ":": [SH, 0x33],
     "'": [0, 0x34], '"': [SH, 0x34], ",": [0, 0x36], ".": [0, 0x37], "/": [0, 0x38],
     "<": [SH, 0x36], ">": [SH, 0x37],
+    "{": [SH, 0x2f], "}": [SH, 0x30], "|": [SH, 0x31], "^": [SH, 0x23],
+    "~": [SH, 0x35], "`": [0, 0x35],
     "?": [SH, 0x38], "(": [SH, 0x26], ")": [SH, 0x27], "&": [SH, 0x24], "*": [SH, 0x25],
     "!": [SH, 0x1e], "@": [SH, 0x1f], "#": [SH, 0x20], "$": [SH, 0x21], "%": [SH, 0x22],
   };
@@ -124,8 +126,6 @@ async function boot() {
     }
   }
 
-  // Type a line into IRB (string + Enter) and drive until its result is echoed.
-  // Returns only the output produced since the line was typed.
   // An app command has no completion marker to wait for. The shell dispatches it
   // and prints nothing of its own afterwards, so waiting on the IRB "=>" only
   // burns the whole step budget. Drive until the output has stopped growing.
@@ -153,6 +153,8 @@ async function boot() {
     return output.slice(start).join("\n");
   }
 
+  // Type a line into IRB (string + Enter) and drive until its result is echoed.
+  // Returns only the output produced since the line was typed.
   function evalInIRB(line, expect, maxSteps = 40000) {
     const start = output.length;
     typeString(line);
