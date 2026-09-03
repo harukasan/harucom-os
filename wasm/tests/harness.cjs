@@ -126,33 +126,6 @@ async function boot() {
     }
   }
 
-  // An app command has no completion marker to wait for. The shell dispatches it
-  // and prints nothing of its own afterwards, so waiting on the IRB "=>" only
-  // burns the whole step budget. Drive until the output has stopped growing.
-  function driveUntilQuiet(from = 0, quiet = 1500, maxSteps = 40000) {
-    let seen = output.length;
-    let still = 0;
-    for (let i = 0; i < maxSteps; i++) {
-      Module._mrb_tick_wasm();
-      Module._mrb_run_step();
-      if (output.length !== seen) {
-        seen = output.length;
-        still = 0;
-        continue;
-      }
-      if (++still >= quiet && output.length > from) return i + 1;
-    }
-    return maxSteps;
-  }
-
-  function runApp(line, maxSteps = 40000) {
-    const start = output.length;
-    typeString(line);
-    hidType(ENTER);
-    driveUntilQuiet(start, 1500, maxSteps);
-    return output.slice(start).join("\n");
-  }
-
   // Type a line into IRB (string + Enter) and drive until its result is echoed.
   // Returns only the output produced since the line was typed.
   function evalInIRB(line, expect, maxSteps = 40000) {
@@ -164,7 +137,7 @@ async function boot() {
   }
 
   const bootSteps = driveUntil("Powered by PicoRuby", 200000);
-  return { Module, output, printed, bootSteps, drive, driveUntil, driveUntilQuiet, hidType, typeString, evalInIRB, runApp, ENTER };
+  return { Module, output, printed, bootSteps, drive, driveUntil, hidType, typeString, evalInIRB, ENTER };
 }
 
 module.exports = { boot };
