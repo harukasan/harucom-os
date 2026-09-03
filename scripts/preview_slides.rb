@@ -76,7 +76,7 @@ def escape_html(text)
   text.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
 end
 
-def element_to_html(element, slide_index, theme_name = "default")
+def element_to_html(element, slide_index, theme_name = "default", setup_lines = [])
   case element.type
   when :text
     align = element.align ? " style=\"text-align: #{element.align}\"" : ""
@@ -99,8 +99,9 @@ def element_to_html(element, slide_index, theme_name = "default")
     "<pre class=\"code-block\"><code>#{code}</code></pre>"
   when :p5_code
     lines = element.text.is_a?(Array) ? element.text : [element.text]
-    code_escaped = lines.join("\n").gsub("\\", "\\\\\\\\").gsub("`", "\\`").gsub("$", "\\$")
-    "<div class=\"p5-canvas\" data-p5-code=\"#{encode_p5_code(lines)}\"></div>"
+    # The theme prepends the pending p5_setup to the draw code, so setup
+    # locals are in scope here the same way they are on the board.
+    "<div class=\"p5-canvas\" data-p5-code=\"#{encode_p5_code(setup_lines + lines)}\"></div>"
   when :blank
     "<div class=\"blank\"></div>"
   when :wait
@@ -140,8 +141,15 @@ def slide_to_html(slide, index, total, metadata, theme_name = "default")
       parts << "  <div class=\"separator\"></div>"
     end
     parts << "  <div class=\"slide-body\">"
+    # p5_setup renders nothing itself; it is consumed by the next p5 block.
+    setup_lines = []
     slide.elements.each do |el|
-      parts << "    #{element_to_html(el, index, theme_name)}"
+      if el.type == :p5_setup
+        setup_lines = el.text.is_a?(Array) ? el.text : [el.text]
+        next
+      end
+      parts << "    #{element_to_html(el, index, theme_name, setup_lines)}"
+      setup_lines = [] if el.type == :p5_code
     end
     parts << "  </div>"
   end
@@ -165,7 +173,7 @@ def generate_html(result)
     <head>
     <meta charset="utf-8">
     <title>#{title}</title>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;800&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;800&family=Inter:wght@400;700&family=Source+Code+Pro:wght@400;700&display=swap">
     <style>
     :root {
     #{theme_css_vars(theme_name)}
@@ -468,12 +476,39 @@ def generate_html(result)
 
     module DVI
       module Graphics
-        # Font constants (name, size pairs used by the shim)
+        # Font constants (family, size pairs used by the shim). The names
+        # mirror picoruby-dvi's font registry so slide code runs unchanged.
         FONT_HELVETICA_BOLD_24 = [:helvetica_bold, 24]
         FONT_HELVETICA_18 = [:helvetica, 18]
         FONT_HELVETICA_BOLD_18 = [:helvetica_bold, 18]
-        FONT_SPLEEN_8X16 = [:monospace, 16]
+
+        FONT_8X8 = [:monospace, 8]
+        FONT_FIXED_4X6 = [:monospace, 6]
         FONT_FIXED_5X7 = [:monospace, 7]
+        FONT_FIXED_6X13 = [:monospace, 13]
+        FONT_SPLEEN_5X8 = [:monospace, 8]
+        FONT_SPLEEN_8X16 = [:monospace, 16]
+        FONT_SPLEEN_12X24 = [:monospace, 24]
+        FONT_MPLUS_12 = [:monospace, 12]
+        FONT_MPLUS_J12 = [:monospace, 12]
+
+        FONT_INTER_18 = [:inter, 18]
+        FONT_INTER_BOLD_18 = [:inter_bold, 18]
+        FONT_INTER_24 = [:inter, 24]
+        FONT_INTER_BOLD_24 = [:inter_bold, 24]
+        FONT_INTER_SYMBOLS_18 = [:inter, 18]
+        FONT_INTER_SYMBOLS_22 = [:inter, 22]
+
+        FONT_OUTFIT_18 = [:outfit, 18]
+        FONT_OUTFIT_BOLD_18 = [:outfit_bold, 18]
+        FONT_OUTFIT_22 = [:outfit, 22]
+        FONT_OUTFIT_BOLD_22 = [:outfit_bold, 22]
+        FONT_OUTFIT_EXTRABOLD_32 = [:outfit_extrabold, 32]
+
+        FONT_SOURCE_CODE_PRO_14 = [:source_code_pro, 14]
+        FONT_SOURCE_CODE_PRO_BOLD_14 = [:source_code_pro_bold, 14]
+        FONT_SOURCE_CODE_PRO_18 = [:source_code_pro, 18]
+        FONT_SOURCE_CODE_PRO_BOLD_18 = [:source_code_pro_bold, 18]
 
         def self.font_height(font)
           font[1]
@@ -595,19 +630,75 @@ def generate_html(result)
         end
       end
 
-      def text_font(font)
+      def stroke_weight(w)
+        @ctx[:lineWidth] = w
+      end
+
+      def width
+        @width
+      end
+
+      def height
+        @height
+      end
+
+      # The canvas transform stack carries the matrix. Fill and stroke are
+      # applied per draw call from the ivars, so save/restore cannot lose them.
+      def push_matrix
+        @ctx.save
+      end
+
+      def pop_matrix
+        @ctx.restore
+      end
+
+      def reset_matrix
+        @ctx.setTransform(1, 0, 0, 1, 0, 0)
+      end
+
+      def translate(tx, ty)
+        @ctx.translate(tx, ty)
+      end
+
+      def rotate(angle)
+        @ctx.rotate(angle)
+      end
+
+      def scale(sx, sy = sx)
+        @ctx.scale(sx, sy)
+      end
+
+      # The weight belongs in @text_font_name because text and text_width
+      # restore the context font from it.
+      def text_font(font, wide_font = nil)
         name, size = font
-        case name
-        when :helvetica_bold
-          @text_font_name = size.to_s + "px Helvetica, Arial, sans-serif"
-          @ctx[:font] = "bold " + @text_font_name
-        when :helvetica
-          @text_font_name = size.to_s + "px Helvetica, Arial, sans-serif"
-          @ctx[:font] = @text_font_name
-        when :monospace
-          @text_font_name = size.to_s + "px Courier New, Courier, monospace"
-          @ctx[:font] = @text_font_name
-        end
+        sans = "Helvetica, Arial, sans-serif"
+        mono = "Courier New, Courier, monospace"
+        @text_font_name = case name
+                          when :helvetica_bold
+                            "bold " + size.to_s + "px " + sans
+                          when :helvetica
+                            size.to_s + "px " + sans
+                          when :monospace
+                            size.to_s + "px " + mono
+                          when :inter
+                            size.to_s + "px Inter, " + sans
+                          when :inter_bold
+                            "bold " + size.to_s + "px Inter, " + sans
+                          when :outfit
+                            size.to_s + "px Outfit, " + sans
+                          when :outfit_bold
+                            "bold " + size.to_s + "px Outfit, " + sans
+                          when :outfit_extrabold
+                            "800 " + size.to_s + "px Outfit, " + sans
+                          when :source_code_pro
+                            size.to_s + "px Source Code Pro, " + mono
+                          when :source_code_pro_bold
+                            "bold " + size.to_s + "px Source Code Pro, " + mono
+                          else
+                            @text_font_name
+                          end
+        @ctx[:font] = @text_font_name
       end
 
       def text_color(c)
