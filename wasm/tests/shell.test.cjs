@@ -28,6 +28,10 @@ describe("shell bundle", () => {
     globalThis.document = document = dom.window.document;
     globalThis.navigator = dom.window.navigator;
     globalThis.HTMLElement = dom.window.HTMLElement;
+    // The run loop asks for the bare global, which Node does not have. A no-op
+    // rather than jsdom's, which re-arms itself every frame and would keep the
+    // test process alive for ever.
+    globalThis.requestAnimationFrame = () => 0;
     dom.window.createHarucomModule = () => Promise.reject(new Error("stubbed"));
 
     await import(pathToFileURL(BUNDLE).href);
@@ -69,7 +73,7 @@ describe("shell bundle, with a module that loads", () => {
       HEAPF32: new Float32Array(4096),
       _malloc: () => 64,
       _free: () => {},
-      _harucom_init: () => 0,
+      _harucom_init: record("init"),
       _harucom_dvi_width: () => 640,
       _harucom_dvi_height: () => 480,
       _harucom_dvi_framebuffer: () => 64,
@@ -92,6 +96,7 @@ describe("shell bundle, with a module that loads", () => {
     globalThis.HTMLElement = dom.window.HTMLElement;
     // jsdom has no 2D context. The display only needs somewhere to build and put
     // an ImageData, so a stub is enough to compose the engine.
+    globalThis.requestAnimationFrame = () => 0;
     // jsdom has no pointer capture. The pads take it so a press that slides off
     // a button still releases, and without this the handler throws before it
     // reaches the engine.
@@ -108,6 +113,16 @@ describe("shell bundle, with a module that loads", () => {
     // by URL, so ask for a distinct one to get a second, independent boot.
     await import(pathToFileURL(BUNDLE).href + "?withModule");
     await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  // Without this the suite passed while the shell never got past composing the
+  // engine: start() threw on a missing requestAnimationFrame and main.tsx put
+  // the message in the console, which nothing read. Deleting the engine.start()
+  // call, or making harucom_init fail, left every other assertion green.
+  it("gets through the boot rather than logging why it could not", () => {
+    const printed = document.querySelector("#app pre");
+    assert.equal(printed ? printed.textContent : "", "", "the console is empty on a clean boot");
+    assert.ok(module.calls.some(([name]) => name === "init"), JSON.stringify(module.calls));
   });
 
   it("renders the panel host once the engine is up", () => {
