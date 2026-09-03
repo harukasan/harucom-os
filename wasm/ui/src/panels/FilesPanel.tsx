@@ -25,6 +25,10 @@ function FilesPanel() {
 
   return (
     <div className={`h-full flex flex-col text-xs ${transfer.dragging ? "bg-border-hover" : ""}`}>
+      {/* The status sits above the controls it is about, and Refresh sits over
+          the Download column it lines up with, so the panel reads as two
+          columns rather than one long row of unrelated buttons. */}
+      <p className="px-2 pt-2 text-fg-dim m-0">{transfer.status}</p>
       <div className="flex items-center gap-2 p-2 border-b border-border">
         <label htmlFor="file-destination" className="text-fg-dim">Upload to</label>
         <select
@@ -38,7 +42,7 @@ function FilesPanel() {
         <button type="button" className={BUTTON} onClick={() => picker.current?.click()}>
           Choose files
         </button>
-        <button type="button" className={BUTTON} onClick={transfer.refresh}>
+        <button type="button" className={`${BUTTON} ml-auto`} onClick={() => transfer.refresh(true)}>
           Refresh
         </button>
         <input
@@ -54,7 +58,6 @@ function FilesPanel() {
           }}
         />
       </div>
-      <p className="px-2 py-1 text-fg-dim m-0">{transfer.status}</p>
       <ul className="flex-1 overflow-auto m-0 p-0 list-none">
         {transfer.files.map((file) => (
           <li key={file.path} className="flex items-center gap-2 px-2 py-0.5 font-mono">
