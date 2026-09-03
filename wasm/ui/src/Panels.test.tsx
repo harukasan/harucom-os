@@ -1,13 +1,29 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, act, screen } from "@testing-library/react";
+import { useState } from "react";
 import { Panels } from "./Panels";
+import { FileTransferProvider } from "./useFileTransfer";
 import { stubEngine } from "./test-engine";
 import { createConsoleLog } from "./engine";
+import type { ConsoleLog, Engine } from "./engine";
+import type { DockPosition } from "./dock";
+
+// Panels is controlled: the shell owns which tab is showing so a dropped file
+// can bring the Files panel forward. This holds that state for the tests.
+function Host({ engine, log, onDock }: { engine: Engine; log: ConsoleLog; onDock: (position: DockPosition) => void }) {
+  const [active, setActive] = useState("console");
+  return (
+    <FileTransferProvider engine={engine}>
+      <Panels engine={engine} log={log} dock="undocked" onDock={onDock}
+              active={active} onActive={setActive} />
+    </FileTransferProvider>
+  );
+}
 
 function setup(onDock = vi.fn()) {
   const log = createConsoleLog();
   const engine = stubEngine(log);
-  return { engine, log, onDock, ...render(<Panels engine={engine} log={log} dock="undocked" onDock={onDock} />) };
+  return { engine, log, onDock, ...render(<Host engine={engine} log={log} onDock={onDock} />) };
 }
 
 describe("Panels", () => {

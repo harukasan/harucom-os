@@ -18,6 +18,9 @@ const { JSDOM } = require("jsdom");
 
 const BUNDLE = path.join(__dirname, "..", "..", "build", "wasm", "ui", "main.js");
 
+// Booting the shell leaves handles nothing here can close: the emscripten
+// runtime and React's scheduler both keep the event loop alive. rake wasm:test
+// runs node with --test-force-exit for that reason.
 describe("shell bundle", () => {
   let document;
 
@@ -73,7 +76,13 @@ describe("shell bundle, with a module that loads", () => {
       HEAPF32: new Float32Array(4096),
       _malloc: () => 64,
       _free: () => {},
-      _harucom_init: record("init"),
+      // Records the call and fills the filesystem, the way harucom_init deploys
+      // the rootfs into MEMFS.
+      _harucom_init() {
+        this.FS.deployed = true;
+        this.calls.push(["init"]);
+        return 0;
+      },
       _harucom_dvi_width: () => 640,
       _harucom_dvi_height: () => 480,
       _harucom_dvi_framebuffer: () => 64,
@@ -84,7 +93,21 @@ describe("shell bundle, with a module that loads", () => {
       _harucom_pad_set: record("pad"),
       _mrb_run_step: () => 0,
       _mrb_tick_wasm: () => 0,
-      FS: { mkdir() {}, unlink() {}, rmdir() {}, readdir: () => [], analyzePath: () => ({ exists: false }) },
+      // A filesystem that only gains its contents when init runs, the way MEMFS
+      // does: the rootfs is deployed by harucom_init, which is called after the
+      // shell has already been rendered.
+      FS: {
+        deployed: false,
+        mkdir() {}, unlink() {}, rmdir() {},
+        analyzePath: () => ({ exists: false }),
+        readdir(path) {
+          if (path !== "/") return [];
+          return this.deployed ? [".", "..", "dict.bin", "system.rb"] : [".", "..", "dict.bin"];
+        },
+        stat: () => ({ mode: 0, size: 7 }),
+        isDir: () => false,
+        isFile: () => true,
+      },
     };
   }
 
@@ -127,7 +150,7 @@ describe("shell bundle, with a module that loads", () => {
 
   it("renders the panel host once the engine is up", () => {
     const tabs = [...document.querySelectorAll("#app button")].map((b) => b.textContent);
-    for (const title of ["Console", "Keyboard", "Pads", "Status"]) {
+    for (const title of ["Console", "Files", "Keyboard", "Pads", "Status"]) {
       assert.ok(tabs.includes(title), `${title} is a tab: ${tabs.join(", ")}`);
     }
   });
@@ -141,5 +164,16 @@ describe("shell bundle, with a module that loads", () => {
     assert.ok(up, "the pads panel is showing: " + document.querySelector("#app").innerHTML.slice(0, 300));
     up.dispatchEvent(new document.defaultView.PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 }));
     assert.ok(module.calls.some(([name]) => name === "pad"), JSON.stringify(module.calls));
+  });
+
+  // The shell renders before harucom_init runs, so a panel that reads the
+  // filesystem when it mounts sees only what emscripten embedded. Without the
+  // second read the Files panel showed /dict.bin alone for the whole session.
+  it("lists the rootfs the OS deployed after the shell had rendered", async () => {
+    const files = [...document.querySelectorAll("#app button")].find((b) => b.textContent === "Files");
+    files.dispatchEvent(new document.defaultView.MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const listed = [...document.querySelectorAll("#app li span")].map((s) => s.textContent);
+    assert.ok(listed.includes("/system.rb"), `the rootfs is listed: ${listed.join(", ")}`);
   });
 });

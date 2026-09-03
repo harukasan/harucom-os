@@ -3,7 +3,6 @@
 // Only the active panel is mounted. Anything a panel must not lose across a tab
 // switch therefore lives in the engine, not in the panel (the console history is
 // the reason that rule exists).
-import { useState } from "react";
 import { PANELS } from "./panels";
 import { DOCK_CHOICES, type DockPosition } from "./dock";
 import type { ConsoleLog, Engine } from "./engine";
@@ -12,13 +11,15 @@ const TAB = "px-3 py-1.5 text-xs uppercase cursor-pointer whitespace-nowrap";
 const TAB_ACTIVE = "text-tab-active bg-panel-bg";
 const TAB_IDLE = "text-tab-inactive hover:text-fg hover:bg-panel-bg";
 
-export function Panels({ engine, log, dock, onDock }: {
+export function Panels({ engine, log, dock, onDock, active, onActive }: {
   engine: Engine;
   log: ConsoleLog;
   dock: DockPosition;
   onDock: (position: DockPosition) => void;
+  /** Owned by the shell, so a dropped file can bring the Files panel forward. */
+  active: string;
+  onActive: (slug: string) => void;
 }) {
-  const [active, setActive] = useState(PANELS[0].slug);
   const panel = PANELS.find((p) => p.slug === active) ?? PANELS[0];
 
   return (
@@ -31,7 +32,7 @@ export function Panels({ engine, log, dock, onDock }: {
               type="button"
               aria-current={p.slug === active}
               className={`${TAB} ${p.slug === active ? TAB_ACTIVE : TAB_IDLE}`}
-              onClick={() => setActive(p.slug)}
+              onClick={() => onActive(p.slug)}
             >
               {p.title}
             </button>

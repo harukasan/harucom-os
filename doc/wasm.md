@@ -135,7 +135,8 @@ modules so the page never calls `Module._harucom_*` itself.
 | `key-report.js` | HID report state machine, held keys and deferred releases (DOM free) |
 | `keyboard.js` | DOM key events to report calls, canvas focus |
 | `runloop.js` | Clock ticks and scheduler steps from `requestAnimationFrame` |
-| `fs.js` | MEMFS cleanup so `ls /` matches the board |
+| `fs.js` | MEMFS helpers: root cleanup, path checks, byte reads and writes, listing (DOM free) |
+| `files.js` | Writing a batch of uploads and reading a drop, over those helpers |
 | `events.js` | The bus the facade dispatches readings through |
 | `console-log.js` | The capped stdout and stderr buffer behind the console panel |
 
@@ -170,13 +171,16 @@ panels rather than inside one. The console history and the file transfer state
 are those cases.
 
 The on-screen keyboard is laid out on a grid of quarter-units, the way keyboard
-sizes are actually specified: a row is 15u wide, a plain key is 1u, and the wide
-keys take the standard ANSI sizes. Every row therefore comes to the same width
-and the columns line up down the board.
+sizes are actually specified: the main block is 15u wide, a plain key is 1u, and
+the wide keys take the standard ANSI sizes. The navigation cluster sits to its
+right in a 3u column, as it does on a real board, with the arrows as an inverted
+T. Every row therefore comes to the same width and the columns line up down the
+board.
 
 | Panel | Shows |
 | --- | --- |
-| Console | stdout and stderr from the OS |
+| Console | stdout and stderr from the OS, with the SGR escapes it prints rendered as colour |
+| Files | files moved between the local machine and the browser's filesystem |
 | Keyboard | an on-screen keyboard driving the same HID report as a physical one |
 | Pads | the two on-screen D-pads |
 | Status | the frame count, the audio worklet's health, and what the last DOM key event became: code, HID usage, whether the browser was stopped, and the resulting report |
@@ -270,6 +274,45 @@ an integer pin in the 26 to 29 range and answers `read_raw`. It is not a
 substitute for picoruby-adc, which also has `read`, `read_voltage` and `input`
 and accepts pin names.
 
+### Files
+
+The Files panel moves files between the local machine and MEMFS. Dropping files
+anywhere on the page, or picking them with the button, writes them into the
+directory chosen in the picker. Each row of the listing downloads that file as a
+Blob. MEMFS is redeployed from the embedded rootfs on every page load, so an
+uploaded file lives for the session only.
+
+The drop target is the whole page rather than the panel, so the canvas is not a
+dead zone and a file can be dropped while another tab is showing.
+
+The panel reaches the filesystem through `engine.files`, not MEMFS directly: the
+path checks that keep a dropped name inside the chosen directory belong with the
+machine rather than with the panel that draws the list.
+
+`fs.js` holds the DOM free half: `normalizeDestination` rejects a name or a
+destination that would escape the chosen directory, `writeFileBytes` and
+`readFileBytes` move raw bytes, and `readTree` walks the filesystem once and
+returns both the files and the directories. `/dev` is left out of the listing,
+because it is an emscripten device mount rather than part of the board's
+filesystem.
+
+The panel is mouse driven. `keyboard.js` listens on `window` in the capture
+phase and calls `preventDefault` on nearly every key so the OS keeps its
+shortcuts, which also swallows Tab, the arrows and Enter before they reach these
+controls. That is why the destination is a `<select>` rather than a text field:
+it stays usable with the mouse, where a text field would not be usable at all.
+Reaching the panel from the keyboard would need a guard in `keyboard.js` for the
+focused element.
+
+The listing is rebuilt on upload and by the Refresh button. The OS writes and
+deletes files too (saving from `app/edit.rb`, `mkdir`, `rm`), and nothing in the
+VM notifies the page, so those show up on the next refresh and a row can name a
+file that is already gone.
+
+The panel is not part of the machine. It lists the filesystem when it mounts,
+and a failure there becomes its status line rather than an exception, so the OS
+runs even when the panel cannot show anything.
+
 ### Not ported yet
 
 These gems are in the board build but not the browser build, so what depends on
@@ -290,7 +333,7 @@ them is unavailable:
 
 | Area | Board | Browser |
 | --- | --- | --- |
-| Filesystem | LittleFS on flash, mounted through VFS | MEMFS, redeployed from the embedded rootfs on every load |
+| Filesystem | LittleFS on flash, mounted through VFS | MEMFS, redeployed from the embedded rootfs on every load, so an upload or an edit is lost on reload |
 | Display | HSTX and DMA scanline renderer | `render_text` into an RGB332 framebuffer, blitted to a canvas |
 | Keyboard | PIO-USB HID host | DOM key events converted to a HID report |
 | Audio | PWM timer ISR consumes the ring | AudioWorklet, drained on demand |
@@ -308,8 +351,9 @@ supplies only the VRAM storage and the renderer.
 banner appears, and exposes helpers to inject HID reports. picoruby-wasm
 initializes its JS interop against `window` and `document`, so the harness
 installs a jsdom DOM first. The tests cover the boot path (every `require`
-resolved), the rendered framebuffer, and a keystroke evaluated end to end
-through the keyboard pipeline into IRB. One file loads the built shell bundle in
+resolved), the rendered framebuffer, a keystroke evaluated end to end through
+the keyboard pipeline into IRB, and a file uploaded into MEMFS and read back by
+the OS. One file loads the built shell bundle in
 a jsdom page, so a build that is broken in ways every source test still passes
 (a bundle that throws on load, an entry that never mounts) fails here.
 

@@ -12,6 +12,10 @@
 // Console output does not go through the bus. It starts before the engine
 // exists, so it is buffered by a console log the caller creates first and hands
 // in (see createConsoleLog).
+//
+// The filesystem is reached through engine.files rather than the shell calling
+// into MEMFS: the path checks that keep a dropped name inside the chosen
+// directory belong with the machine, not with the panel that draws the list.
 
 import { createEventBus } from "./events.js";
 import { createDisplay } from "./display.js";
@@ -20,10 +24,13 @@ import { installKeyboard } from "./keyboard.js";
 import { installAudio } from "./audio.js";
 import { createPads } from "./pads.js";
 import { startRunLoop } from "./runloop.js";
-import { pruneRuntimeDirs } from "./fs.js";
+import { addFiles } from "./files.js";
+import { pruneRuntimeDirs, readFileBytes, readTree } from "./fs.js";
 
 export function createEngine(Module, { canvas, log = null }) {
   const bus = createEventBus();
+  const waiting = [];   // onReady callbacks registered before start()
+  let ready = false;
 
   // None of these touch the VM yet (createDisplay only reads the static
   // framebuffer address and the constant dimensions), so composing them before
@@ -47,6 +54,21 @@ export function createEngine(Module, { canvas, log = null }) {
     started = true;
     if (Module._harucom_init() !== 0) throw new Error("harucom_init failed");
     pruneRuntimeDirs(Module); // drop the emscripten-only /home /tmp /proc dirs
+    // Ready means the filesystem is the one the OS will use, which is true from
+    // here: it does not depend on the run loop, and tying it to that would hide
+    // a working filesystem behind an unrelated failure.
+    ready = true;
+    // Guarded: these are the shell's callbacks, and one of them throwing must
+    // not stop the run loop below from starting. That would leave a black
+    // screen with no ticks, no key flush and no audio, and start() cannot be
+    // called again because it is already marked started.
+    for (const callback of waiting.splice(0)) {
+      try {
+        callback();
+      } catch (e) {
+        console.error("harucom: a ready callback failed", e);
+      }
+    }
     startRunLoop(Module, {
       blit: display.blit,
       flushKeys: report.flush,
@@ -55,8 +77,30 @@ export function createEngine(Module, { canvas, log = null }) {
     });
   }
 
+  // Run `callback` once the VM is up and the rootfs is on MEMFS, immediately if
+  // that has already happened.
+  //
+  // This is not an event, because it cannot be missed. The shell is rendered
+  // before start() so the canvas is in the document for the first blit, which
+  // means anything reading the filesystem mounts while MEMFS still holds only
+  // the embedded dictionary. Whether its subscription is in place before start()
+  // then depends on when React flushes effects, and a missed notification would
+  // leave a listing that is wrong for the whole session.
+  function onReady(callback) {
+    if (ready) {
+      callback();
+      return () => {};
+    }
+    waiting.push(callback);
+    return () => {
+      const i = waiting.indexOf(callback);
+      if (i >= 0) waiting.splice(i, 1);
+    };
+  }
+
   return {
     start,
+    onReady,
     on: bus.on,
     log,
     setPad: pads.setPad,
@@ -69,5 +113,10 @@ export function createEngine(Module, { canvas, log = null }) {
     keyDown: report.keyDown,
     keyUp: report.keyUp,
     setKeyModifier: report.setOverlayModifier,
+    files: {
+      add: (directory, files) => addFiles(Module, directory, files),
+      tree: () => readTree(Module),
+      read: (path) => readFileBytes(Module, path),
+    },
   };
 }
