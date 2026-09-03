@@ -125,4 +125,20 @@ describe("App", () => {
     dockTo("Dock the panels below");
     expect((screen.getByLabelText("Upload to") as HTMLSelectElement).value).toBe("/app");
   });
+
+  // The drop target is the whole page and the Files panel is unmounted whenever
+  // another tab is showing, so a drag over the console had nothing to show for
+  // it and no way to tell the page would take the file.
+  it("shows a drop is possible while another tab is open", () => {
+    const { container } = setup();
+    expect(container.firstElementChild?.className).not.toContain("outline-accent");
+    act(() => {
+      // jsdom has no DataTransfer. isFileDrag only reads `types`, which is what
+      // says a drag carries files rather than text.
+      const event = new window.Event("dragenter", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: { types: ["Files"] } });
+      document.dispatchEvent(event);
+    });
+    expect(container.firstElementChild?.className).toContain("outline-accent");
+  });
 });

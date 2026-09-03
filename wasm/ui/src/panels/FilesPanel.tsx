@@ -35,7 +35,7 @@ function FilesPanel() {
   const picker = useRef<HTMLInputElement>(null);
 
   return (
-    <div className={`h-full flex flex-col text-xs ${transfer.dragging ? "bg-border-hover" : ""}`}>
+    <div className="h-full flex flex-col text-xs">
       {/* The status sits above the controls it is about, and Refresh sits over
           the Download column it lines up with, so the panel reads as two
           columns rather than one long row of unrelated buttons. */}
@@ -50,7 +50,14 @@ function FilesPanel() {
           value={transfer.destination}
           onChange={(e) => transfer.setDestination(e.target.value)}
         >
-          {transfer.directories.map((path) => <option key={path} value={path}>{path}</option>)}
+          {/* The chosen directory is always offered, even when the listing could
+              not be read and holds only the root: a select whose value has no
+              matching option renders blank, while uploads still go to the name
+              it has stopped showing. */}
+          {(transfer.directories.includes(transfer.destination)
+            ? transfer.directories
+            : [transfer.destination, ...transfer.directories]
+          ).map((path) => <option key={path} value={path}>{path}</option>)}
         </select>
         <button type="button" className={BUTTON} onClick={() => picker.current?.click()}>
           Choose files

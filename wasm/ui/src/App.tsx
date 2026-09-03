@@ -14,6 +14,7 @@ import { useCallback, useRef, useState } from "react";
 import { Screen } from "./Screen";
 import { Panels } from "./Panels";
 import { Console } from "./Console";
+import { DropTarget } from "./DropTarget";
 import { FileTransferProvider } from "./useFileTransfer";
 import { clampDock, useDockResize } from "./useDockResize";
 import type { ConsoleLog, Engine } from "./engine";
@@ -81,7 +82,7 @@ export function App({ canvas, engine, log }: { canvas: HTMLCanvasElement; engine
   if (!engine) return shell;
   return (
     <FileTransferProvider engine={engine} onDrop={showFiles}>
-      {shell}
+      <DropTarget>{shell}</DropTarget>
     </FileTransferProvider>
   );
 }

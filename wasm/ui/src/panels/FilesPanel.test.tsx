@@ -195,4 +195,14 @@ describe("FilesPanel", () => {
     setup(stubFiles(TREE, { tree: () => { throw new Error("FS is gone"); } }));
     expect(screen.getByText(/Could not list the filesystem: FS is gone/)).toBeTruthy();
   });
+
+  // A select whose value has no matching option renders blank, so the control
+  // would show nothing while uploads still went to the directory it had stopped
+  // naming.
+  it("still names the destination when the listing could not be read", () => {
+    setup(stubFiles(TREE, { tree: () => { throw new Error("FS is gone"); } }));
+    const picker = screen.getByLabelText("Upload to") as HTMLSelectElement;
+    expect(picker.value).toBe("/data");
+    expect([...picker.options].map((o) => o.value)).toContain("/data");
+  });
 });
