@@ -60,4 +60,17 @@ describe("Pads", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     expect(engine.releasePads).toHaveBeenCalledTimes(2);
   });
+
+  // Only the active panel is mounted, so switching tabs or docks takes the blur
+  // listener away with the panel. A direction held at that moment would never
+  // see its release and the ADC shim would answer with it for the rest of the
+  // session.
+  it("releases everything when the panel goes away", () => {
+    const engine = stubEngine();
+    const { container, unmount } = render(<Pads engine={engine} />);
+    fireEvent.pointerDown(buttons(container)[0], { button: 0, pointerId: 1 });
+    engine.releasePads.mockClear();
+    unmount();
+    expect(engine.releasePads).toHaveBeenCalled();
+  });
 });

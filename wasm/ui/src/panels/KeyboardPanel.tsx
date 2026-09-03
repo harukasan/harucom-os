@@ -46,10 +46,14 @@ const KEY_LATCHED = "bg-pad-on text-[#16161e]";
 
 function KeyboardPanel({ engine }: PanelProps) {
   const [latched, setLatched] = useState<Record<Latch, boolean>>({ shift: false, ctrl: false, alt: false });
-  // A ref, not state: nothing renders from it (the pressed look is the CSS
-  // :active state), and the unmount cleanup below has to read the current value
-  // rather than the one captured when the effect was set up.
-  const pressed = useRef<number | null>(null);
+  // Which usage each pointer is holding. A map rather than one slot because this
+  // panel exists for a machine with no keyboard, which means touch, where typing
+  // with two thumbs is normal: with a single slot, pressing A then B and lifting
+  // A would send the release for B and leave A held, and the OS repeats from the
+  // held state. A ref rather than state because nothing renders from it (the
+  // pressed look is the CSS :active state) and the unmount cleanup has to read
+  // the current value, not the one captured when the effect was set up.
+  const pressed = useRef(new Map<number, number>());
 
   // Push the combined latch mask down whenever it changes, so it applies to
   // every key pressed afterwards, including physical ones.
@@ -64,8 +68,9 @@ function KeyboardPanel({ engine }: PanelProps) {
   // forever, and every later physical key would carry the latched modifiers,
   // with nothing on screen to say why.
   useEffect(() => () => {
-    if (pressed.current !== null) engine.keyUp(pressed.current);
-    pressed.current = null;
+    const held = pressed.current;
+    for (const usage of held.values()) engine.keyUp(usage);
+    held.clear();
     engine.setKeyModifier(0);
   }, [engine]);
 
@@ -73,16 +78,18 @@ function KeyboardPanel({ engine }: PanelProps) {
     // Capture so a press that slides off the key still releases on this button.
     e.currentTarget.setPointerCapture(e.pointerId);
     e.preventDefault(); // do not take focus away from the screen
-    pressed.current = usage;
+    pressed.current.set(e.pointerId, usage);
     engine.keyDown(usage);
   }
 
-  // Release whatever is held rather than what is under the pointer now, so a
-  // press that ends off its key still lifts.
-  function release() {
-    if (pressed.current === null) return;
-    engine.keyUp(pressed.current);
-    pressed.current = null;
+  // Release what this pointer took, not what is under it now, so a press that
+  // ends off its key still lifts and a second finger does not release the first
+  // finger's key.
+  function release(e: ReactPointerEvent<HTMLButtonElement>) {
+    const usage = pressed.current.get(e.pointerId);
+    if (usage === undefined) return;
+    pressed.current.delete(e.pointerId);
+    engine.keyUp(usage);
   }
 
   return (

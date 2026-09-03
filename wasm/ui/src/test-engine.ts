@@ -1,10 +1,21 @@
 // A stub engine for the component tests: every command recorded, no events
 // unless a test emits one. Shared so a new method on Engine is added in one
 // place rather than in every test file.
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import type { Engine, EngineEvents, ConsoleLog } from "./engine";
 
+// The commands are vitest mocks, so a test can read what the component asked
+// the engine to do.
+type Mocked<T> = T extends (...args: infer A) => infer R ? Mock<(...args: A) => R> : T;
+
 export interface StubEngine extends Engine {
+  start: Mocked<Engine["start"]>;
+  setPad: Mocked<Engine["setPad"]>;
+  releasePads: Mocked<Engine["releasePads"]>;
+  armAudio: Mocked<Engine["armAudio"]>;
+  keyDown: Mocked<Engine["keyDown"]>;
+  keyUp: Mocked<Engine["keyUp"]>;
+  setKeyModifier: Mocked<Engine["setKeyModifier"]>;
   /** Deliver an event to whatever the component subscribed. */
   emit<E extends keyof EngineEvents>(event: E, value: EngineEvents[E]): void;
 }

@@ -12,9 +12,9 @@ function setup() {
   return { engine, log, ...render(<Keyboard engine={engine} log={log} />) };
 }
 
-function pointer(button: HTMLElement, type: string) {
+function pointer(button: HTMLElement, type: string, pointerId = 1) {
   act(() => {
-    button.dispatchEvent(new window.PointerEvent(type, { bubbles: true, pointerId: 1 }));
+    button.dispatchEvent(new window.PointerEvent(type, { bubbles: true, pointerId }));
   });
 }
 
@@ -85,5 +85,29 @@ describe("KeyboardPanel", () => {
     pointer(screen.getByRole("button", { name: "A" }), "pointerdown");
     unmount();
     expect(engine.keyUp).toHaveBeenCalledWith(0x04);
+  });
+
+  // This panel is for a machine with no keyboard, which means touch, where
+  // typing with two thumbs is normal. With one slot for the held key, lifting
+  // the first finger sent the release for the second key and left the first one
+  // down, and the OS repeats from the held state.
+  it("keeps two fingers apart", () => {
+    const { engine } = setup();
+    pointer(screen.getByRole("button", { name: "A" }), "pointerdown", 1);
+    pointer(screen.getByRole("button", { name: "B" }), "pointerdown", 2);
+    pointer(screen.getByRole("button", { name: "A" }), "pointerup", 1);
+    expect(engine.keyUp).toHaveBeenCalledWith(0x04);
+    expect(engine.keyUp).not.toHaveBeenCalledWith(0x05);
+    pointer(screen.getByRole("button", { name: "B" }), "pointerup", 2);
+    expect(engine.keyUp).toHaveBeenCalledWith(0x05);
+  });
+
+  it("releases every finger still down when the panel goes away", () => {
+    const { engine, unmount } = setup();
+    pointer(screen.getByRole("button", { name: "A" }), "pointerdown", 1);
+    pointer(screen.getByRole("button", { name: "B" }), "pointerdown", 2);
+    unmount();
+    expect(engine.keyUp).toHaveBeenCalledWith(0x04);
+    expect(engine.keyUp).toHaveBeenCalledWith(0x05);
   });
 });

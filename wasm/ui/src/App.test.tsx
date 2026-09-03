@@ -23,7 +23,7 @@ const dock = () => document.querySelector("[role=separator]")?.nextElementSiblin
 function drag(from: number, to: number, axis: "clientX" | "clientY") {
   const grip = screen.getByRole("separator");
   act(() => {
-    grip.dispatchEvent(new window.PointerEvent("pointerdown", { bubbles: true, pointerId: 1, [axis]: from }));
+    grip.dispatchEvent(new window.PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0, [axis]: from }));
     grip.dispatchEvent(new window.PointerEvent("pointermove", { bubbles: true, pointerId: 1, [axis]: to }));
     grip.dispatchEvent(new window.PointerEvent("pointerup", { bubbles: true, pointerId: 1, [axis]: to }));
   });
@@ -66,6 +66,33 @@ describe("App", () => {
     dockTo("Dock the panels below");
     drag(400, 300, "clientY");
     expect(dock().style.height).toBe("356px"); // 256 + 100
+  });
+
+  // The drag writes the size straight onto the element so a move does not
+  // re-render, and commits it to state on release. A second drag measures from
+  // that state, so this is what says the commit happened: without it the inline
+  // style is all there is, and it is lost the next time App renders.
+  it("starts a second drag from where the first one ended", () => {
+    setup();
+    dockTo("Dock the panels below");
+    drag(400, 300, "clientY"); // 256 + 100
+    expect(dock().style.height).toBe("356px");
+    drag(400, 300, "clientY"); // 356 + 100, not 256 + 100 again
+    expect(dock().style.height).toBe("456px");
+  });
+
+  // A right-press must not start a drag: the context menu can swallow the
+  // pointerup, and with the pointer captured every later move would go on
+  // resizing with no button held.
+  it("ignores a drag started with a non-primary button", () => {
+    setup();
+    dockTo("Dock the panels below");
+    const grip = screen.getByRole("separator");
+    act(() => {
+      grip.dispatchEvent(new window.PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 2, clientY: 400 }));
+      grip.dispatchEvent(new window.PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientY: 300 }));
+    });
+    expect(dock().style.height).toBe("256px");
   });
 
   it("clamps the dock so it cannot swallow or vanish behind the screen", () => {

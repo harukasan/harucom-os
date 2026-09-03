@@ -62,6 +62,11 @@ export function Pads({ engine }: { engine: Engine }) {
   // Losing the page can swallow the release entirely. Switching apps on a phone
   // fires visibilitychange without a window blur, so watch both, as keyboard.js
   // does for the physical keys.
+  //
+  // The cleanup releases as well, because these listeners live and die with the
+  // panel: only the active panel is mounted, so switching tabs or docks with a
+  // direction held takes both the pointerup and the safety net away, and the ADC
+  // shim would answer with that direction for the rest of the session.
   useEffect(() => {
     const releaseAll = () => engine.releasePads();
     const onVisibility = () => {
@@ -72,6 +77,7 @@ export function Pads({ engine }: { engine: Engine }) {
     return () => {
       window.removeEventListener("blur", releaseAll);
       document.removeEventListener("visibilitychange", onVisibility);
+      releaseAll();
     };
   }, [engine]);
 

@@ -25,6 +25,10 @@ export function useDockResize(
   const drag = useRef<{ origin: number; base: number; size: number } | null>(null);
 
   const onPointerDown = useCallback((e: ReactPointerEvent<HTMLElement>) => {
+    // Only the primary button. A right-press opens the context menu, which can
+    // swallow the matching pointerup, and because the pointer is captured every
+    // later move would go on resizing the dock with no button held.
+    if (e.button !== 0) return;
     e.preventDefault();
     drag.current = { origin: vertical ? e.clientY : e.clientX, base: size, size };
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -45,8 +49,15 @@ export function useDockResize(
     const state = drag.current;
     if (!state) return;
     drag.current = null;
-    e.currentTarget.releasePointerCapture(e.pointerId);
+    // A cancelled pointer is no longer active, and releasing capture for one the
+    // browser has forgotten throws. Commit first so a cancelled drag keeps the
+    // size it reached rather than snapping back on the next render.
     commit(state.size);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // the pointer is already gone
+    }
   }, [commit]);
 
   return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp };
