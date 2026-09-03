@@ -171,9 +171,11 @@ panels rather than inside one. The console history and the file transfer state
 are those cases.
 
 The on-screen keyboard is laid out on a grid of quarter-units, the way keyboard
-sizes are actually specified: a row is 15u wide, a plain key is 1u, and the wide
-keys take the standard ANSI sizes. Every row therefore comes to the same width
-and the columns line up down the board.
+sizes are actually specified: the main block is 15u wide, a plain key is 1u, and
+the wide keys take the standard ANSI sizes. The navigation cluster sits to its
+right in a 3u column, as it does on a real board, with the arrows as an inverted
+T. Every row therefore comes to the same width and the columns line up down the
+board.
 
 | Panel | Shows |
 | --- | --- |

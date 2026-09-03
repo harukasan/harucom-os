@@ -109,10 +109,12 @@ describe("KeyboardPanel", () => {
     unmount();
     expect(engine.keyUp).toHaveBeenCalledWith(0x04);
     expect(engine.keyUp).toHaveBeenCalledWith(0x05);
+  });
 
-  // Every row is 15u wide, which is what makes the columns line up down the
-  // board. A width that does not add up shows as a ragged right edge, and is
-  // easy to introduce by changing one key.
+  // Every row is 19u wide (15u main block, a 1u split, a 3u navigation
+  // cluster), which is what makes the columns line up down the board. A width
+  // that does not add up shows as a ragged right edge, and is easy to introduce
+  // by changing one key.
   it("lays every row out to the same width", () => {
     const { container } = setup();
     const rows = [...container.querySelectorAll<HTMLElement>(".grid")];
@@ -120,7 +122,7 @@ describe("KeyboardPanel", () => {
     for (const row of rows) {
       const spans = [...row.children].map((cell) =>
         Number(/span (\d+)/.exec((cell as HTMLElement).style.gridColumn)?.[1] ?? 0));
-      expect(spans.reduce((total, span) => total + span, 0)).toBe(60);
+      expect(spans.reduce((total, span) => total + span, 0)).toBe(76);
     }
   });
 
@@ -131,5 +133,51 @@ describe("KeyboardPanel", () => {
     const spacers = [...container.querySelectorAll("div.grid > div")];
     expect(spacers.length).toBeGreaterThan(0);
     for (const spacer of spacers) expect(spacer.tagName).toBe("DIV");
+  });
+
+  // The navigation keys belong beside the main block, not under it: reaching
+  // for Home where a real board has it is the whole point of drawing a keyboard
+  // rather than a list of buttons.
+  it("puts the navigation cluster to the right of the main block", () => {
+    const { container } = setup();
+    const rows = [...container.querySelectorAll<HTMLElement>(".grid")];
+    const columnOf = (label: string) => {
+      for (const row of rows) {
+        let column = 0;
+        for (const cell of [...row.children] as HTMLElement[]) {
+          const span = Number(/span (\d+)/.exec(cell.style.gridColumn)?.[1] ?? 0);
+          if (cell.textContent === label) return column;
+          column += span;
+        }
+      }
+      return -1;
+    };
+    // The main block ends at column 60, so anything past it is in the cluster.
+    for (const label of ["Ins", "Home", "PgUp", "Del", "End", "PgDn", "\u2190", "\u2191", "\u2192"]) {
+      expect(columnOf(label)).toBeGreaterThanOrEqual(60);
+    }
+    expect(columnOf("Bksp")).toBeLessThan(60);
+  });
+
+  // Up sits over Down with Left and Right either side, the inverted T a hand
+  // already knows.
+  it("arranges the arrows as an inverted T", () => {
+    const { container } = setup();
+    const rows = [...container.querySelectorAll<HTMLElement>(".grid")];
+    const cellStart = (row: HTMLElement, label: string) => {
+      let column = 0;
+      for (const cell of [...row.children] as HTMLElement[]) {
+        const span = Number(/span (\d+)/.exec(cell.style.gridColumn)?.[1] ?? 0);
+        if (cell.textContent === label) return column;
+        column += span;
+      }
+      return -1;
+    };
+    const upRow = rows.find((row) => cellStart(row, "\u2191") >= 0)!;
+    const downRow = rows.find((row) => cellStart(row, "\u2193") >= 0)!;
+    expect(rows.indexOf(downRow)).toBe(rows.indexOf(upRow) + 1);
+    expect(cellStart(downRow, "\u2193")).toBe(cellStart(upRow, "\u2191"));
+    expect(cellStart(downRow, "\u2190")).toBeLessThan(cellStart(downRow, "\u2193"));
+    expect(cellStart(downRow, "\u2192")).toBeGreaterThan(cellStart(downRow, "\u2193"));
   });
 });
