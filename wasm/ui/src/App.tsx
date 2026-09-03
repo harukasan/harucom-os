@@ -36,26 +36,25 @@ export function App({ canvas, engine, log }: { canvas: HTMLCanvasElement; engine
   const showFiles = useCallback(() => setActive("files"), []);
 
   const body = engine
-    ? (
-      <FileTransferProvider engine={engine} onDrop={showFiles}>
-        <Panels engine={engine} log={log} dock={dock} onDock={setDock}
-                active={active} onActive={setActive} />
-      </FileTransferProvider>
-    )
+    ? <Panels engine={engine} log={log} dock={dock} onDock={setDock}
+              active={active} onActive={setActive} />
     : <Console log={log} />;
 
-  if (dock === "undocked") {
-    return (
+  // The provider wraps both layouts rather than sitting inside the body, because
+  // React matches children by position: the undocked box and the docked splitter
+  // occupy the same index, so a provider in the body was torn down on every dock
+  // switch. That is the state it exists to keep, and the report of what was just
+  // uploaded is the part a user is looking for.
+  const shell = dock === "undocked"
+    ? (
       <div className="min-h-screen w-full bg-base text-fg flex flex-col items-center py-8">
         <Screen canvas={canvas} />
         <div className="undock-box mt-10 border border-border rounded-md bg-panel-bg flex flex-col">
           {body}
         </div>
       </div>
-    );
-  }
-
-  return (
+    )
+    : (
     <div className={`h-screen w-screen bg-base text-fg flex overflow-hidden ${bottom ? "flex-col" : "flex-row"}`}>
       <div className="flex-1 grid place-items-center p-4 min-h-0 min-w-0 overflow-hidden">
         <Screen canvas={canvas} />
@@ -77,5 +76,12 @@ export function App({ canvas, engine, log }: { canvas: HTMLCanvasElement; engine
         {body}
       </div>
     </div>
+    );
+
+  if (!engine) return shell;
+  return (
+    <FileTransferProvider engine={engine} onDrop={showFiles}>
+      {shell}
+    </FileTransferProvider>
   );
 }

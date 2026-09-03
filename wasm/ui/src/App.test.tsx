@@ -8,7 +8,11 @@ import { DOCK_MAX, DOCK_MIN } from "./useDockResize";
 function setup() {
   const canvas = document.createElement("canvas");
   const log = createConsoleLog();
-  const engine = stubEngine(log);
+  const engine = stubEngine(log, {
+    add: async () => ({ written: [], replaced: [], failed: [] }),
+    tree: () => ({ files: [], directories: ["/", "/app", "/data"] }),
+    read: () => new Uint8Array(new ArrayBuffer(0)),
+  });
   return { canvas, engine, log, ...render(<App canvas={canvas} engine={engine} log={log} />) };
 }
 
@@ -102,5 +106,23 @@ describe("App", () => {
     expect(dock().style.height).toBe(`${DOCK_MIN}px`);
     drag(400, -4000, "clientY");
     expect(dock().style.height).toBe(`${DOCK_MAX}px`);
+  });
+
+  // The transfer state is held above the panels so it survives them being
+  // unmounted. React matches children by position, so a provider inside the body
+  // was torn down on every dock switch: the report of what had just been
+  // uploaded, which is the part a user is looking for, went with it.
+  it("keeps the file transfer state across a dock switch", () => {
+    setup();
+    act(() => {
+      screen.getByRole("button", { name: "Files" }).click();
+    });
+    const picker = screen.getByLabelText("Upload to") as HTMLSelectElement;
+    act(() => {
+      picker.value = "/app";
+      picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+    });
+    dockTo("Dock the panels below");
+    expect((screen.getByLabelText("Upload to") as HTMLSelectElement).value).toBe("/app");
   });
 });
