@@ -79,4 +79,37 @@ describe("Screen fullscreen", () => {
     await act(async () => screen.getByRole("button", { name: "Show the screen fullscreen" }).click());
     expect(focus).toHaveBeenCalled();
   });
+
+  // A refused request is the common case in an iframe or under a permissions
+  // policy. Without a catch the click does nothing and the only trace is an
+  // uncaught rejection, which nobody looking at the page will see.
+  it("says so when the browser refuses", async () => {
+    stubFullscreen();
+    Element.prototype.requestFullscreen = vi.fn(() => Promise.reject(new TypeError("blocked")));
+    render(<Screen canvas={document.createElement("canvas")} />);
+    await act(async () => screen.getByRole("button", { name: "Show the screen fullscreen" }).click());
+    expect(screen.getByRole("alert").textContent).toMatch(/refused/);
+  });
+
+  // When something else on the page is fullscreen the button still reads
+  // "Fullscreen", so acting on a bare truthy check would take that other element
+  // out of fullscreen rather than showing the screen.
+  it("shows the screen even while another element is fullscreen", async () => {
+    const { enter } = stubFullscreen();
+    const other = document.createElement("div");
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => other });
+    render(<Screen canvas={document.createElement("canvas")} />);
+    await act(async () => screen.getByRole("button", { name: "Show the screen fullscreen" }).click());
+    expect(enter).toHaveBeenCalled();
+    expect(document.exitFullscreen).not.toHaveBeenCalled();
+  });
+
+  // A touch device never hovers, so an invisible button that still takes taps
+  // would send the screen fullscreen with nothing on screen to explain it.
+  it("does not take clicks while it is invisible", () => {
+    render(<Screen canvas={document.createElement("canvas")} />);
+    const button = screen.getByRole("button", { name: "Show the screen fullscreen" });
+    expect(button.className).toContain("pointer-events-none");
+    expect(button.className).toContain("group-hover:pointer-events-auto");
+  });
 });

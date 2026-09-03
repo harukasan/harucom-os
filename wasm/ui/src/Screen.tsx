@@ -17,6 +17,7 @@ export function Screen({ canvas }: { canvas: HTMLCanvasElement }) {
   const frame = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     host.current?.appendChild(canvas); // appendChild moves it if it is elsewhere
@@ -27,11 +28,26 @@ export function Screen({ canvas }: { canvas: HTMLCanvasElement }) {
   // moves back to the canvas afterwards, because the keyboard is the point of
   // running the screen fullscreen.
   const toggle = useCallback(() => {
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    } else {
-      void frame.current?.requestFullscreen?.().then(() => canvas.focus());
+    // Compared against the frame, not merely truthy: when something else on the
+    // page is fullscreen the button reads "Fullscreen", and asking to exit would
+    // take that other element out of fullscreen instead of showing the screen.
+    if (document.fullscreenElement === frame.current) {
+      document.exitFullscreen().catch(() => setError("Could not leave fullscreen."));
+      return;
     }
+    const request = frame.current?.requestFullscreen?.();
+    // A refused request rejects: an iframe without allow="fullscreen", a
+    // permissions policy, or a click the browser did not accept as activation.
+    // Without this the click does nothing and the only sign is an uncaught
+    // rejection in the console, which nobody looking at the page will see.
+    if (!request) {
+      setError("This browser will not show the screen fullscreen.");
+      return;
+    }
+    request.then(() => {
+      setError("");
+      canvas.focus();
+    }).catch(() => setError("The browser refused to show the screen fullscreen."));
   }, [canvas]);
 
   // The user can leave fullscreen without touching the button (Escape, or the
@@ -61,14 +77,25 @@ export function Screen({ canvas }: { canvas: HTMLCanvasElement }) {
         type="button"
         aria-label={fullscreen ? "Leave fullscreen" : "Show the screen fullscreen"}
         // Out of the way until the pointer is over the screen, so it does not
-        // sit on top of what the OS is drawing.
+        // sit on top of what the OS is drawing. It stops taking clicks while it
+        // is invisible: a touch device never hovers, so otherwise a tap in that
+        // corner of the screen would enter fullscreen with nothing to explain
+        // it, and a mouse click meant for the canvas would be swallowed.
         className="absolute top-2 right-2 px-2 py-1 rounded bg-bar-bg/80 text-fg text-xs
-                   border border-border opacity-0 group-hover:opacity-100 focus:opacity-100
+                   border border-border opacity-0 pointer-events-none
+                   group-hover:opacity-100 group-hover:pointer-events-auto
+                   focus:opacity-100 focus:pointer-events-auto
                    transition-opacity cursor-pointer"
         onClick={toggle}
       >
         {fullscreen ? "Exit" : "Fullscreen"}
       </button>
+      {error && (
+        <p role="alert" className="absolute top-12 right-2 m-0 px-2 py-1 rounded bg-bar-bg/90
+                                   text-ansi-red text-xs border border-border">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
