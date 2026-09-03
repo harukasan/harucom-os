@@ -20,7 +20,8 @@ export interface FileTransfer {
   setDestination(path: string): void;
   status: string;
   dragging: boolean;
-  refresh(): void;
+  /** Re-read the listing. `announce` says so in the status, for the button. */
+  refresh(announce?: boolean): void;
   upload(files: UploadCandidate[], folders?: string[]): Promise<void>;
   download(path: string): void;
 }
@@ -47,21 +48,25 @@ export function FileTransferProvider({ engine, onDrop, children }: {
 
   // The listing goes stale on its own: the OS writes and deletes files without
   // telling the page. Refresh is how the user asks for the current truth.
-  const refresh = useCallback(() => {
+  // announce is off by default because refresh also runs after an upload, where
+  // it would overwrite the report of what was just written.
+  const refresh = useCallback((announce = false) => {
     try {
       const tree = engine.files.tree();
       setFiles(tree.files);
       setDirectories(tree.directories);
       setDestination((current) =>
         [current, PREFERRED, "/"].find((path) => tree.directories.includes(path)) ?? "/");
+      if (announce) setStatus("File list refreshed.");
     } catch (e) {
       setStatus(`Could not list the filesystem: ${(e as Error).message}`);
     }
   }, [engine]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  // The provider mounts before engine.start() runs, so a listing taken now would
+  // see MEMFS before the rootfs is deployed: the embedded dictionary and nothing
+  // else. onReady covers both orders, firing at once when the OS is already up.
+  useEffect(() => engine.onReady(() => refresh()), [engine, refresh]);
 
   const upload = useCallback(async (chosen: UploadCandidate[], folders: string[] = []) => {
     const notes = folders.map((name) => `${name}: folders are not supported`);

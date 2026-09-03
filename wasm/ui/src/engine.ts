@@ -64,6 +64,11 @@ export interface Files {
 export interface Engine {
   /** Init the VM, prune the emscripten-only dirs and start the run loop. */
   start(): void;
+  /**
+   * Run the callback once the VM is up and the rootfs is on MEMFS, immediately
+   * if that has already happened. Returns an unsubscribe.
+   */
+  onReady(callback: () => void): () => void;
   on<E extends keyof EngineEvents>(event: E, callback: (value: EngineEvents[E]) => void): () => void;
   log: ConsoleLog | null;
   setPad(pad: number, dir: number, down: boolean): void;

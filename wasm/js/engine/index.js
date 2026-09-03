@@ -30,6 +30,8 @@ import { pruneRuntimeDirs, readFileBytes, readTree } from "./fs.js";
 
 export function createEngine(Module, { canvas, log = null }) {
   const bus = createEventBus();
+  const waiting = [];   // onReady callbacks registered before start()
+  let ready = false;
 
   // None of these touch the VM yet (createDisplay only reads the static
   // framebuffer address and the constant dimensions), so composing them before
@@ -53,6 +55,11 @@ export function createEngine(Module, { canvas, log = null }) {
     started = true;
     if (Module._harucom_init() !== 0) throw new Error("harucom_init failed");
     pruneRuntimeDirs(Module); // drop the emscripten-only /home /tmp /proc dirs
+    // Ready means the filesystem is the one the OS will use, which is true from
+    // here: it does not depend on the run loop, and tying it to that would hide
+    // a working filesystem behind an unrelated failure.
+    ready = true;
+    for (const callback of waiting.splice(0)) callback();
     startRunLoop(Module, {
       blit: display.blit,
       flushKeys: report.flush,
@@ -61,8 +68,30 @@ export function createEngine(Module, { canvas, log = null }) {
     });
   }
 
+  // Run `callback` once the VM is up and the rootfs is on MEMFS, immediately if
+  // that has already happened.
+  //
+  // This is not an event, because it cannot be missed. The shell is rendered
+  // before start() so the canvas is in the document for the first blit, which
+  // means anything reading the filesystem mounts while MEMFS still holds only
+  // the embedded dictionary. Whether its subscription is in place before start()
+  // then depends on when React flushes effects, and a missed notification would
+  // leave a listing that is wrong for the whole session.
+  function onReady(callback) {
+    if (ready) {
+      callback();
+      return () => {};
+    }
+    waiting.push(callback);
+    return () => {
+      const i = waiting.indexOf(callback);
+      if (i >= 0) waiting.splice(i, 1);
+    };
+  }
+
   return {
     start,
+    onReady,
     on: bus.on,
     log,
     setPad: pads.setPad,

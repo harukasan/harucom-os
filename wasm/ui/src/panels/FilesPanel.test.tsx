@@ -17,9 +17,9 @@ function stubFiles(tree: FileTree, overrides: Partial<Files> = {}): Files {
   };
 }
 
-function setup(files: Files) {
+function setup(files: Files, options?: { started?: boolean }) {
   const log = createConsoleLog();
-  const engine = stubEngine(log, files);
+  const engine = stubEngine(log, files, options);
   return {
     engine,
     ...render(
@@ -108,6 +108,43 @@ describe("FilesPanel", () => {
       picker.dispatchEvent(new window.Event("change", { bubbles: true }));
     });
     expect(screen.getByText(/Upload failed: out of memory/)).toBeTruthy();
+  });
+
+  // The panel mounts before engine.start() deploys the rootfs, so a listing
+  // taken then sees only the file emscripten embedded. Without the second read
+  // the Files panel shows /dict.bin and nothing else for the whole session.
+  it("lists the rootfs once the OS says it is there", () => {
+    let tree: FileTree = { files: [{ path: "/dict.bin", size: 4 }], directories: ["/"] };
+    const { engine } = setup(stubFiles(tree, { tree: () => tree }), { started: false });
+    expect(screen.queryByText("/system.rb")).toBeNull();
+    tree = TREE;
+    act(() => engine.ready());
+    expect(screen.getByText("/system.rb")).toBeTruthy();
+  });
+
+  // Pressing a button that appears to do nothing reads as broken, and the
+  // listing usually looks identical afterwards.
+  it("says so when the listing is re-read by hand", () => {
+    setup(stubFiles(TREE));
+    act(() => {
+      screen.getByRole("button", { name: "Refresh" }).click();
+    });
+    expect(screen.getByText("File list refreshed.")).toBeTruthy();
+  });
+
+  // An upload reports what it wrote. Re-reading the listing afterwards must not
+  // replace that with a line about the listing.
+  it("keeps the upload report when it re-reads the listing itself", async () => {
+    const files = stubFiles(TREE, {
+      add: vi.fn(async () => ({ written: ["/data/a.txt"], replaced: [], failed: [] })),
+    });
+    setup(files);
+    const picker = screen.getByLabelText("Files to upload") as HTMLInputElement;
+    Object.defineProperty(picker, "files", { value: [new File(["hi"], "a.txt")] });
+    await act(async () => {
+      picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+    });
+    expect(screen.getByText(/Wrote 1 file/)).toBeTruthy();
   });
 
   it("says why the listing could not be read", () => {

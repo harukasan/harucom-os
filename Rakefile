@@ -309,8 +309,11 @@ namespace :wasm do
     abort "#{WASM_WASM} not found. Run `rake wasm:build` first." unless File.exist?(WASM_WASM)
     npm_install!(WASM_DIR) # jsdom, which the harness builds its page in
     # node --test expands the glob itself (a bare directory arg is treated as a
-    # module path, not a discovery root).
-    sh "node", "--test", File.join(WASM_DIR, "tests", "*.test.cjs")
+    # module path, not a discovery root). --test-force-exit because a file that
+    # boots the shell leaves handles open that nothing can close from a test: the
+    # emscripten runtime and React's scheduler both keep the event loop alive, so
+    # the run would pass and then hang.
+    sh "node", "--test", "--test-force-exit", File.join(WASM_DIR, "tests", "*.test.cjs")
   end
 
   desc "Remove the wasm build output"

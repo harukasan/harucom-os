@@ -18,6 +18,8 @@ export interface StubEngine extends Engine {
   setKeyModifier: Mocked<Engine["setKeyModifier"]>;
   /** Deliver an event to whatever the component subscribed. */
   emit<E extends keyof EngineEvents>(event: E, value: EngineEvents[E]): void;
+  /** Report that the VM is up, as engine.start() does. */
+  ready(): void;
 }
 
 const NO_FILES: Files = {
@@ -26,10 +28,31 @@ const NO_FILES: Files = {
   read: () => new Uint8Array(new ArrayBuffer(0)),
 };
 
-export function stubEngine(log: ConsoleLog | null = null, files: Files = NO_FILES): StubEngine {
+// `started` false models the engine before start(): onReady queues instead of
+// firing, so a test can check what a component does while the VM is still
+// coming up. The default is a running engine, which is what a panel mounting
+// mid-session sees.
+export function stubEngine(
+  log: ConsoleLog | null = null,
+  files: Files = NO_FILES,
+  { started = true }: { started?: boolean } = {},
+): StubEngine {
   const listeners = new Map<string, ((value: never) => void)[]>();
+  const readyCallbacks: (() => void)[] = [];
+  let running = started;
   return {
     start: vi.fn(),
+    onReady(callback) {
+      if (running) {
+        callback();
+        return () => {};
+      }
+      readyCallbacks.push(callback);
+      return () => {
+        const i = readyCallbacks.indexOf(callback);
+        if (i >= 0) readyCallbacks.splice(i, 1);
+      };
+    },
     setPad: vi.fn(),
     releasePads: vi.fn(),
     armAudio: vi.fn(),
@@ -46,6 +69,10 @@ export function stubEngine(log: ConsoleLog | null = null, files: Files = NO_FILE
         const i = list.indexOf(callback as (value: never) => void);
         if (i >= 0) list.splice(i, 1);
       };
+    },
+    ready() {
+      running = true;
+      for (const callback of readyCallbacks.splice(0)) callback();
     },
     emit(event, value) {
       for (const callback of (listeners.get(event) ?? []).slice()) {
