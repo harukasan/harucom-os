@@ -5,7 +5,9 @@
 #   ls /app
 #   ls -l
 
+require "console"
 require "option_parser"
+require "ls_format"
 
 options = {}
 opts = OptionParser.new
@@ -13,50 +15,13 @@ opts.banner = "Usage: ls [options] [path]"
 opts.on("-l", "Long format") { options[:l] = true }
 opts.parse!(ARGV)
 
-# Neither filesystem behind this carries POSIX permission bits, so the long
-# format shows what both can answer: the type, the size and the modification
-# time. There is no permission column, because mode_str has no implementation
-# to read one from.
-def entry_type(path)
-  File.directory?(path) ? "d" : "-"
-end
-
-# Size and time come from opposite places on the two filesystems: a VFS puts
-# them on File::Stat and leaves File without them, while the posix File carries
-# File.size and answers mtime only through an open handle. File.directory? above
-# is the one both agree on.
-def entry_stat(path)
-  return File::Stat.new(path) if defined?(File::Stat)
-  nil
-end
-
-def entry_size(path, stat)
-  stat ? stat.size : File.size(path)
-end
-
-def entry_mtime(path, stat)
-  stat ? stat.mtime : File.open(path) { |f| f.mtime } # block form closes the fd
-end
-
-# A board with no clock stamps everything at the epoch, so every row would carry
-# the same 1970 date. Show that the time is unset instead of repeating it.
-def entry_time_str(path, stat)
-  time = entry_mtime(path, stat)
-  time.to_i.zero? ? "-" : time.to_s
-end
-
-def long_entry(path, name)
-  stat = entry_stat(path)
-  size = entry_size(path, stat).to_s.rjust(8)
-  "#{entry_type(path)} #{size} #{entry_time_str(path, stat)} #{name}"
-end
-
 path = ARGV[0] || "."
 
 # If path is a file, show just that file
 if File.exist?(path) && !File.directory?(path)
   if options[:l]
-    puts long_entry(path, path)
+    puts "#{Console::CYAN}#{LsFormat::HEADER}#{Console::RESET}"
+    puts LsFormat.row(path, path, false) # the guard above already settled this
   else
     puts path
   end
@@ -71,23 +36,24 @@ end
 begin
   Dir.open(path) do |dir|
     if options[:l]
-      begin
-        puts "\e[36m#{Littlefs::Stat::LABEL}\e[0m"
-      rescue NameError
-        # Not a LittleFS filesystem
-      end
+      puts "#{Console::CYAN}#{LsFormat::HEADER}#{Console::RESET}"
       while entry = dir.read
         full = "#{path}/#{entry}"
-        name = File.directory?(full) ? "\e[34m#{entry}\e[0m" : entry
-        puts long_entry(full, name)
+        directory = File.directory?(full)
+        name = directory ? "#{Console::BLUE}#{entry}#{Console::RESET}" : entry
+        # One bad entry should cost its own row, not the rest of the listing.
+        begin
+          puts LsFormat.row(full, name, directory)
+        rescue => e
+          puts LsFormat.error_row(name, e.message)
+        end
       end
     else
       while entry = dir.read
-        # File.directory? rather than File::Stat: the plain listing only needs
-        # this one predicate, and File::Stat comes from the filesystem gem, which
-        # a platform without a VFS does not have. Line 19 already uses this form.
+        # File.directory? rather than File::Stat: the plain listing needs only
+        # this one predicate, and every platform has it.
         if File.directory?("#{path}/#{entry}")
-          puts "\e[34m#{entry}\e[0m"
+          puts "#{Console::BLUE}#{entry}#{Console::RESET}"
         else
           puts entry
         end
