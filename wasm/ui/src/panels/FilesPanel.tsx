@@ -12,12 +12,23 @@
 // which also swallows Tab, the arrows and Enter before they could reach these
 // controls.
 import { useRef } from "react";
-import { useFileTransfer } from "../useFileTransfer";
+import { useFileTransfer, type TransferOutcome } from "../useFileTransfer";
 import type { PanelDefinition } from "./types";
 
 const BUTTON =
   "px-2 py-1 rounded bg-pad text-fg text-xs border border-border " +
   "hover:bg-border-hover cursor-pointer";
+
+// A transfer either landed or it did not, and that is not something to make a
+// reader work out from a line of grey prose. The palette is the console's, so
+// green and red mean here what they mean there.
+const OUTCOME: Record<TransferOutcome, string> = {
+  idle: "text-fg-dim",
+  busy: "text-fg-dim",
+  ok: "text-ansi-green",
+  partial: "text-ansi-yellow",
+  failed: "text-ansi-red",
+};
 
 function FilesPanel() {
   const transfer = useFileTransfer();
@@ -28,7 +39,9 @@ function FilesPanel() {
       {/* The status sits above the controls it is about, and Refresh sits over
           the Download column it lines up with, so the panel reads as two
           columns rather than one long row of unrelated buttons. */}
-      <p className="px-2 pt-2 text-fg-dim m-0">{transfer.status}</p>
+      <p role="status" className={`px-2 pt-2 m-0 ${OUTCOME[transfer.outcome]}`}>
+        {transfer.status}
+      </p>
       <div className="flex items-center gap-2 p-2 border-b border-border">
         <label htmlFor="file-destination" className="text-fg-dim">Upload to</label>
         <select

@@ -13,15 +13,21 @@ import type { Engine, FileEntry, UploadCandidate } from "./engine";
 const PREFERRED = "/data";
 const READY = "Drop files on the page to upload them.";
 
+// What the last thing to happen was, so the panel can say it in a colour rather
+// than only in a sentence. A transfer either landed or it did not, and reading a
+// line of grey text to find out which is exactly what a user will not do.
+export type TransferOutcome = "idle" | "busy" | "ok" | "partial" | "failed";
+
 export interface FileTransfer {
   files: FileEntry[];
   directories: string[];
   destination: string;
   setDestination(path: string): void;
   status: string;
+  outcome: TransferOutcome;
   dragging: boolean;
   /** Re-read the listing. `announce` says so in the status, for the button. */
-  refresh(announce?: boolean): void;
+  refresh(announce?: boolean): boolean;
   upload(files: UploadCandidate[], folders?: string[]): Promise<void>;
   download(path: string): void;
 }
@@ -44,6 +50,14 @@ export function FileTransferProvider({ engine, onDrop, children }: {
   const [directories, setDirectories] = useState<string[]>(["/"]);
   const [destination, setDestination] = useState(PREFERRED);
   const [status, setStatus] = useState(READY);
+  const [outcome, setOutcome] = useState<TransferOutcome>("idle");
+
+  // One place to set both, so a message can never be left wearing the colour of
+  // whatever happened before it.
+  const report = useCallback((text: string, result: TransferOutcome) => {
+    setStatus(text);
+    setOutcome(result);
+  }, []);
   const [dragging, setDragging] = useState(false);
 
   // The listing goes stale on its own: the OS writes and deletes files without
@@ -57,11 +71,13 @@ export function FileTransferProvider({ engine, onDrop, children }: {
       setDirectories(tree.directories);
       setDestination((current) =>
         [current, PREFERRED, "/"].find((path) => tree.directories.includes(path)) ?? "/");
-      if (announce) setStatus("File list refreshed.");
+      if (announce) report("File list refreshed.", "idle");
+      return true;
     } catch (e) {
-      setStatus(`Could not list the filesystem: ${(e as Error).message}`);
+      report(`Could not list the filesystem: ${(e as Error).message}`, "failed");
+      return false;
     }
-  }, [engine]);
+  }, [engine, report]);
 
   // The provider mounts before engine.start() runs, so a listing taken now would
   // see MEMFS before the rootfs is deployed: the embedded dictionary and nothing
@@ -71,13 +87,13 @@ export function FileTransferProvider({ engine, onDrop, children }: {
   const upload = useCallback(async (chosen: UploadCandidate[], folders: string[] = []) => {
     const notes = folders.map((name) => `${name}: folders are not supported`);
     if (chosen.length === 0) {
-      if (notes.length > 0) setStatus(`Skipped: ${notes.join("; ")}`);
+      if (notes.length > 0) report(`Skipped: ${notes.join("; ")}`, "failed");
       return;
     }
-    setStatus(`Uploading ${chosen.length} file(s) to ${destination}...`);
+    report(`Uploading ${chosen.length} file(s) to ${destination}...`, "busy");
     try {
       const { written, replaced, failed } = await engine.files.add(destination, chosen);
-      refresh();
+      const listed = refresh();
       const parts = [];
       if (written.length > 0) {
         const suffix = replaced.length > 0 ? ` (${replaced.length} replaced)` : "";
@@ -85,13 +101,17 @@ export function FileTransferProvider({ engine, onDrop, children }: {
       }
       const problems = [...failed, ...notes];
       if (problems.length > 0) parts.push(`Skipped: ${problems.join("; ")}`);
-      setStatus(parts.join(" "));
+      // A listing that could not be re-read is worth saying even when every file
+      // landed, because what is on screen is now stale.
+      if (!listed) parts.push("The listing could not be re-read.");
+      report(parts.join(" "),
+             problems.length > 0 || !listed ? (written.length > 0 ? "partial" : "failed") : "ok");
     } catch (e) {
       // Nothing awaits this, so a rejection would leave the status stuck on
       // "Uploading..." with no sign that anything went wrong.
-      setStatus(`Upload failed: ${(e as Error).message}`);
+      report(`Upload failed: ${(e as Error).message}`, "failed");
     }
-  }, [engine, destination, refresh]);
+  }, [engine, destination, refresh, report]);
 
   const download = useCallback((path: string) => {
     try {
@@ -107,11 +127,11 @@ export function FileTransferProvider({ engine, onDrop, children }: {
       anchor.remove();
       // Revoking in the same task can cancel the download click() just started.
       setTimeout(() => URL.revokeObjectURL(url), 0);
-      setStatus(`Downloaded ${path} (${bytes.length} bytes).`);
+      report(`Downloaded ${path} (${bytes.length} bytes).`, "ok");
     } catch (e) {
-      setStatus(`Could not download ${path}: ${(e as Error).message}`);
+      report(`Could not download ${path}: ${(e as Error).message}`, "failed");
     }
-  }, [engine]);
+  }, [engine, report]);
 
   // Both dragover and drop must preventDefault or the browser navigates to the
   // dropped file, which ends the session. dragenter and dragleave nest over
@@ -157,7 +177,7 @@ export function FileTransferProvider({ engine, onDrop, children }: {
   }, [upload, onDrop]);
 
   const value: FileTransfer = {
-    files, directories, destination, setDestination, status, dragging, refresh, upload, download,
+    files, directories, destination, setDestination, status, outcome, dragging, refresh, upload, download,
   };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

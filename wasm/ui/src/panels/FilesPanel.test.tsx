@@ -30,6 +30,16 @@ function setup(files: Files, options?: { started?: boolean }) {
   };
 }
 
+const status = () => screen.getByRole("status");
+
+async function upload(file: File) {
+  const picker = screen.getByLabelText("Files to upload") as HTMLInputElement;
+  Object.defineProperty(picker, "files", { value: [file], configurable: true });
+  await act(async () => {
+    picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+}
+
 const TREE: FileTree = {
   files: [{ path: "/system.rb", size: 2683 }, { path: "/data/kick.wav", size: 12 }],
   directories: ["/", "/app", "/data"],
@@ -132,19 +142,53 @@ describe("FilesPanel", () => {
     expect(screen.getByText("File list refreshed.")).toBeTruthy();
   });
 
-  // An upload reports what it wrote. Re-reading the listing afterwards must not
-  // replace that with a line about the listing.
-  it("keeps the upload report when it re-reads the listing itself", async () => {
+  // An upload reports what it wrote, and re-reads the listing afterwards. When
+  // that read fails the report has to survive and say so, rather than being
+  // replaced by the listing error or hiding it.
+  it("keeps the upload report when the listing after it cannot be read", async () => {
+    let reads = 0;
+    const files = stubFiles(TREE, {
+      add: vi.fn(async () => ({ written: ["/data/a.txt"], replaced: [], failed: [] })),
+      tree: () => {
+        if (++reads > 1) throw new Error("FS is gone");
+        return TREE;
+      },
+    });
+    setup(files);
+    await upload(new File(["hi"], "a.txt"));
+    expect(screen.getByText(/Wrote 1 file/)).toBeTruthy();
+    expect(screen.getByText(/could not be re-read/)).toBeTruthy();
+    expect(status().className).toContain("text-ansi-yellow");
+  });
+
+  // Colour is the part a user actually reads. A message wearing the wrong one is
+  // worse than no colour at all.
+  it("says how it went in colour", async () => {
     const files = stubFiles(TREE, {
       add: vi.fn(async () => ({ written: ["/data/a.txt"], replaced: [], failed: [] })),
     });
     setup(files);
-    const picker = screen.getByLabelText("Files to upload") as HTMLInputElement;
-    Object.defineProperty(picker, "files", { value: [new File(["hi"], "a.txt")] });
-    await act(async () => {
-      picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+    expect(status().className).toContain("text-fg-dim"); // nothing has happened yet
+    await upload(new File(["hi"], "a.txt"));
+    expect(status().className).toContain("text-ansi-green");
+  });
+
+  it("marks a refused upload in red", async () => {
+    const files = stubFiles(TREE, {
+      add: vi.fn(async () => ({ written: [], replaced: [], failed: ["../escape.txt: name carries a separator"] })),
     });
-    expect(screen.getByText(/Wrote 1 file/)).toBeTruthy();
+    setup(files);
+    await upload(new File(["x"], "../escape.txt"));
+    expect(status().className).toContain("text-ansi-red");
+  });
+
+  it("marks a partly written batch in yellow", async () => {
+    const files = stubFiles(TREE, {
+      add: vi.fn(async () => ({ written: ["/data/a.txt"], replaced: [], failed: ["b.txt: no space"] })),
+    });
+    setup(files);
+    await upload(new File(["x"], "a.txt"));
+    expect(status().className).toContain("text-ansi-yellow");
   });
 
   it("says why the listing could not be read", () => {
