@@ -43,6 +43,12 @@ window.createHarucomModule({ print: log.write, printErr: log.write }).then((modu
   // than painting an offscreen node for the first few frames.
   flushSync(() => root.render(<App canvas={canvas} engine={engine} log={log} />));
 
+  // installKeyboard already asked for focus, but it runs inside createEngine,
+  // while the canvas is still detached and focus() does nothing. Keys reach the
+  // OS regardless (keyboard.js listens on window), but the canvas is the focus
+  // target the shell sets up, so give it focus now that it is on the page.
+  canvas.focus();
+
   try {
     engine.start();
   } catch (e) {

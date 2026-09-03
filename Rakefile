@@ -184,12 +184,13 @@ namespace :wasm do
   end
 
   # A coarse mtime signature of the staged sources, so the dev server can restage
-  # when an index.html / style.css / js edit changes them.
+  # when an index.html, js or shell edit changes them.
   def stage_signature
     Dir.glob([File.join(WASM_DIR, "index.html"),
               File.join(WASM_DIR, "js", "**", "*"),
               File.join(WASM_DIR, "ui", "src", "**", "*"),
-              File.join(WASM_DIR, "ui", "index.html")]).sort.map do |f|
+              File.join(WASM_DIR, "ui", "package.json"),
+              File.join(WASM_DIR, "ui", "vite.config.ts")]).sort.map do |f|
       File.file?(f) ? File.mtime(f).to_f : 0.0
     end
   end

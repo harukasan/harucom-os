@@ -7,9 +7,10 @@
   <link rel="stylesheet" href="ui/style.css">
 </head>
 <body>
-  <!-- The shell renders here. The DVI canvas and the log element are created by
-       main.js rather than written here, because the print handlers have to exist
-       before the module is constructed to catch the output of harucom_init. -->
+  <!-- The shell renders here. The DVI canvas and the console buffer are created
+       by ui/main.js rather than written here, because the print handlers have to
+       be in place before the module is constructed to catch what harucom_init
+       prints. -->
   <div id="app"></div>
 
   <!-- harucom.js (classic script) defines the global createHarucomModule
