@@ -19,7 +19,6 @@
 
 import { createEventBus } from "./events.js";
 import { createDisplay } from "./display.js";
-import { createFiles } from "./files.js";
 import { createKeyReport } from "./key-report.js";
 import { installKeyboard } from "./keyboard.js";
 import { installAudio } from "./audio.js";
