@@ -128,11 +128,32 @@ describe("KeyboardPanel", () => {
 
   // A gap is a spacer, not a key: clicking where the F-row breaks must not send
   // a keystroke.
+  // A gap holds the row's width open where a real board has none: between Esc
+  // and F1, and before the navigation cluster. Pressing one must do nothing, and
+  // it must not look like a key either.
   it("leaves the gaps in the rows inert", () => {
-    const { container } = setup();
-    const spacers = [...container.querySelectorAll("div.grid > div")];
+    const { engine, container } = setup();
+    const spacers = [...container.querySelectorAll<HTMLElement>("div.grid > div")];
     expect(spacers.length).toBeGreaterThan(0);
-    for (const spacer of spacers) expect(spacer.tagName).toBe("DIV");
+    for (const spacer of spacers) {
+      expect(spacer.textContent).toBe("");
+      act(() => {
+        spacer.dispatchEvent(new window.PointerEvent("pointerdown", { bubbles: true, pointerId: 9 }));
+        spacer.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      });
+    }
+    expect(engine.keyDown).not.toHaveBeenCalled();
+    // Only the push the mount effect makes, so no latch was toggled either.
+    expect(engine.setKeyModifier).toHaveBeenCalledTimes(1);
+  });
+
+  // Every key carries its label. A gap rendered as a button would be an empty
+  // one, indistinguishable on screen but pressable.
+  it("draws no key without a label", () => {
+    const { container } = setup();
+    for (const button of container.querySelectorAll("button")) {
+      expect(button.textContent).not.toBe("");
+    }
   });
 
   // The navigation keys belong beside the main block, not under it: reaching
