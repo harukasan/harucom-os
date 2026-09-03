@@ -11,6 +11,17 @@ import { isFileDrag, partitionDrop } from "../../js/engine/files.js";
 import type { Engine, FileEntry, UploadCandidate } from "./engine";
 
 const PREFERRED = "/data";
+
+// Name what was written. A count alone leaves the reader checking the listing to
+// find out which file arrived, and after a drop of several that is the whole
+// question. One file gets its full path; several share a directory, so the
+// directory is said once and the names follow it.
+function wroteMessage(written: readonly string[], replaced: readonly string[], directory: string): string {
+  const replacedNote = replaced.length > 0 ? ` (${replaced.length} replaced)` : "";
+  if (written.length === 1) return `Wrote ${written[0]}${replacedNote}.`;
+  const names = written.map((path) => path.split("/").pop()).join(", ");
+  return `Wrote ${written.length} files to ${directory}${replacedNote}: ${names}.`;
+}
 const READY = "Drop files on the page to upload them.";
 
 // What the last thing to happen was, so the panel can say it in a colour rather
@@ -95,10 +106,7 @@ export function FileTransferProvider({ engine, onDrop, children }: {
       const { written, replaced, failed } = await engine.files.add(destination, chosen);
       const listed = refresh();
       const parts = [];
-      if (written.length > 0) {
-        const suffix = replaced.length > 0 ? ` (${replaced.length} replaced)` : "";
-        parts.push(`Wrote ${written.length} file(s) to ${destination}${suffix}.`);
-      }
+      if (written.length > 0) parts.push(wroteMessage(written, replaced, destination));
       const problems = [...failed, ...notes];
       if (problems.length > 0) parts.push(`Skipped: ${problems.join("; ")}`);
       // A listing that could not be re-read is worth saying even when every file

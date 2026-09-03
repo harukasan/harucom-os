@@ -79,7 +79,8 @@ describe("FilesPanel", () => {
       picker.dispatchEvent(new window.Event("change", { bubbles: true }));
     });
     expect(files.add).toHaveBeenCalledWith("/data", [file]);
-    expect(screen.getByText(/Wrote 1 file\(s\) to \/data/)).toBeTruthy();
+    // The path, not a count: after a drop the question is which file arrived.
+    expect(screen.getByText("Wrote /data/a.txt.")).toBeTruthy();
   });
 
   it("says which uploads were rejected", async () => {
@@ -156,9 +157,30 @@ describe("FilesPanel", () => {
     });
     setup(files);
     await upload(new File(["hi"], "a.txt"));
-    expect(screen.getByText(/Wrote 1 file/)).toBeTruthy();
-    expect(screen.getByText(/could not be re-read/)).toBeTruthy();
+    expect(status().textContent).toMatch(/Wrote \/data\/a\.txt\./);
+    expect(status().textContent).toMatch(/could not be re-read/);
     expect(status().className).toContain("text-ansi-yellow");
+  });
+
+  // Several files share a directory, so it is said once and the names follow,
+  // rather than repeating the path on every one.
+  it("names every file when a batch lands", async () => {
+    const written = ["/data/kick.wav", "/data/snare.wav", "/data/hat.wav"];
+    const files = stubFiles(TREE, {
+      add: vi.fn(async () => ({ written, replaced: [], failed: [] })),
+    });
+    setup(files);
+    await upload(new File(["x"], "kick.wav"));
+    expect(status().textContent).toBe("Wrote 3 files to /data: kick.wav, snare.wav, hat.wav.");
+  });
+
+  it("says how many of them replaced something", async () => {
+    const files = stubFiles(TREE, {
+      add: vi.fn(async () => ({ written: ["/data/a.txt"], replaced: ["/data/a.txt"], failed: [] })),
+    });
+    setup(files);
+    await upload(new File(["x"], "a.txt"));
+    expect(status().textContent).toBe("Wrote /data/a.txt (1 replaced).");
   });
 
   // Colour is the part a user actually reads. A message wearing the wrong one is
