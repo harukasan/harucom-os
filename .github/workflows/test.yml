@@ -3,8 +3,9 @@ name: Test
 on:
   push:
     branches: [ "main" ]
+  # No branch filter: a pull request stacked on another branch needs testing
+  # just as much as one against main, and with a filter it silently gets none.
   pull_request:
-    branches: [ "main" ]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -33,3 +34,8 @@ jobs:
 
     - name: Run host tests
       run: bundle exec rake test
+
+    # The shell's own tests need neither emcc nor a wasm build, so they are the
+    # half of the browser suite CI can afford to run on every push.
+    - name: Test the browser shell
+      run: bundle exec rake wasm:ui_test

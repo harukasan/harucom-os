@@ -1,3 +1,7 @@
 # Node test harness dependencies (jsdom). Build artifacts live in build/wasm/.
 node_modules/
 package-lock.json
+
+# The shell pins its tree: React, Vite and Tailwind are a few hundred packages,
+# so an unpinned install can change the built bundle with no commit to show it.
+!ui/package-lock.json

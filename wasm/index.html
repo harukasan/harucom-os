@@ -4,19 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Harucom OS (wasm)</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="ui/style.css">
 </head>
 <body>
-  <!-- #screen is the DVI framebuffer, blitted every committed frame. #log
-       collects stdout and stderr, which the Console mirrors to fd 1. -->
-  <canvas id="screen" width="640" height="480"></canvas>
-  <!-- Stand-ins for the board's two resistor-ladder pads, built by pad-ui.js. -->
-  <div id="pads"></div>
-  <pre id="log"></pre>
+  <!-- The shell renders here. The DVI canvas and the console buffer are created
+       by ui/main.js rather than written here, because the print handlers have to
+       be in place before the module is constructed to catch what harucom_init
+       prints. -->
+  <div id="app"></div>
 
   <!-- harucom.js (classic script) defines the global createHarucomModule
-       factory; main.js (ES module) boots the VM and wires up the page. -->
+       factory; ui/main.js (ES module) boots the VM and renders the shell. -->
   <script src="harucom.js"></script>
-  <script type="module" src="js/main.js"></script>
+  <script type="module" src="ui/main.js"></script>
 </body>
 </html>

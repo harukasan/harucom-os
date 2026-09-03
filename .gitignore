@@ -4,3 +4,7 @@ lib/picoruby/build/
 .bundle/
 
 !.vscode/*
+
+# The browser shell's dependency tree and its build output.
+wasm/ui/node_modules/
+wasm/ui/dist/

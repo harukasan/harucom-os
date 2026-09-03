@@ -101,4 +101,53 @@ describe("key-report", () => {
     drain();
     assert.deepEqual(last(), [0, []]);
   });
+
+  // The on-screen keyboard latches Shift/Ctrl/Alt as toggles, which have to
+  // combine with the physical keys rather than replace them: holding a physical
+  // Ctrl while the panel latch says Shift must report both.
+  it("ORs the on-screen latches with the physical modifiers", () => {
+    const { report, drain, last } = make();
+    report.setOverlayModifier(0x02); // panel latches Shift
+    report.modifierDown(0x01);       // physical Ctrl goes down
+    report.keyDown(0x04);            // A
+    drain();
+    assert.deepEqual(last(), [0x03, [0x04]]);
+  });
+
+  it("drops the latch when the panel clears it", () => {
+    const { report, drain, last } = make();
+    report.setOverlayModifier(0x02);
+    report.keyDown(0x04);
+    drain();
+    assert.deepEqual(last(), [0x02, [0x04]]);
+    report.setOverlayModifier(0);
+    drain();
+    assert.deepEqual(last(), [0, [0x04]]);
+  });
+
+  // reset() runs when the page loses focus. The panel toggles stay lit across
+  // that, so clearing them here would leave the report disagreeing with the UI.
+  it("keeps the on-screen latch across a reset", () => {
+    const { report, drain, last } = make();
+    report.setOverlayModifier(0x02);
+    report.keyDown(0x04);
+    report.reset();
+    drain();
+    assert.deepEqual(last(), [0x02, []]);
+  });
+
+  it("reports the live state for the keys readout", () => {
+    const { report } = make();
+    report.modifierDown(0x01);
+    report.setOverlayModifier(0x02);
+    report.keyDown(0x04);
+    assert.deepEqual(report.snapshot(), { held: [0x04], modifier: 0x03 });
+  });
+
+  it("hands the readout a copy, so a reader cannot edit the report", () => {
+    const { report } = make();
+    report.keyDown(0x04);
+    report.snapshot().held.push(0x05);
+    assert.deepEqual(report.snapshot().held, [0x04]);
+  });
 });

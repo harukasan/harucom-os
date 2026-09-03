@@ -15,10 +15,15 @@ with its own submodules (`git submodule update --init --recursive`).
 
 | Command | Description |
 | --- | --- |
-| `rake wasm:build` | Build `build/wasm/harucom.{js,wasm}` and stage the page next to it. `CLEAN=1` rebuilds the presym and host tools from scratch. |
-| `rake wasm:server` | Serve `build/wasm/` on `http://localhost:8000/` (`PORT=` to change). Edits to `wasm/index.html`, `wasm/style.css` and `wasm/js/` are restaged while it runs, so a plain reload picks them up. |
-| `rake wasm:test` | Run the headless smoke tests under Node. Needs `npm install` in `wasm/` once (jsdom). |
+| `rake wasm:build` | Build `build/wasm/harucom.{js,wasm}`, build the shell, and stage the page next to it. `CLEAN=1` rebuilds the presym and host tools from scratch. |
+| `rake wasm:ui` | Build the shell into `wasm/ui/dist` without touching the wasm module (no `emcc` needed). |
+| `rake wasm:ui_test` | Type-check the shell and run its component tests. |
+| `rake wasm:server` | Serve `build/wasm/` on `http://localhost:8000/` (`PORT=` to change). Edits to `wasm/index.html`, `wasm/js/` and `wasm/ui/src/` are rebuilt and restaged while it runs, so a plain reload picks them up. |
+| `rake wasm:test` | Run the headless smoke tests under Node. |
 | `rake wasm:clean` | Remove `build/wasm/` and the picoruby wasm build. |
+
+The rake tasks install their own npm dependencies, so a fresh checkout needs no
+separate setup step.
 
 `build_config/harucom-wasm.rb` is the emscripten counterpart of
 `build_config/harucom-os-pico2.rb`. It defines `PICORB_PLATFORM_POSIX`, so
@@ -103,11 +108,16 @@ ignored. Defined in
 
 ### Boot
 
-`index.html` loads `harucom.js` (the emscripten module) and then `js/main.js`.
-`main.js` creates the module, wires `Module.print` / `printErr` to the `#log`
-element, composes the Engine and calls `engine.start()`, which runs
-`harucom_init`, prunes the emscripten-only directories (`/home`, `/tmp`,
-`/proc`) so the filesystem root matches the board, and starts the run loop.
+`index.html` loads `harucom.js` (the emscripten module) and then `ui/main.js`,
+the built shell. The shell creates the canvas and the console buffer, then the
+module with `Module.print` / `printErr` wired to that buffer, composes the Engine
+and renders the page, and calls `engine.start()`, which runs `harucom_init`,
+prunes the emscripten-only directories (`/home`, `/tmp`, `/proc`) so the
+filesystem root matches the board, and starts the run loop.
+
+The canvas and the buffer are made before the module because emscripten captures
+the print handlers when the module is constructed, and `harucom_init` prints
+during boot: anything created later would miss that output.
 
 `harucom_init` writes the rootfs into MEMFS on every page load, because MEMFS
 starts empty each time. The board instead hash-gates a deploy against its
@@ -126,6 +136,50 @@ modules so the page never calls `Module._harucom_*` itself.
 | `keyboard.js` | DOM key events to report calls, canvas focus |
 | `runloop.js` | Clock ticks and scheduler steps from `requestAnimationFrame` |
 | `fs.js` | MEMFS cleanup so `ls /` matches the board |
+| `events.js` | The bus the facade dispatches readings through |
+| `console-log.js` | The capped stdout and stderr buffer behind the console panel |
+
+Readings leave the engine through `on(event, callback)`: `"keys"` after each DOM
+key event, `"frame"` when the DVI frame count advances, and `"audio"` once a
+second with the worklet's level, underruns and dropped frames. Console output is
+the exception. It starts before the engine exists, because emscripten captures
+the print handlers when the module is constructed and `harucom_init` prints
+during boot, so the shell creates the buffer first and hands it in.
+
+### Shell
+
+`wasm/ui` is the page: React and TypeScript, styled with Tailwind, built by Vite
+into a single `main.js` and `style.css` that the hand-written `index.html`
+references. It runs entirely in JavaScript, so panel updates never take steps
+from the mruby scheduler that runs the OS.
+
+The screen is a canvas the shell creates before the module and passes down as a
+prop. React hosts it but never renders it: the engine holds a 2D context on that
+element, so re-creating it would freeze the display. Passing the element (rather
+than looking it up by id) is also what lets it survive a dock switch, which
+unmounts and remounts that part of the tree.
+
+The screen can also be shown fullscreen, which is what makes the browser build
+usable as a machine rather than a demo in a page: the OS gets the whole display,
+and focus returns to the canvas so the keyboard goes with it.
+
+Panels sit in a devtools-style tab strip that docks in one of three positions:
+undocked on a scrollable page, below the screen, or beside it. Only the active
+panel is mounted, so anything that must survive a tab switch lives above the
+panels rather than inside one. The console history and the file transfer state
+are those cases.
+
+The on-screen keyboard is laid out on a grid of quarter-units, the way keyboard
+sizes are actually specified: a row is 15u wide, a plain key is 1u, and the wide
+keys take the standard ANSI sizes. Every row therefore comes to the same width
+and the columns line up down the board.
+
+| Panel | Shows |
+| --- | --- |
+| Console | stdout and stderr from the OS |
+| Keyboard | an on-screen keyboard driving the same HID report as a physical one |
+| Pads | the two on-screen D-pads |
+| Status | the frame count, the audio worklet's health, and what the last DOM key event became: code, HID usage, whether the browser was stopped, and the resulting report |
 
 ### Run loop
 
@@ -200,8 +254,8 @@ canvas click or the first keystroke.
 
 The board reads two 4-way pads as resistor ladders on ADC pins 28 and 29. The
 browser has no ADC, so `harucom-os-wasm` supplies an `ADC` class whose
-`read_raw` returns a value JavaScript injects, and the page draws two on-screen
-D-pads that write it. `engine/pad-ladder.js` computes what the ladder would read
+`read_raw` returns a value JavaScript injects, and the Pads panel draws two
+on-screen D-pads that write it. `engine/pad-ladder.js` computes what the ladder would read
 for a set of pressed directions, using the same parallel-resistance formula and
 calibration values as `Board::Pad`, so the Ruby decoder sees exactly what it
 sees on hardware and needs no browser-specific path.
@@ -255,12 +309,21 @@ banner appears, and exposes helpers to inject HID reports. picoruby-wasm
 initializes its JS interop against `window` and `document`, so the harness
 installs a jsdom DOM first. The tests cover the boot path (every `require`
 resolved), the rendered framebuffer, and a keystroke evaluated end to end
-through the keyboard pipeline into IRB.
+through the keyboard pipeline into IRB. One file loads the built shell bundle in
+a jsdom page, so a build that is broken in ways every source test still passes
+(a bundle that throws on load, an entry that never mounts) fails here.
+
+`rake wasm:ui_test` covers the shell's own sources with vitest and
+[Testing Library][testing-library], which is a different question: the node
+tests exercise the OS through the browser glue, and these exercise the
+components without a VM.
 
 ## References
 
 - [emscripten][emscripten]: The C to WebAssembly toolchain
 - [picoruby-wasm][picoruby-wasm]: PicoRuby's browser runtime and JS interop
+- [Testing Library][testing-library]: The component testing helpers the shell's tests use
 
 [emscripten]: https://emscripten.org/
+[testing-library]: https://testing-library.com/
 [picoruby-wasm]: https://github.com/picoruby/picoruby/tree/master/mrbgems/picoruby-wasm

@@ -4,7 +4,7 @@
 // math lives in pad-ladder.js (pure, testable). This owns the per-pad pressed
 // mask and writes the value the ladder would produce to the wasm ADC shim, so
 // Board::Pad decodes it exactly as it decodes the real hardware. The on-screen
-// buttons that drive it are page chrome and live in js/pad-ui.js.
+// buttons that drive it are page chrome and live in the shell (ui/src/Pads.tsx).
 import { padRawValue } from "./pad-ladder.js";
 
 export function createPads(Module) {
