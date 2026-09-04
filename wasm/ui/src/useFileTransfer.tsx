@@ -10,7 +10,10 @@ import type { ReactNode } from "react";
 import { isFileDrag, partitionDrop } from "../../js/engine/files.js";
 import type { Engine, FileEntry, UploadCandidate } from "./engine";
 
-const PREFERRED = "/data";
+// Uploads land at the root unless the user picks another directory. It is the
+// one directory that is always there, and it assumes nothing about what an
+// uploaded file is for, which the panel cannot know.
+const DEFAULT_DESTINATION = "/";
 
 // Name what was written. A count alone leaves the reader checking the listing to
 // find out which file arrived, and after a drop of several that is the whole
@@ -59,7 +62,7 @@ export function FileTransferProvider({ engine, onDrop, children }: {
 }) {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [directories, setDirectories] = useState<string[]>(["/"]);
-  const [destination, setDestination] = useState(PREFERRED);
+  const [destination, setDestination] = useState(DEFAULT_DESTINATION);
   const [status, setStatus] = useState(READY);
   const [outcome, setOutcome] = useState<TransferOutcome>("idle");
 
@@ -80,8 +83,10 @@ export function FileTransferProvider({ engine, onDrop, children }: {
       const tree = engine.files.tree();
       setFiles(tree.files);
       setDirectories(tree.directories);
+      // The chosen directory can go away under the panel, and a select left
+      // pointing at one that is gone would send the next upload nowhere.
       setDestination((current) =>
-        [current, PREFERRED, "/"].find((path) => tree.directories.includes(path)) ?? "/");
+        tree.directories.includes(current) ? current : DEFAULT_DESTINATION);
       if (announce) report("File list refreshed.", "idle");
       return true;
     } catch (e) {

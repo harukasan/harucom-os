@@ -50,10 +50,10 @@ function FilesPanel() {
           value={transfer.destination}
           onChange={(e) => transfer.setDestination(e.target.value)}
         >
-          {/* The chosen directory is always offered, even when the listing could
-              not be read and holds only the root: a select whose value has no
-              matching option renders blank, while uploads still go to the name
-              it has stopped showing. */}
+          {/* The chosen directory is always offered, even when it is not among
+              the ones that were listed: a select whose value has no matching
+              option renders blank, while uploads still go to the name it has
+              stopped showing. */}
           {(transfer.directories.includes(transfer.destination)
             ? transfer.directories
             : [transfer.destination, ...transfer.directories]
