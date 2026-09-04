@@ -66,7 +66,7 @@ function hidForChar(ch) {
 // Boot a fresh VM and return { Module, output, printed, bootSteps, ...helpers }.
 async function boot() {
   setupDom();
-  const createHarucomModule = require("../../build/wasm/harucom.js");
+  const createHarucomModule = require("../../build/wasm-module/harucom.js");
   const output = []; // every line the wasm prints (fd 1 / 2 via posix hal_write)
   const Module = await createHarucomModule({
     print: (s) => output.push(s),

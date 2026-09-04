@@ -1,4 +1,4 @@
-// Loads the built shell bundle (build/wasm/ui/main.js) in a jsdom page.
+// Loads the built shell bundle (build/wasm/v/<stamp>/main.js) in a jsdom page.
 //
 // The React sources have their own unit tests (rake wasm:ui_test), which run
 // against the TypeScript. This one runs against the artifact the browser
@@ -16,7 +16,14 @@ const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
 const { JSDOM } = require("jsdom");
 
-const BUNDLE = path.join(__dirname, "..", "..", "build", "wasm", "ui", "main.js");
+// Staging versions everything the page fetches, so the bundle sits under a
+// stamped directory rather than at a fixed path. There is only ever one of them,
+// because staging clears v/ before it writes.
+const PAGE = path.join(__dirname, "..", "..", "build", "wasm");
+const VERSIONS = path.join(PAGE, "v");
+const BUNDLE = (fs.existsSync(VERSIONS) ? fs.readdirSync(VERSIONS) : [])
+  .map((stamp) => path.join(VERSIONS, stamp, "main.js"))
+  .find((bundle) => fs.existsSync(bundle));
 
 // Booting the shell leaves handles nothing here can close: the emscripten
 // runtime and React's scheduler both keep the event loop alive. rake wasm:test
@@ -25,7 +32,7 @@ describe("shell bundle", () => {
   let document;
 
   before(async () => {
-    assert.ok(fs.existsSync(BUNDLE), `${BUNDLE} not found. Run \`rake wasm:build\` first.`);
+    assert.ok(BUNDLE, `no staged shell bundle under ${VERSIONS}. Run \`rake wasm:build\` first.`);
     const dom = new JSDOM('<!DOCTYPE html><div id="app"></div>', { pretendToBeVisual: true });
     globalThis.window = dom.window;
     globalThis.document = document = dom.window.document;
