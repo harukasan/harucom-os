@@ -13,7 +13,9 @@ entries = []
 rootfs_dir.glob("**/*").sort.each do |path|
   next unless path.file?
   rel = path.relative_path_from(rootfs_dir).to_s
-  var_name = "ruby_script_" + rel.gsub(/[\/.]/, "_")
+  # Every character a C identifier cannot hold becomes an underscore, so a
+  # path like slides/rubykaigi2026-followup.md still yields a valid name.
+  var_name = "ruby_script_" + rel.gsub(/[^A-Za-z0-9_]/, "_")
   abs_path = "/" + rel
   data = path.binread
   entries << { var_name: var_name, path: abs_path, data: data }
