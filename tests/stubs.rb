@@ -84,6 +84,27 @@ module Editor
   end
 end
 
+# Flash dictionary access for the input methods. The board defines these
+# class methods in C (harucom-os-dict gem) over the dictionary region.
+# Tests install their own table with InputMethod.tcode_table=, indexed
+# like the packed one: first stroke * 40 + second stroke.
+class InputMethod
+  TCODE_KEY_COUNT = 40
+
+  def self.tcode_table=(table)
+    $tcode_table = table
+  end
+
+  def self.dict_available?
+    !$tcode_table.nil?
+  end
+
+  def self.tcode_lookup(key1, key2)
+    return nil unless $tcode_table
+    $tcode_table[key1 * TCODE_KEY_COUNT + key2]
+  end
+end
+
 # DMX universe stub with a write log for timing assertions.
 module DMX
   def self.reset
