@@ -6,6 +6,11 @@ Harucom OS is the firmware for [Harucom Board](https://github.com/harukasan/haru
 
 - [Harucom Board](https://github.com/harukasan/harucom-board)
 
+## Try it in a browser
+
+Harucom OS also builds to WebAssembly and runs at
+[try.harucom.org](https://try.harucom.org/), with no board required.
+
 ## Prerequisites
 
 - [Raspberry Pi Pico SDK toolchain](https://github.com/raspberrypi/pico-sdk) (ARM GCC, CMake, Ninja)
@@ -48,6 +53,7 @@ Design documents and implementation notes are in the [doc/](doc/) directory:
 - [USB host keyboard](doc/usb-host-keyboard.md)
 - [Keyboard input](doc/keyboard-input.md)
 - [Filesystem](doc/filesystem.md)
+- [Browser build](doc/wasm.md)
 
 ## License
 
