@@ -15,12 +15,12 @@ with its own submodules (`git submodule update --init --recursive`).
 
 | Command | Description |
 | --- | --- |
-| `rake wasm:build` | Build `build/wasm/harucom.{js,wasm}`, build the shell, and stage the page next to it. `CLEAN=1` rebuilds the presym and host tools from scratch, which a change to [build_config/harucom-wasm.rb](../build_config/harucom-wasm.rb) needs: a gem can carry build-wide defines, and mruby's object tasks depend on sources and headers, never on flags. |
+| `rake wasm:build` | Build `build/wasm-module/harucom.{js,wasm}`, build the shell, and stage the page into `build/wasm/`. `CLEAN=1` rebuilds the presym and host tools from scratch, which a change to [build_config/harucom-wasm.rb](../build_config/harucom-wasm.rb) needs: a gem can carry build-wide defines, and mruby's object tasks depend on sources and headers, never on flags. |
 | `rake wasm:ui` | Build the shell into `wasm/ui/dist` without touching the wasm module (no `emcc` needed). |
 | `rake wasm:ui_test` | Type-check the shell and run its component tests. |
 | `rake wasm:server` | Serve `build/wasm/` on `http://localhost:8000/` (`PORT=` to change). Edits to `wasm/index.html`, `wasm/js/` and `wasm/ui/src/` are rebuilt and restaged while it runs, so a plain reload picks them up. |
 | `rake wasm:test` | Run the headless smoke tests under Node. |
-| `rake wasm:clean` | Remove `build/wasm/` and the picoruby wasm build. |
+| `rake wasm:clean` | Remove `build/wasm/`, `build/wasm-module/` and the picoruby wasm build. |
 
 The rake tasks install their own npm dependencies, so a fresh checkout needs no
 separate setup step.
@@ -30,6 +30,31 @@ separate setup step.
 picoruby compiles each gem's `ports/posix` and supplies the posix `Machine`,
 task scheduler, io-console, env and rng ports. `MRB_INT64` needs `MRB_NO_BOXING`
 on this 32-bit target, which also keeps full `Float` precision.
+
+## Deployment
+
+The browser build is published at <https://try.harucom.org/>.
+[.github/workflows/browser.yml](../.github/workflows/browser.yml) builds it and
+runs `rake wasm:test` on every pull request, and deploys `build/wasm/` to GitHub
+Pages when the change lands on `main`. The tests gate the deploy, so a module
+that builds but does not boot is never published.
+
+That gate is also the only end to end check the project has: it boots the real
+VM over the real `rootfs/`, which the board build (compile only) and `rake test`
+(per file, with the hardware stubbed) cannot do. Pull requests therefore build
+and test here even though they never deploy.
+
+`build/wasm/` holds the published tree and nothing else: `index.html`, and under
+`v/<stamp>/` the four files the page fetches. The stamp is a digest of those
+files, so one build moves every asset URL at once and a browser cannot pair a
+file it still has cached with one it refetches. That pairing is the failure to
+avoid, because GitHub Pages serves everything with `max-age=600` while a reload
+revalidates only the document. `index.html` is the one unversioned file. The
+emscripten glue resolves `harucom.wasm` against its own URL, so keeping the pair
+in one directory versions the wasm with no loader hook.
+
+The custom domain lives in the repository Pages settings, which is what GitHub
+reads for a site published from a workflow.
 
 ## C API
 
@@ -108,7 +133,7 @@ ignored. Defined in
 
 ### Boot
 
-`index.html` loads `harucom.js` (the emscripten module) and then `ui/main.js`,
+`index.html` loads `harucom.js` (the emscripten module) and then `main.js`,
 the built shell. The shell creates the canvas and the console buffer, then the
 module with `Module.print` / `printErr` wired to that buffer, composes the Engine
 and renders the page, and calls `engine.start()`, which runs `harucom_init`,

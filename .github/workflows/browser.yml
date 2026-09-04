@@ -1,0 +1,149 @@
+name: Browser build
+
+# Build the browser port, run its integration tests, and publish it to
+# https://try.harucom.org/ from main.
+#
+# rake wasm:test is the only place the whole OS actually runs: it boots the real
+# VM over the real rootfs, so it catches breakage that build.yml (compile only)
+# and rake test (per-file, hardware stubbed) cannot. That is why pull requests
+# build and test here even though they never deploy.
+#
+# Publishing needs Settings -> Pages -> Source set to "GitHub Actions" and
+# Custom domain set to try.harucom.org. That setting is the authority for the
+# domain. The CNAME file written below only keeps the domain visible in the
+# deployed tree.
+
+on:
+  push:
+    branches: [ "main" ]
+  # No branch filter: a pull request stacked on another branch needs the same
+  # cover as one against main.
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Per ref, so a pull request does not queue behind main. Superseded pull request
+# runs are dropped, a deploy in flight is not.
+concurrency:
+  group: browser-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    permissions:
+      contents: read
+      pages: read
+
+    steps:
+    # First, so a misconfigured Pages site fails here rather than after the
+    # emcc build has already run.
+    - name: Check that the Pages site is configured
+      if: github.event_name != 'pull_request'
+      uses: actions/configure-pages@v5
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: false
+
+    # picoruby with all of its own submodules (picoruby-mbedtls takes the mbedtls
+    # source out of the pico-sdk under picoruby-r2p2, so that one is not
+    # optional), the dictionary (emcc embeds dict.bin with --embed-file) and the
+    # DVI font sources. Not lib/pico-sdk or lib/Pico-PIO-USB: only the board's
+    # CMake build reads those, and they are 300 MB of tree emcc never opens.
+    - name: Check out the submodules the browser build needs
+      run: |
+        # .gitmodules carries ssh URLs for the two repositories we own, and the
+        # runner has no key. Every submodule the browser build needs is public,
+        # so fetch them over https instead. actions/checkout does this itself
+        # when it checks submodules out, which this job does not use.
+        git config --global url."https://github.com/".insteadOf "git@github.com:"
+        git submodule update --init --recursive --depth 1 \
+          lib/picoruby \
+          vendor/harucom-os-dict \
+          mrbgems/picoruby-dvi/lib/fonts/font8x8 \
+          mrbgems/picoruby-dvi/lib/fonts/misc-misc \
+          mrbgems/picoruby-dvi/lib/fonts/spleen
+
+    # libfreetype-dev builds the freetype gem that picoruby-dvi uses to
+    # generate its font tables, libssl-dev links the picoruby host tools.
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfreetype-dev libssl-dev
+
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '4.0.1'
+        bundler-cache: true
+
+    # picoruby's own rake runs under Bundler.with_unbundled_env, because the
+    # bundler env breaks the python that emcc ships. It resolves rake and
+    # freetype from the system gems, not from the bundle.
+    - name: Install the gems the nested rake needs
+      run: gem install rake freetype
+
+    # Only the shell's tree is pinned. wasm/package-lock.json is gitignored, so
+    # it is not there to key a cache on.
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: wasm/ui/package-lock.json
+
+    - name: Set up emscripten
+      uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: '6.0.0'
+        actions-cache-folder: emsdk-cache
+
+    # The picoruby build directory is deliberately not cached. CMake and mruby
+    # have no dependency edge from the submodule or the compile flags to
+    # libmruby.a, so a restored cache can silently link a stale VM.
+    - name: Build the browser module and the shell
+      run: bundle exec rake wasm:build
+
+    - name: Run the browser tests
+      run: bundle exec rake wasm:test
+
+    - name: Write CNAME
+      if: github.event_name != 'pull_request'
+      run: echo 'try.harucom.org' > build/wasm/CNAME
+
+    - name: Upload the page
+      if: github.event_name != 'pull_request'
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: build/wasm
+
+  deploy:
+    needs: build
+    # Only main publishes. A dispatch from any other branch builds and tests,
+    # and stops there.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      pages: write
+      id-token: write
+
+    # One deployment at a time, and never cancel one that is already publishing.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4

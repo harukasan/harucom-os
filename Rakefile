@@ -120,13 +120,17 @@ task distclean: [:clean, :clean_picoruby, :clean_dict]
 # ---------------------------------------------------------------------------
 # PICORUBY_DIR is defined above with the host-test paths.
 WASM_DIR      = File.join(PROJECT_DIR, "wasm")        # source: index.html, js, tests
-WASM_OUT      = File.join(BUILD_DIR, "wasm")          # build output (build/ is gitignored)
+WASM_OUT      = File.join(BUILD_DIR, "wasm")          # the page, exactly as published
+WASM_MODULE   = File.join(BUILD_DIR, "wasm-module")   # emcc output, before staging
 WASM_CONFIG   = File.join(PROJECT_DIR, "build_config", "harucom-wasm.rb")
 WASM_BUILD    = File.join(PICORUBY_DIR, "build", "harucom-wasm")
 WASM_HOST     = File.join(PICORUBY_DIR, "build", "mrbc") # host tools (mrbc)
 WASM_LIBMRUBY = File.join(WASM_BUILD, "lib", "libmruby.a")
-WASM_JS       = File.join(WASM_OUT, "harucom.js")
-WASM_WASM     = File.join(WASM_OUT, "harucom.wasm")
+# Linked here rather than into WASM_OUT, because staging gives every published
+# file a versioned name and the link step cannot know it yet. Node tests load
+# the module from this stable path.
+WASM_JS       = File.join(WASM_MODULE, "harucom.js")
+WASM_WASM     = File.join(WASM_MODULE, "harucom.wasm")
 ROOTFS_DIR    = File.join(PROJECT_DIR, "rootfs")
 # Generated into build/, the same path the board's CMake build uses
 # (CMAKE_BINARY_DIR/ruby_scripts.h), so the header lives in one place and not in
@@ -174,13 +178,39 @@ namespace :wasm do
 
   # Copy the static page, the engine modules and the built shell next to the
   # wasm module so build/wasm/ is a self-contained directory the server can host.
+  #
+  # Everything the page fetches goes under v/<stamp>/, where the stamp is a
+  # digest of those files. One deploy therefore moves every asset URL at once, so
+  # a browser reloading afterwards cannot pair a file it still has cached with
+  # one it refetches: the old URLs are simply gone. index.html is the only
+  # unversioned file, and it is the one a reload revalidates.
+  #
+  # The emscripten glue resolves harucom.wasm against its own URL, so keeping the
+  # pair in one directory versions the wasm with no loader hook. wasm/js/ is not
+  # staged: vite bundles those modules into main.js (the audio worklet as a data
+  # URL), so nothing fetches them.
   def stage_page!
-    mkdir_p WASM_OUT
-    cp File.join(WASM_DIR, "index.html"), File.join(WASM_OUT, "index.html")
-    rm_rf File.join(WASM_OUT, "js")
-    cp_r File.join(WASM_DIR, "js"), File.join(WASM_OUT, "js")
-    rm_rf File.join(WASM_OUT, "ui")
-    cp_r File.join(WASM_DIR, "ui", "dist"), File.join(WASM_OUT, "ui")
+    require "digest"
+    dist = File.join(WASM_DIR, "ui", "dist")
+    assets = { "harucom.js" => WASM_JS, "harucom.wasm" => WASM_WASM,
+               "main.js" => File.join(dist, "main.js"),
+               "style.css" => File.join(dist, "style.css") }
+    digest = Digest::SHA256.new
+    assets.each { |name, path| digest << name << Digest::SHA256.file(path).digest }
+    stamp = digest.hexdigest[0, 10]
+
+    rm_rf File.join(WASM_OUT, "v")
+    version_dir = File.join(WASM_OUT, "v", stamp)
+    mkdir_p version_dir
+    assets.each { |name, path| cp path, File.join(version_dir, name) }
+
+    # Point index.html at this build. Only the names staged above are rewritten,
+    # so anything else the page grows keeps whatever path it was given.
+    html = File.read(File.join(WASM_DIR, "index.html")).gsub(/\b(src|href)="([^"\/:]+)"/) do
+      assets.key?($2) ? %(#{$1}="v/#{stamp}/#{$2}") : $~[0]
+    end
+    File.write(File.join(WASM_OUT, "index.html"), html)
+    stamp
   end
 
   # A coarse mtime signature of the staged sources, so the dev server can restage
@@ -205,7 +235,7 @@ namespace :wasm do
       rm_rf WASM_BUILD
       rm_rf WASM_HOST
     end
-    mkdir_p WASM_OUT
+    mkdir_p WASM_MODULE
     # Build libmruby.a with emscripten outside this project's bundler env: the
     # bundler env breaks emcc's bundled Python. The picoruby-dvi font generation
     # still works because freetype is installed as a system gem.
@@ -324,6 +354,7 @@ namespace :wasm do
   desc "Remove the wasm build output"
   task :clean do
     rm_rf WASM_BUILD
+    rm_rf WASM_MODULE
     rm_rf WASM_OUT
   end
 end
