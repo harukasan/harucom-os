@@ -7,6 +7,7 @@ module PicoRabbit
       def title_font; G::FONT_OUTFIT_EXTRABOLD_32; end
       def body_font; G::FONT_OUTFIT_22; end
       def bold_font; G::FONT_OUTFIT_BOLD_22; end
+      def body_font_ascent; 22; end
 
       # Colors
       def background_color; 0xFF; end
