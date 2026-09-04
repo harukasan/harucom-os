@@ -115,7 +115,7 @@ class InputMethodTCodeTest < Picotest::Test
   def test_the_timeout_commits_the_first_stroke_as_plain_text
     press("h")
     Machine.millis = InputMethod::TCode::TIMEOUT_MS
-    assert_equal :consumed, press("f")
+    assert_equal :commit, press("f")
     assert_equal "h", @composer.committed
     assert_equal "f", @composer.preedit
   end
@@ -128,10 +128,10 @@ class InputMethodTCodeTest < Picotest::Test
     assert_equal "h愛", @composer.committed
   end
 
-  def test_a_pair_missing_from_the_table_commits_only_the_second_key
+  def test_a_pair_missing_from_the_table_commits_both_keys
     press("a")
     assert_equal :commit, press("s")
-    assert_equal "s", @composer.committed
+    assert_equal "as", @composer.committed
   end
 
   def test_a_key_outside_the_layout_passes_through
@@ -149,6 +149,16 @@ class InputMethodTCodeTest < Picotest::Test
 
   def test_a_non_printable_key_passes_through
     assert_equal :passthrough, press("\e", false)
+  end
+
+  # A key the engine never sees as text leaves the pair open: the stroke
+  # stays in the preedit and pairs with the next key on the layout.
+  def test_a_non_printable_key_leaves_a_pending_stroke_alone
+    press("h")
+    Machine.millis = InputMethod::TCode::TIMEOUT_MS
+    assert_equal :passthrough, press("\e", false)
+    assert_equal "", @composer.committed
+    assert_equal "h", @composer.preedit
   end
 
   def test_reset_commits_a_pending_stroke
