@@ -50,10 +50,11 @@ jobs:
       with:
         submodules: false
 
-    # picoruby, the dictionary (emcc embeds dict.bin with --embed-file) and the
-    # DVI font sources. Not pico-sdk, which a recursive checkout would pull
-    # twice, at lib/pico-sdk and again under picoruby-r2p2, for around 650 MB of
-    # tree that emcc never reads.
+    # picoruby with all of its own submodules (picoruby-mbedtls takes the mbedtls
+    # source out of the pico-sdk under picoruby-r2p2, so that one is not
+    # optional), the dictionary (emcc embeds dict.bin with --embed-file) and the
+    # DVI font sources. Not lib/pico-sdk or lib/Pico-PIO-USB: only the board's
+    # CMake build reads those, and they are 300 MB of tree emcc never opens.
     - name: Check out the submodules the browser build needs
       run: |
         # .gitmodules carries ssh URLs for the two repositories we own, and the
@@ -61,12 +62,9 @@ jobs:
         # so fetch them over https instead. actions/checkout does this itself
         # when it checks submodules out, which this job does not use.
         git config --global url."https://github.com/".insteadOf "git@github.com:"
-        git submodule update --init --depth 1 lib/picoruby
-        git -C lib/picoruby config submodule."mrbgems/picoruby-r2p2/lib/pico-sdk".update none
-        git -C lib/picoruby config submodule."mrbgems/picoruby-r2p2/lib/rp2040js".update none
-        git submodule update --init --recursive --depth 1 lib/picoruby
-        git submodule update --init --recursive --depth 1 vendor/harucom-os-dict
-        git submodule update --init --depth 1 \
+        git submodule update --init --recursive --depth 1 \
+          lib/picoruby \
+          vendor/harucom-os-dict \
           mrbgems/picoruby-dvi/lib/fonts/font8x8 \
           mrbgems/picoruby-dvi/lib/fonts/misc-misc \
           mrbgems/picoruby-dvi/lib/fonts/spleen
