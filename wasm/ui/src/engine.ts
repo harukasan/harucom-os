@@ -26,7 +26,9 @@ export interface EngineEvents {
 export interface ConsoleLog {
   write(line: string): void;
   lines(): readonly string[];
-  subscribe(callback: (lines: readonly string[]) => void): () => void;
+  /** How many lines the cap has evicted, so a reader can align its own work. */
+  dropped(): number;
+  subscribe(callback: (lines: readonly string[], dropped: number) => void): () => void;
 }
 
 /** One file in the MEMFS tree. */

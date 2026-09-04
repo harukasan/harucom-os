@@ -6,8 +6,10 @@
 // escape is dropped rather than printed, because showing the raw bytes is worse
 // than showing nothing.
 //
-// The whole text is parsed at once rather than line by line, so a colour opened
-// on one line and closed on the next still ends where it was meant to.
+// A colour opened on one line and closed on the next has to end where it was
+// meant to, so parseFrom takes the state the previous run left and returns the
+// state this one ends in. That is what lets the console parse a line at a time
+// and keep the result, instead of re-reading the whole buffer on every print.
 
 export interface Span {
   text: string;
@@ -55,7 +57,10 @@ function apply(style: Style, codes: number[]): Style {
   return next;
 }
 
-function classNameOf(style: Style): string {
+// Exported so the console can style the newline between two lines with the
+// state the first one ended in, which is what it carried when the whole buffer
+// was parsed as one string.
+export function classNameOf(style: Style): string {
   return [style.foreground, style.background, style.bold ? "font-bold" : ""]
     .filter(Boolean).join(" ");
 }
@@ -66,9 +71,15 @@ function classNameOf(style: Style): string {
 // that are not SGR.
 const ESCAPE = /\u001b\[([0-9;]*)([@-~])/g;
 
-export function parseAnsi(text: string): Span[] {
+/** The escape state a run of text ends in, to carry into the next one. */
+export type { Style };
+
+// Parse one run, starting from the state the previous run left. PLAIN is not
+// exported: it is the object apply() assigns for a reset, so handing it out
+// would let a caller's edit change what every later reset means.
+export function parseFrom(text: string, entering: Style = PLAIN): { spans: Span[]; style: Style } {
   const spans: Span[] = [];
-  let style = PLAIN;
+  let style = entering;
   let at = 0;
 
   const push = (chunk: string) => {
@@ -89,5 +100,12 @@ export function parseAnsi(text: string): Span[] {
     style = apply(style, match[1].split(";").filter((part) => part !== "").map(Number));
   }
   push(text.slice(at));
-  return spans;
+  return { spans, style };
+}
+
+// The whole text at once. No production code calls this: it is the reference
+// definition the line-at-a-time parse is tested against, so a line-by-line run
+// and a single pass over the same text have to agree.
+export function parseAnsi(text: string): Span[] {
+  return parseFrom(text).spans;
 }
