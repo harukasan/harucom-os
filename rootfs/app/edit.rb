@@ -545,6 +545,10 @@ while running
       redo_stack.clear
       undo_record(undo_stack, [:insert, buffer.cursor_y, buffer.cursor_x, text])
       buffer.put(text)
+      # The key runs below as well and can move the cursor off the line the
+      # text landed on. The content redraw follows the cursor and would leave
+      # that line stale, so redraw the view instead.
+      buffer.mark_dirty(:structure) if ime_result == :passthrough
     end
     case ime_result
     when :commit

@@ -30,39 +30,36 @@ class InputMethod
 
     def process(key, im)
       # Backspace takes back a stroke still waiting for its partner, the way
-      # it takes back a romaji character in SKK.
-      if @stroke1 && key.match?(:bspace)
+      # it takes back a romaji character in SKK. Held with a modifier it is a
+      # different key and belongs to the application.
+      if @stroke1 && key.match?(:bspace, ctrl: false, shift: false, alt: false)
         @stroke1 = nil
         im.set_preedit("")
         return :consumed
       end
 
-      # Any other key the engine cannot use ends the pair. Commit the stroke
-      # as a normal character and let the caller have the key, so the pair
-      # cannot complete at a position the cursor has moved to since.
-      unless key.printable?
+      # Escape and Ctrl-G abandon it as well, the way they cancel a conversion
+      # in SKK.
+      if @stroke1 && (key.match?(:escape) || key.match?(:g, ctrl: true))
+        @stroke1 = nil
+        im.set_preedit("")
+        return :consumed
+      end
+
+      ch = key.printable? ? key.to_s : nil
+      pos = ch ? KEY_POSITIONS[ch] : nil
+
+      # A key the engine cannot pair ends the pair, whether it stands for text
+      # or not. Commit the stroke as a normal character and hand the key on.
+      # The caller takes committed text whatever the result says, so the pair
+      # cannot complete at a position the caller has moved to in between, and
+      # the key still reaches the handling every other key of its kind gets.
+      unless pos
         if @stroke1
           im.commit(@stroke1)
           @stroke1 = nil
-          im.set_preedit("")
         end
         return :passthrough
-      end
-
-      ch = key.to_s
-      pos = KEY_POSITIONS[ch]
-
-      # Key off the T-Code layout: it stands for itself. Commit it, behind
-      # a pending stroke if there is one, since the caller only takes text
-      # on :commit and would otherwise drop the key.
-      unless pos
-        return :passthrough unless @stroke1
-
-        pending = @stroke1
-        @stroke1 = nil
-        im.set_preedit("")
-        im.commit(pending + ch)
-        return :commit
       end
 
       now = Machine.board_millis

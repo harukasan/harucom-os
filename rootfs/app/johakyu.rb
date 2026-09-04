@@ -950,6 +950,7 @@ class JohakyuApp
     # instead of feeding the IME or inserting their character (the
     # gem's printable? only excludes Ctrl).
     if c.alt?
+      $ime.reset if $ime
       redraw_after_key(old_dirty)
       return
     end
@@ -960,6 +961,7 @@ class JohakyuApp
       return
     end
     if c.match?(:enter, ctrl: true)
+      $ime.reset if $ime
       start_eval
       redraw_after_key(old_dirty)
       return
@@ -984,6 +986,10 @@ class JohakyuApp
         @redo_stack.clear
         undo_record([:insert, @buffer.cursor_y, @buffer.cursor_x, text])
         @buffer.put(text)
+        # The key runs below as well and can move the cursor off the line the
+        # text landed on. The content redraw follows the cursor and would
+        # leave that line stale, so redraw the view instead.
+        @buffer.mark_dirty(:structure) if ime_result == :passthrough
       end
       case ime_result
       when :commit
