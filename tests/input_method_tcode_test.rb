@@ -12,13 +12,19 @@ class InputMethodTCodeTest < Picotest::Test
   # A key event as Keyboard#read_char delivers it. TCode asks a key only
   # whether it is printable and which character it carries.
   class Key
-    def initialize(char, printable = true)
+    def initialize(char, printable = true, name = nil)
       @char = char
       @printable = printable
+      @name = name
     end
 
     def printable?
       @printable
+    end
+
+    # TCode asks by name only, without modifiers.
+    def match?(name)
+      @name == name
     end
 
     def to_s
@@ -65,8 +71,12 @@ class InputMethodTCodeTest < Picotest::Test
     POSITIONS[strokes[0]] * POSITIONS.size + POSITIONS[strokes[1]]
   end
 
-  def press(char, printable = true)
-    @tcode.process(Key.new(char, printable), @composer)
+  def press(char, printable = true, name = nil)
+    @tcode.process(Key.new(char, printable, name), @composer)
+  end
+
+  def press_special(name)
+    press(nil, false, name)
   end
 
   def test_two_strokes_commit_one_character
@@ -159,14 +169,28 @@ class InputMethodTCodeTest < Picotest::Test
     assert_equal :passthrough, press("\e", false)
   end
 
-  # A key the engine never sees as text leaves the pair open: the stroke
-  # stays in the preedit and pairs with the next key on the layout.
-  def test_a_non_printable_key_leaves_a_pending_stroke_alone
+  # A key the engine cannot use ends the pair. The stroke is committed as
+  # text and the key goes on to the caller, so the pair cannot complete at
+  # a position the caller has moved to in between.
+  def test_a_non_printable_key_flushes_a_pending_stroke
     press("h")
-    Machine.millis = InputMethod::TCode::TIMEOUT_MS
-    assert_equal :passthrough, press("\e", false)
+    assert_equal :passthrough, press_special(:enter)
+    assert_equal "h", @composer.committed
+    assert_equal "", @composer.preedit
+    assert @tcode.idle?
+  end
+
+  def test_backspace_takes_back_a_pending_stroke
+    press("h")
+    assert_equal :consumed, press_special(:bspace)
     assert_equal "", @composer.committed
-    assert_equal "h", @composer.preedit
+    assert_equal "", @composer.preedit
+    assert @tcode.idle?
+  end
+
+  def test_backspace_without_a_pending_stroke_passes_through
+    assert_equal :passthrough, press_special(:bspace)
+    assert_equal "", @composer.committed
   end
 
   def test_reset_commits_a_pending_stroke

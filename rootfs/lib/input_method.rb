@@ -7,11 +7,18 @@
 #
 # Usage:
 #   result = $ime.process(key)
+#   text = $ime.take_committed
+#   buffer.put(text) if text.bytesize > 0
 #   case result
-#   when :commit      then buffer.put($ime.take_committed)
+#   when :commit      then # the key produced the text above
 #   when :consumed    then # redraw preedit only
 #   when :passthrough then # handle key normally
 #   end
+#
+# An engine can commit text on its way out of a composition, including when
+# it hands the key on, so the caller takes committed text on every result.
+# Reading it on :commit alone leaves the text queued until the next
+# conversion, where it lands wherever the cursor has moved to since.
 
 class InputMethod
   # InputMethod class methods (dict_available?, skk_lookup, tcode_lookup)

@@ -538,12 +538,16 @@ while running
   ime_handled = false
   if $ime
     ime_result = $ime.process(c)
-    case ime_result
-    when :commit
-      text = $ime.take_committed
+    # Any result can leave committed text behind, including :passthrough when
+    # the engine flushes a half-finished composition on its way out.
+    text = $ime.take_committed
+    if text.bytesize > 0
       redo_stack.clear
       undo_record(undo_stack, [:insert, buffer.cursor_y, buffer.cursor_x, text])
       buffer.put(text)
+    end
+    case ime_result
+    when :commit
       ime_handled = true
     when :consumed
       buffer.mark_dirty(:content)

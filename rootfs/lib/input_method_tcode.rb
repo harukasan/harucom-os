@@ -29,7 +29,25 @@ class InputMethod
     end
 
     def process(key, im)
-      return :passthrough unless key.printable?
+      # Backspace takes back a stroke still waiting for its partner, the way
+      # it takes back a romaji character in SKK.
+      if @stroke1 && key.match?(:bspace)
+        @stroke1 = nil
+        im.set_preedit("")
+        return :consumed
+      end
+
+      # Any other key the engine cannot use ends the pair. Commit the stroke
+      # as a normal character and let the caller have the key, so the pair
+      # cannot complete at a position the cursor has moved to since.
+      unless key.printable?
+        if @stroke1
+          im.commit(@stroke1)
+          @stroke1 = nil
+          im.set_preedit("")
+        end
+        return :passthrough
+      end
 
       ch = key.to_s
       pos = KEY_POSITIONS[ch]
