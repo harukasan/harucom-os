@@ -39,6 +39,11 @@ class LineEditor
   # The block receives the current input and returns true if complete.
   # Returns the completed string, or nil on Ctrl-D (EOF)
   def readmultiline(prompt, prompt_cont, &check)
+    # An app can exit with a composition still in flight, and the input method
+    # is a process-wide object that outlives it. Start from a clean engine so
+    # the first key here does not pair with a stroke typed inside the app.
+    @ime.reset if @ime
+
     @prompt = prompt
     @prompt_cont = prompt_cont || prompt
     @prompt_width = Editor.display_width(@prompt)
