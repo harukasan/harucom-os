@@ -32,7 +32,8 @@ class InputMethod
       # Backspace takes back a stroke still waiting for its partner, the way
       # it takes back a romaji character in SKK. Held with a modifier it is a
       # different key and belongs to the application.
-      if @stroke1 && key.match?(:bspace, ctrl: false, shift: false, alt: false)
+      unmodified = { ctrl: false, shift: false, alt: false, super_key: false }
+      if @stroke1 && key.match?(:bspace, **unmodified)
         @stroke1 = nil
         im.set_preedit("")
         return :consumed
@@ -40,7 +41,7 @@ class InputMethod
 
       # Escape and Ctrl-G abandon it as well, the way they cancel a conversion
       # in SKK.
-      if @stroke1 && (key.match?(:escape) || key.match?(:g, ctrl: true))
+      if @stroke1 && (key.match?(:escape, **unmodified) || key.match?(:g, ctrl: true))
         @stroke1 = nil
         im.set_preedit("")
         return :consumed
@@ -49,17 +50,18 @@ class InputMethod
       ch = key.printable? ? key.to_s : nil
       pos = ch ? KEY_POSITIONS[ch] : nil
 
-      # A key the engine cannot pair ends the pair, whether it stands for text
-      # or not. Commit the stroke as a normal character and hand the key on.
-      # The caller takes committed text whatever the result says, so the pair
-      # cannot complete at a position the caller has moved to in between, and
-      # the key still reaches the handling every other key of its kind gets.
+      # A key with no place in the layout ends the pair.
       unless pos
-        if @stroke1
-          im.commit(@stroke1)
-          @stroke1 = nil
-        end
-        return :passthrough
+        return :passthrough unless @stroke1
+
+        pending = @stroke1
+        @stroke1 = nil
+        im.set_preedit("")
+        # A key that carries text goes in behind the stroke. One that does not
+        # is consumed here, the way an IME consumes the key that ends a
+        # composition, so it cannot act on a buffer this flush just changed.
+        im.commit(ch ? pending + ch : pending)
+        return :commit
       end
 
       now = Machine.board_millis

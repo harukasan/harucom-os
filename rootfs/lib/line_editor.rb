@@ -82,12 +82,11 @@ class LineEditor
       # Process through input method if active
       if @ime
         ime_result = @ime.process(c)
-        # Any result can leave committed text behind, including :passthrough
-        # when the engine flushes a half-finished composition on its way out.
-        text = @ime.take_committed
-        @buffer.put(text) if text.bytesize > 0
         case ime_result
-        when :commit, :consumed
+        when :commit
+          @buffer.put(@ime.take_committed)
+          next
+        when :consumed
           next
         end
         # :passthrough falls through to normal handling

@@ -84,6 +84,66 @@ module Editor
   end
 end
 
+# Keyboard::Key and the cached constants the input methods compare against.
+# Mirrors mrbgems/picoruby-keyboard-input/mrblib/key.rb: engines ask a key for
+# its name, its character and its modifiers, and compare against the constants
+# by identity, which the cache below preserves the way the real Keyboard.key
+# does.
+class Keyboard
+  class Key
+    attr_reader :name, :char
+
+    def initialize(name, char, ctrl: false, shift: false, alt: false, super_key: false)
+      @name = name
+      @char = char
+      @ctrl = ctrl
+      @shift = shift
+      @alt = alt
+      @super = super_key
+    end
+
+    def ctrl?;  @ctrl;  end
+    def shift?; @shift; end
+    def alt?;   @alt;   end
+    def super?; @super; end
+
+    # Only the arguments given are checked, so a caller can tell Backspace
+    # from Shift-Backspace or ask about a name alone.
+    def match?(name = nil, ctrl: nil, shift: nil, alt: nil, super_key: nil)
+      return false if name      != nil && @name  != name
+      return false if ctrl      != nil && @ctrl  != ctrl
+      return false if shift     != nil && @shift != shift
+      return false if alt       != nil && @alt   != alt
+      return false if super_key != nil && @super != super_key
+      true
+    end
+
+    def printable?
+      @char != nil && !@ctrl
+    end
+
+    def to_s
+      @char
+    end
+  end
+
+  def self.key(name, char = nil, ctrl: false, shift: false, alt: false, super_key: false)
+    $keyboard_keys ||= {}
+    packed = "#{name}\t#{char}\t#{ctrl}\t#{shift}\t#{alt}\t#{super_key}"
+    $keyboard_keys[packed] ||=
+      Key.new(name, char, ctrl: ctrl, shift: shift, alt: alt, super_key: super_key)
+  end
+
+  ENTER  = key(:enter)
+  ESCAPE = key(:escape)
+  BSPACE = key(:bspace)
+  TAB    = key(:tab)
+  LEFT   = key(:left)
+  RIGHT  = key(:right)
+  UP     = key(:up)
+  DOWN   = key(:down)
+end
+
 # Flash dictionary access for the input methods. The board defines these
 # class methods in C (harucom-os-dict gem) over the dictionary region.
 # Tests install their own table with InputMethod.tcode_table=, indexed the
@@ -101,6 +161,16 @@ class InputMethod
   def self.tcode_lookup(key1, key2)
     return nil unless $tcode_table
     $tcode_table[key1 * InputMethod::TCode::KEY_POSITIONS.size + key2]
+  end
+
+  # Reading => [candidate, ...], as the flash dictionary returns them.
+  def self.skk_entries=(entries)
+    $skk_entries = entries
+  end
+
+  def self.skk_lookup(reading)
+    return nil unless $skk_entries
+    $skk_entries[reading]
   end
 end
 

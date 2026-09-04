@@ -12,13 +12,14 @@ class InputMethodTCodeTest < Picotest::Test
   # A key event as Keyboard#read_char delivers it. TCode asks a key only
   # whether it is printable and which character it carries.
   class Key
-    def initialize(char, printable = true, name = nil, ctrl: false, shift: false, alt: false)
+    def initialize(char, printable = true, name = nil, ctrl: false, shift: false, alt: false, super_key: false)
       @char = char
       @printable = printable
       @name = name
       @ctrl = ctrl
       @shift = shift
       @alt = alt
+      @super = super_key
     end
 
     def printable?
@@ -32,6 +33,7 @@ class InputMethodTCodeTest < Picotest::Test
       return false if ctrl  != nil && @ctrl  != ctrl
       return false if shift != nil && @shift != shift
       return false if alt   != nil && @alt   != alt
+      return false if super_key != nil && @super != super_key
       true
     end
 
@@ -79,13 +81,13 @@ class InputMethodTCodeTest < Picotest::Test
     POSITIONS[strokes[0]] * POSITIONS.size + POSITIONS[strokes[1]]
   end
 
-  def press(char, printable = true, name = nil, ctrl: false, shift: false, alt: false)
-    key = Key.new(char, printable, name, ctrl: ctrl, shift: shift, alt: alt)
+  def press(char, printable = true, name = nil, ctrl: false, shift: false, alt: false, super_key: false)
+    key = Key.new(char, printable, name, ctrl: ctrl, shift: shift, alt: alt, super_key: super_key)
     @tcode.process(key, @composer)
   end
 
-  def press_special(name, ctrl: false, shift: false, alt: false)
-    press(nil, false, name, ctrl: ctrl, shift: shift, alt: alt)
+  def press_special(name, ctrl: false, shift: false, alt: false, super_key: false)
+    press(nil, false, name, ctrl: ctrl, shift: shift, alt: alt, super_key: super_key)
   end
 
   def test_two_strokes_commit_one_character
@@ -158,13 +160,12 @@ class InputMethodTCodeTest < Picotest::Test
     assert_equal "", @composer.committed
   end
 
-  # A key off the layout is handled the same as a key that carries no text:
-  # the stroke is flushed and the key goes on to the caller, which inserts it
-  # through its own printable-key path and takes the flushed text as well.
-  def test_a_key_outside_the_layout_flushes_a_pending_stroke
+  # A key off the layout still stands for its own character, so it goes in
+  # behind the stroke it ended.
+  def test_a_key_outside_the_layout_commits_behind_the_stroke
     press("h")
-    assert_equal :passthrough, press("!")
-    assert_equal "h", @composer.committed
+    assert_equal :commit, press("!")
+    assert_equal "h!", @composer.committed
     assert_equal "", @composer.preedit
     assert @tcode.idle?
   end
@@ -173,12 +174,12 @@ class InputMethodTCodeTest < Picotest::Test
     assert_equal :passthrough, press("\e", false)
   end
 
-  # A key the engine cannot use ends the pair. The stroke is committed as
-  # text and the key goes on to the caller, so the pair cannot complete at
-  # a position the caller has moved to in between.
-  def test_a_non_printable_key_flushes_a_pending_stroke
+  # A key with no character of its own ends the pair and is consumed, the way
+  # an IME consumes the key that ends a composition. It never reaches the
+  # application, so it cannot act on a buffer this flush has just changed.
+  def test_a_non_printable_key_ends_the_pair_and_is_consumed
     press("h")
-    assert_equal :passthrough, press_special(:enter)
+    assert_equal :commit, press_special(:enter)
     assert_equal "h", @composer.committed
     assert_equal "", @composer.preedit
     assert @tcode.idle?
@@ -197,12 +198,23 @@ class InputMethodTCodeTest < Picotest::Test
     assert_equal "", @composer.committed
   end
 
-  # Backspace with a modifier is a different key. It reaches the application,
-  # and the stroke is flushed on the way like any other key the engine cannot
-  # pair.
-  def test_modified_backspace_is_left_to_the_application
+  # Backspace with a modifier is a different key, so it does not cancel. It
+  # ends the pair like any other key with no character of its own.
+  def test_modified_backspace_ends_the_pair_instead_of_cancelling
     press("h")
-    assert_equal :passthrough, press_special(:bspace, shift: true)
+    assert_equal :commit, press_special(:bspace, shift: true)
+    assert_equal "h", @composer.committed
+  end
+
+  def test_super_backspace_does_not_cancel_either
+    press("h")
+    assert_equal :commit, press_special(:bspace, super_key: true)
+    assert_equal "h", @composer.committed
+  end
+
+  def test_modified_escape_does_not_cancel
+    press("h")
+    assert_equal :commit, press_special(:escape, alt: true)
     assert_equal "h", @composer.committed
   end
 
