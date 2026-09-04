@@ -132,12 +132,12 @@ p5.no_fill
 The board expires a timeslice from a 1 ms timer interrupt.
 The browser main thread cannot be interrupted at all.
 
-- A per-opcode hook counts opcodes and **requests** a switch
+- A per-opcode hook **requests** a switch, never forces one
 - The VM decides when to actually take it
 
 {::wait/}
 A switch yields by returning from `mrb_vm_exec`.
-Returning out of a re-entrant call would corrupt the C caller,
+Returning from a re-entrant call would corrupt the C caller,
 so a pending switch waits until the stack is pure Ruby again.
 
 # Fixes
@@ -179,7 +179,7 @@ mrb_task_reset_context(mrb, ss->task);   /* c->ci back to cibase */
 ```
 
 - Suspended inside a method, `c->ci` is a **nested** frame
-- The new proc lands there, then the rewind jumps to `cibase`
+- The new proc lands there, the rewind jumps to `cibase`
 - `cibase` still holds the previous proc and its entry PC
 
 {::wait/}
@@ -217,7 +217,7 @@ So an IRB backtrace reads the way CRuby's does:
 - A large enough script in the sandbox died on the board
 - The PSRAM heap was barely touched
 - The same sequence on a 64-bit host, under ASan:
-  **heap-buffer-overflow**, 8 bytes past a 1024-byte region
+  - **heap-buffer-overflow**, 8 bytes past 1024
 
 {::wait/}
 1024 bytes is 64 slots, `TASK_STACK_INIT_SIZE`.
@@ -290,8 +290,8 @@ A refactor flipped "frame base offset" to "remaining room"
 
 # Three more in mruby
 
-- **#7308** the same `proc_set` hole for a task suspended
-  mid-call-chain, plus alias procs and heap envs
+- **#7308** the same `proc_set` hole, one layer deeper
+  - alias procs and heap envs take the same path
 - **#7309** mruby-task: the main task's name was GC'd
 - **#7312** gc.c: a class method table was marked twice
 
@@ -323,8 +323,8 @@ cw = 24
 ticks = 20
 tw = cw * ticks
 
-row_a = 312
-row_b = 396
+row_a = 320
+row_b = 400
 ```
 
 ```p5
@@ -379,8 +379,6 @@ end
 
 p5.no_stroke
 p5.stroke_weight(1)
-p5.text_color(0x49)
-p5.text("carrier wrap = the compare register latches", ox, 258)
 p5.text_color(red)
 p5.text("22,050 Hz: every write lands at a new phase", ox, row_a - 32)
 p5.text_color(green)
