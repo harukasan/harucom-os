@@ -31,6 +31,22 @@ picoruby compiles each gem's `ports/posix` and supplies the posix `Machine`,
 task scheduler, io-console, env and rng ports. `MRB_INT64` needs `MRB_NO_BOXING`
 on this 32-bit target, which also keeps full `Float` precision.
 
+## Deployment
+
+The browser build is published at <https://try.harucom.org/>.
+[.github/workflows/browser.yml](../.github/workflows/browser.yml) builds it and
+runs `rake wasm:test` on every pull request, and deploys `build/wasm/` to GitHub
+Pages when the change lands on `main`. The tests gate the deploy, so a module
+that builds but does not boot is never published.
+
+That gate is also the only end to end check the project has: it boots the real
+VM over the real `rootfs/`, which the board build (compile only) and `rake test`
+(per file, with the hardware stubbed) cannot do. Pull requests therefore build
+and test here even though they never deploy.
+
+The custom domain lives in the repository Pages settings, which is what GitHub
+reads for a site published from a workflow.
+
 ## C API
 
 The browser module exports these to JavaScript.
