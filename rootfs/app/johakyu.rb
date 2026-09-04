@@ -950,6 +950,10 @@ class JohakyuApp
     # instead of feeding the IME or inserting their character (the
     # gem's printable? only excludes Ctrl).
     if c.alt?
+      if $ime
+        $ime.reset
+        @buffer.mark_dirty(:content)
+      end
       redraw_after_key(old_dirty)
       return
     end
@@ -960,6 +964,10 @@ class JohakyuApp
       return
     end
     if c.match?(:enter, ctrl: true)
+      if $ime
+        $ime.reset
+        @buffer.mark_dirty(:content)
+      end
       start_eval
       redraw_after_key(old_dirty)
       return

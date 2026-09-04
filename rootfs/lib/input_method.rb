@@ -12,6 +12,11 @@
 #   when :consumed    then # redraw preedit only
 #   when :passthrough then # handle key normally
 #   end
+#
+# A key that ends a composition is consumed by the engine, which commits the
+# text and returns :commit. It never reaches the application, so it cannot
+# act on a buffer the flush has just changed, and the caller never has to
+# insert text and run the key in the same pass.
 
 class InputMethod
   # InputMethod class methods (dict_available?, skk_lookup, tcode_lookup)

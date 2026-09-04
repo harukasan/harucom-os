@@ -29,21 +29,38 @@ class InputMethod
     end
 
     def process(key, im)
-      return :passthrough unless key.printable?
+      # Backspace takes back a stroke still waiting for its partner, the way
+      # it takes back a romaji character in SKK. Held with a modifier it is a
+      # different key and belongs to the application.
+      unmodified = { ctrl: false, shift: false, alt: false, super_key: false }
+      if @stroke1 && key.match?(:bspace, **unmodified)
+        @stroke1 = nil
+        im.set_preedit("")
+        return :consumed
+      end
 
-      ch = key.to_s
-      pos = KEY_POSITIONS[ch]
+      # Escape and Ctrl-G abandon it as well, the way they cancel a conversion
+      # in SKK.
+      if @stroke1 && (key.match?(:escape, **unmodified) || key.match?(:g, ctrl: true))
+        @stroke1 = nil
+        im.set_preedit("")
+        return :consumed
+      end
 
-      # Key off the T-Code layout: it stands for itself. Commit it, behind
-      # a pending stroke if there is one, since the caller only takes text
-      # on :commit and would otherwise drop the key.
+      ch = key.printable? ? key.to_s : nil
+      pos = ch ? KEY_POSITIONS[ch] : nil
+
+      # A key with no place in the layout ends the pair.
       unless pos
         return :passthrough unless @stroke1
 
         pending = @stroke1
         @stroke1 = nil
         im.set_preedit("")
-        im.commit(pending + ch)
+        # A key that carries text goes in behind the stroke. One that does not
+        # is consumed here, the way an IME consumes the key that ends a
+        # composition, so it cannot act on a buffer this flush just changed.
+        im.commit(ch ? pending + ch : pending)
         return :commit
       end
 

@@ -204,10 +204,15 @@ class InputMethod
         return :passthrough
       end
 
-      # Non-printable keys: flush romaji and pass through
+      # A key with no character ends the composition. Flush the romaji and
+      # consume the key, so it cannot act on a buffer the flush just changed.
+      # With nothing pending there is nothing to end, and the key belongs to
+      # the application.
       unless key.printable?
+        return :passthrough if @romaji.bytesize == 0
+
         flush_romaji(im)
-        return :passthrough
+        return :commit
       end
 
       ch = key.to_s
@@ -317,7 +322,17 @@ class InputMethod
         return :commit
       end
 
-      return :passthrough unless key.printable?
+      # A key with no character ends the composition here too: confirm the
+      # reading as it stands, the way Enter does above, and consume the key.
+      unless key.printable?
+        flush_n_to_reading
+        im.commit(@reading) if @reading.bytesize > 0
+        im.set_preedit("")
+        @reading = ""
+        @romaji = ""
+        @mode = :hiragana
+        return :commit
+      end
 
       ch = key.to_s
 
