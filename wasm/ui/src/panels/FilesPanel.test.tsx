@@ -32,6 +32,14 @@ function setup(files: Files, options?: { started?: boolean }) {
 
 const status = () => screen.getByRole("status");
 
+function chooseDestination(path: string) {
+  const picker = screen.getByLabelText("Upload to") as HTMLSelectElement;
+  act(() => {
+    picker.value = path;
+    picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+}
+
 async function upload(file: File) {
   const picker = screen.getByLabelText("Files to upload") as HTMLInputElement;
   Object.defineProperty(picker, "files", { value: [file], configurable: true });
@@ -52,18 +60,25 @@ describe("FilesPanel", () => {
     expect(screen.getByText("2683 B")).toBeTruthy();
   });
 
-  // /data is where a sample or a script is meant to land, so it is the default
-  // when it exists rather than the root, where a stray file would clutter the
-  // listing the OS itself boots from.
-  it("offers the directories and starts at /data", () => {
+  // The root is the one directory that is always there, and it assumes nothing
+  // about what an uploaded file is for.
+  it("offers the directories and starts at the root", () => {
     setup(stubFiles(TREE));
     const picker = screen.getByLabelText("Upload to") as HTMLSelectElement;
-    expect(picker.value).toBe("/data");
+    expect(picker.value).toBe("/");
     expect([...picker.options].map((o) => o.value)).toEqual(["/", "/app", "/data"]);
   });
 
-  it("falls back to the root when there is no /data", () => {
-    setup(stubFiles({ files: [], directories: ["/", "/app"] }));
+  // The OS deletes directories without telling the page, so a select left
+  // pointing at one that is gone would send the next upload nowhere.
+  it("falls back to the root when the chosen directory is gone", () => {
+    let tree = TREE;
+    setup(stubFiles(TREE, { tree: () => tree }));
+    chooseDestination("/data");
+    tree = { files: [], directories: ["/", "/app"] };
+    act(() => {
+      screen.getByRole("button", { name: "Refresh" }).click();
+    });
     expect((screen.getByLabelText("Upload to") as HTMLSelectElement).value).toBe("/");
   });
 
@@ -72,6 +87,7 @@ describe("FilesPanel", () => {
       add: vi.fn(async () => ({ written: ["/data/a.txt"], replaced: [], failed: [] })),
     });
     setup(files);
+    chooseDestination("/data");
     const picker = screen.getByLabelText("Files to upload") as HTMLInputElement;
     const file = new File(["hi"], "a.txt");
     Object.defineProperty(picker, "files", { value: [file] });
@@ -170,6 +186,7 @@ describe("FilesPanel", () => {
       add: vi.fn(async () => ({ written, replaced: [], failed: [] })),
     });
     setup(files);
+    chooseDestination("/data");
     await upload(new File(["x"], "kick.wav"));
     expect(status().textContent).toBe("Wrote 3 files to /data: kick.wav, snare.wav, hat.wav.");
   });
@@ -224,7 +241,7 @@ describe("FilesPanel", () => {
   it("still names the destination when the listing could not be read", () => {
     setup(stubFiles(TREE, { tree: () => { throw new Error("FS is gone"); } }));
     const picker = screen.getByLabelText("Upload to") as HTMLSelectElement;
-    expect(picker.value).toBe("/data");
-    expect([...picker.options].map((o) => o.value)).toContain("/data");
+    expect(picker.value).toBe("/");
+    expect([...picker.options].map((o) => o.value)).toContain("/");
   });
 });
