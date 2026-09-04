@@ -59,7 +59,6 @@
  * in the 25 ms period. If the previous frame is still draining at the
  * next tick, that frame is skipped and the period stretches to 30 Hz
  * until frames fit again. */
-#define DMX_FRAME_INTERVAL_US    25000
 #define DMX_DEGRADED_INTERVAL_US 33333
 
 #define DMX_DEADMAN_DEFAULT_MS 500

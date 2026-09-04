@@ -15,7 +15,7 @@ with its own submodules (`git submodule update --init --recursive`).
 
 | Command | Description |
 | --- | --- |
-| `rake wasm:build` | Build `build/wasm/harucom.{js,wasm}`, build the shell, and stage the page next to it. `CLEAN=1` rebuilds the presym and host tools from scratch. |
+| `rake wasm:build` | Build `build/wasm/harucom.{js,wasm}`, build the shell, and stage the page next to it. `CLEAN=1` rebuilds the presym and host tools from scratch, which a change to [build_config/harucom-wasm.rb](../build_config/harucom-wasm.rb) needs: a gem can carry build-wide defines, and mruby's object tasks depend on sources and headers, never on flags. |
 | `rake wasm:ui` | Build the shell into `wasm/ui/dist` without touching the wasm module (no `emcc` needed). |
 | `rake wasm:ui_test` | Type-check the shell and run its component tests. |
 | `rake wasm:server` | Serve `build/wasm/` on `http://localhost:8000/` (`PORT=` to change). Edits to `wasm/index.html`, `wasm/js/` and `wasm/ui/src/` are rebuilt and restaged while it runs, so a plain reload picks them up. |
@@ -321,10 +321,8 @@ them is unavailable:
 | Gem | What is missing |
 | --- | --- |
 | `picoruby-flash-file` | `PWMAudio::Stream`, which reads samples straight from flash |
-| `picoruby-dmx` | DMX output, and the johakyu lighting paths that drive it |
 | `picoruby-uart`, `picoruby-gpio`, `picoruby-pwm` | The peripherals themselves |
 | `picoruby-adc` | Analog input. A narrow `ADC` stand-in exists for the pads, described above |
-| `picoruby-synth-native` | The native synth kernels |
 
 `PWMAudio` itself is present, so tones and in-memory samples work. Only
 `PWMAudio::Stream` raises, because its constructor calls `FlashFile.extents`.
@@ -339,6 +337,7 @@ them is unavailable:
 | Audio | PWM timer ISR consumes the ring | AudioWorklet, drained on demand |
 | Reboot | Watchdog | Page reload (`window.__harucomReboot`) |
 | Preemption | 1 ms timer interrupt | Opcode budget in `code_fetch_hook` |
+| DMX | UART paced by DMA at 40 Hz, degrading to about 30 Hz once a frame no longer fits the period | No wire. The universe and its accessors are the same code, frames are counted at the nominal 40 Hz, and the dead-man switch is absent because there is no rig to darken |
 
 The DVI text core itself is shared: `mrbgems/picoruby-dvi/src/dvi_text.c` holds
 the cell writers, the narrow font cache and the palette, and each platform port

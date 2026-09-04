@@ -162,10 +162,21 @@ void dmx_stop(void);
 uint32_t dmx_frame_count(void);
 ```
 
-The background transmit engine
-([ports/rp2350/dmx_port.c](../mrbgems/picoruby-dmx/ports/rp2350/dmx_port.c)).
+The background transmit engine. On the board
+([ports/rp2350/dmx_port.c](../mrbgems/picoruby-dmx/ports/rp2350/dmx_port.c))
 `dmx_init` returns the claimed DMA channel, or `DMX_INIT_ERR_UNIT` /
-`DMX_INIT_ERR_RESOURCE` on failure.
+`DMX_INIT_ERR_PIN` / `DMX_INIT_ERR_RESOURCE` on failure.
+
+The browser build
+([ports/posix/dmx_wasm.c](../mrbgems/picoruby-dmx/ports/posix/dmx_wasm.c))
+has nothing to transmit to, so it keeps the engine's bookkeeping and drops the
+wire. `dmx_init` claims no resource and returns 0, but it rejects a unit name
+the board would reject and a pin outside `DMX_MAX_TXD_PIN`, so a show written
+in the browser fails on wiring the board will not accept. Which pins carry TX
+for which unit is board wiring and stays in the board port. `dmx_start` darkens
+the universe and begins counting frames at `DMX_FRAME_INTERVAL_US` off the
+clock, without the board's degradation to a longer period when a frame no
+longer fits. The dead-man switch is absent, because there is no rig to darken.
 
 ### dmx_keepalive / dmx_set_deadman_ms
 

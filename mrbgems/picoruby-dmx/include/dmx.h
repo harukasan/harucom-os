@@ -26,6 +26,10 @@ uint8_t dmx_get(uint16_t channel);
 void dmx_blackout(void);
 void dmx_set_active_slots(uint16_t count);
 
+/* Frame period of the transmit engine. Every port paces to this, and
+ * dmx_frame_count() advances at this rate. */
+#define DMX_FRAME_INTERVAL_US 25000 /* 40 Hz */
+
 /* Background transmit engine (platform-specific, ports/).
  * dmx_init configures the given UART unit and TX pin for DMX512
  * (250000 baud 8N2, fixed by the standard), claims a DMA channel and

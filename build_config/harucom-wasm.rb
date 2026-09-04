@@ -77,6 +77,27 @@ MRuby::CrossBuild.new("harucom-wasm") do |conf|
   # (ports/posix/dict_region.c) loads it from the emcc-embedded /dict.bin.
   conf.gem File.expand_path("../mrbgems/harucom-os-dict", __dir__)
 
+  # Exact rational time arithmetic for the Johakyu pattern core
+  # (rootfs/lib/johakyu/), the same gems the board build carries. C-backed
+  # Rational keeps pattern queries off the allocation-heavy pure Ruby fraction
+  # path. mruby-bigint comes along because mruby-rational does not compile
+  # without MRB_USE_BIGINT. It also changes integer overflow from RangeError
+  # to Bignum promotion, which is another reason to match the board here.
+  conf.gem File.expand_path("../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-bigint", __dir__)
+  conf.gem File.expand_path("../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-rational", __dir__)
+
+  conf.gem File.expand_path("../lib/picoruby/mrbgems/picoruby-mruby/lib/mruby/mrbgems/mruby-metaprog", __dir__)
+
+  # DMX512 (DMX) for the Johakyu live-coding app. The universe and its
+  # accessors in src/ are portable. The board port paces a UART through DMA,
+  # the browser has nothing to transmit to, so ports/posix/dmx_wasm.c keeps
+  # the engine's bookkeeping and drops the wire.
+  conf.gem File.expand_path("../mrbgems/picoruby-dmx", __dir__)
+
+  # Sample synthesis kernels (Synth), used by the Johakyu drum kit. Pure C
+  # with no pico-sdk dependency, so the board sources compile here as they are.
+  conf.gem File.expand_path("../mrbgems/picoruby-synth-native", __dir__)
+
   # Userland support gems pulled in by rootfs/system.rb. picoruby-editor is an
   # upstream pure-Ruby gem (Editor / Editor::Buffer, used by line_editor.rb).
   conf.gem core: "picoruby-editor"
