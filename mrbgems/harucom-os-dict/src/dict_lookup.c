@@ -26,24 +26,26 @@ fnv1a(const char *data, int len)
   return hash;
 }
 
+/* Header of an image this build knows how to read, or NULL for anything else */
 static const dict_header_t *
 get_header(void)
 {
-  return (const dict_header_t *)dict_region_base();
+  const dict_header_t *h = (const dict_header_t *)dict_region_base();
+  if (!h || h->magic != DICT_MAGIC || h->version != DICT_VERSION) return NULL;
+  return h;
 }
 
 int
 dict_available(void)
 {
-  const dict_header_t *h = get_header();
-  return h && h->magic == DICT_MAGIC;
+  return get_header() != NULL;
 }
 
 const void *
 dict_find_section(uint32_t type, uint32_t *out_size)
 {
   const dict_header_t *h = get_header();
-  if (!h || h->magic != DICT_MAGIC) return NULL;
+  if (!h) return NULL;
 
   const dict_section_t *sections =
       (const dict_section_t *)((const uint8_t *)h + sizeof(dict_header_t));

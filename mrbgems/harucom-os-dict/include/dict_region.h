@@ -20,6 +20,14 @@ extern "C" {
 #define DICT_REGION_SIZE  (2 * 1024 * 1024) /* 2 MB */
 #define DICT_MAGIC        0x4B444348        /* "HCDK" */
 
+/*
+ * Format version of the image. The packing tool bumps this when the meaning
+ * of the packed data changes. The lookups ignore an image built for another
+ * version, so a board still holding an older dictionary reads as having none
+ * rather than returning characters from a layout this build no longer uses.
+ */
+#define DICT_VERSION      2
+
 /* Section types */
 #define DICT_TYPE_SKK   1
 #define DICT_TYPE_TCODE 2
@@ -74,7 +82,8 @@ int dict_skk_lookup(const char *reading, int reading_len, const char **out_candi
 /*
  * T-Code table lookup.
  * Returns the Unicode codepoint for the two-stroke sequence, or 0 if
- * no character is assigned.
+ * no character is assigned. The table is indexed as
+ * table[key1 * key_count + key2], where key1 is the first keystroke.
  */
 uint16_t dict_tcode_lookup(int key1, int key2);
 

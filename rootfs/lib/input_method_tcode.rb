@@ -29,58 +29,58 @@ class InputMethod
     end
 
     def process(key, im)
-      # Check timeout on first stroke
-      if @stroke1
-        now = Machine.board_millis
-        if (now - @stroke1_ms) >= TIMEOUT_MS
-          # Timeout: pass first stroke as normal character
-          ch = @stroke1
-          @stroke1 = nil
-          im.set_preedit("")
-          im.commit(ch)
-          # Continue processing current key below (may start a new stroke)
-        end
-      end
-
       return :passthrough unless key.printable?
 
       ch = key.to_s
       pos = KEY_POSITIONS[ch]
 
-      # Key not in T-Code layout: pass through (also flush pending stroke)
+      # Key off the T-Code layout: it stands for itself. Commit it, behind
+      # a pending stroke if there is one, since the caller only takes text
+      # on :commit and would otherwise drop the key.
       unless pos
-        if @stroke1
-          pending = @stroke1
-          @stroke1 = nil
-          im.set_preedit("")
-          im.commit(pending)
-          return :commit
-        end
-        return :passthrough
+        return :passthrough unless @stroke1
+
+        pending = @stroke1
+        @stroke1 = nil
+        im.set_preedit("")
+        im.commit(pending + ch)
+        return :commit
+      end
+
+      now = Machine.board_millis
+
+      # A stroke left alone for too long is not part of a pair. Commit it
+      # as a normal character and start a new pair from this key.
+      if @stroke1 && (now - @stroke1_ms) >= TIMEOUT_MS
+        im.commit(@stroke1)
+        @stroke1 = ch
+        @stroke1_ms = now
+        im.set_preedit(ch)
+        return :commit
       end
 
       if @stroke1
         # Second stroke
-        pos1 = KEY_POSITIONS[@stroke1]
+        pending = @stroke1
+        pos1 = KEY_POSITIONS[pending]
         @stroke1 = nil
         im.set_preedit("")
 
         result = InputMethod.tcode_lookup(pos1, pos)
         if result
           im.commit(result)
-          return :commit
         else
           # No match: output both keys as normal characters
-          im.commit(ch)
-          return :commit
+          im.commit(pending + ch)
         end
-      else
-        # First stroke
-        @stroke1 = ch
-        @stroke1_ms = Machine.board_millis
-        im.set_preedit(ch)
-        return :consumed
+        return :commit
       end
+
+      # First stroke
+      @stroke1 = ch
+      @stroke1_ms = now
+      im.set_preedit(ch)
+      :consumed
     end
 
     def mode_label
