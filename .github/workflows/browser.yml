@@ -56,6 +56,11 @@ jobs:
     # tree that emcc never reads.
     - name: Check out the submodules the browser build needs
       run: |
+        # .gitmodules carries ssh URLs for the two repositories we own, and the
+        # runner has no key. Every submodule the browser build needs is public,
+        # so fetch them over https instead. actions/checkout does this itself
+        # when it checks submodules out, which this job does not use.
+        git config --global url."https://github.com/".insteadOf "git@github.com:"
         git submodule update --init --depth 1 lib/picoruby
         git -C lib/picoruby config submodule."mrbgems/picoruby-r2p2/lib/pico-sdk".update none
         git -C lib/picoruby config submodule."mrbgems/picoruby-r2p2/lib/rp2040js".update none
