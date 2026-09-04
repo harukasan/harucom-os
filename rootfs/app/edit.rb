@@ -294,13 +294,6 @@ end
 # Returns the entered string, or nil if cancelled with Escape.
 # When y_or_n: true, returns immediately on a single character input.
 def prompt_input(console, keyboard, label, y_or_n: false)
-  # The prompt runs its own read loop without the IME, so a composition
-  # started before it would be left mid-flight: its preedit stays painted on
-  # the buffer line and the next key after the prompt pairs with a stroke from
-  # before it. Discard it here, the way a scene or file switch does. The
-  # callers below ask for the buffer back once the prompt closes.
-  $ime.reset if $ime
-
   input = ""
   loop do
     # Draw prompt
@@ -577,10 +570,10 @@ while running
     unless filepath
       filepath = prompt_input(console, keyboard, "Save as: ")
       draw_command_bar(console)
-      buffer.mark_dirty(:structure)
       unless filepath && filepath.bytesize > 0
         filepath = nil
         message = "Save cancelled"
+        buffer.mark_dirty(:structure)
         next
       end
     end

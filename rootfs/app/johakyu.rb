@@ -761,23 +761,23 @@ class JohakyuApp
     @console.put_string_at(0, @command_row, @command_bar_text, COMMAND_ATTR)
   end
 
-  # Prompt on the command bar. Keeps the show alive while waiting.
   # Discard a composition before a command that does not route keys through
-  # the IME. Without this the engine is left mid-composition: the preedit
-  # stays painted on the buffer line and the next key pairs with a stroke the
-  # user typed before the command. The preedit was drawn over the buffer, so
-  # ask for that line back as well.
+  # the IME. Without this the engine is left mid-composition and the next key
+  # pairs with a stroke typed before the command. The preedit was painted over
+  # the buffer line and emptying it stops the overlay from being drawn, so ask
+  # for that line back too, but only when there was a preedit to erase:
+  # dirtying the buffer for nothing schedules a syntax reparse on the show
+  # loop.
   def discard_composition
     return unless $ime
+    return if $ime.preedit.bytesize == 0
 
     $ime.reset
     @buffer.mark_dirty(:content)
   end
 
+  # Prompt on the command bar. Keeps the show alive while waiting.
   def prompt_input(label, y_or_n: false)
-    # The prompt runs its own read loop without the IME.
-    discard_composition
-
     input = ""
     loop do
       display = " #{label}#{input}"
@@ -953,10 +953,16 @@ class JohakyuApp
     @join_line = -1
     @buffer.clear_dirty
 
-    # Editor commands checked before the IME: an Alt+digit would
-    # otherwise be fed into the preedit as a plain digit.
+    # Alt chords are the only commands checked before the IME. The gem's
+    # printable? excludes Ctrl but not Alt, so an Alt+digit would reach the
+    # engine as a plain digit. Every Ctrl chord below goes through the IME
+    # first, where a pending composition ends on it like on any other key
+    # that carries no character.
     if c.alt? && c.char && c.char >= "0" && c.char <= "9"
-      discard_composition
+      # switch_scene asks for the incoming buffer back itself, so this only
+      # has to drop the engine state, and marking the outgoing buffer here
+      # would leave a dirty flag on a buffer nobody is about to draw.
+      $ime.reset if $ime
       switch_scene(c.char == "0" ? 10 : c.char.to_i)
       redraw_after_key(old_dirty)
       return
@@ -969,29 +975,6 @@ class JohakyuApp
       redraw_after_key(old_dirty)
       return
     end
-    if c.match?(:o, ctrl: true)
-      discard_composition
-      open_file
-      redraw_after_key(old_dirty)
-      return
-    end
-    if c.match?(:enter, ctrl: true)
-      discard_composition
-      start_eval
-      redraw_after_key(old_dirty)
-      return
-    end
-    if c.match?(:b, ctrl: true)
-      # Panic switch: zero the universe now. Bound light tracks keep
-      # writing, so this darkens until their next event; eval an
-      # empty buffer to silence for good.
-      discard_composition
-      DMX.blackout
-      @message = "Blackout (running tracks relight)"
-      redraw_after_key(old_dirty)
-      return
-    end
-
     ime_handled = false
     if $ime
       ime_result = $ime.process(c)
@@ -1009,6 +992,25 @@ class JohakyuApp
     end
 
     unless ime_handled
+      if c.match?(:o, ctrl: true)
+        open_file
+        redraw_after_key(old_dirty)
+        return
+      end
+      if c.match?(:enter, ctrl: true)
+        start_eval
+        redraw_after_key(old_dirty)
+        return
+      end
+      if c.match?(:b, ctrl: true)
+        # Panic switch: zero the universe now. Bound light tracks keep
+        # writing, so this darkens until their next event. Eval an empty
+        # buffer to silence for good.
+        DMX.blackout
+        @message = "Blackout (running tracks relight)"
+        redraw_after_key(old_dirty)
+        return
+      end
       case c
       when Keyboard::CTRL_Q, Keyboard::CTRL_C
         unsaved = unsaved_scene_count
