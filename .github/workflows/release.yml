@@ -59,9 +59,22 @@ jobs:
           (cd staging && zip     ../release/harucom_os-${{ github.ref_name }}.zip    *.uf2)
           (cd staging && tar czf ../release/harucom_os-${{ github.ref_name }}.tar.gz *.uf2)
 
+      # The notes for a tag live in doc/release-notes/<tag>.md. A tag without
+      # one gets an empty body, and the generated pull request list still
+      # describes the release.
+      - name: Collect the release notes
+        run: |
+          notes="doc/release-notes/${{ github.ref_name }}.md"
+          if [ -f "$notes" ]; then
+            cat "$notes" > release-notes.md
+          else
+            : > release-notes.md
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
+          body_path: release-notes.md
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
