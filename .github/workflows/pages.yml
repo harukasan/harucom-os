@@ -1,0 +1,101 @@
+name: Pages
+
+# Publish the browser build to https://try.harucom.org/.
+#
+# The Pages site is deployed from this workflow, so the repository must have
+# Settings -> Pages -> Source set to "GitHub Actions" and Custom domain set to
+# try.harucom.org. That setting is the authority for the domain. The CNAME file
+# written below only keeps the domain visible in the deployed tree.
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# One deployment at a time, and never cancel one that is already publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # The dictionary submodule and its own data submodules: the browser
+        # module embeds build/dict.bin, so the IME works in the page.
+        submodules: recursive
+
+    # libfreetype-dev builds the freetype gem that picoruby-dvi uses to
+    # generate its font tables, libssl-dev links the picoruby host tools.
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfreetype-dev libssl-dev
+
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '4.0.1'
+        bundler-cache: true
+
+    # picoruby's own rake runs under Bundler.with_unbundled_env, because the
+    # bundler env breaks the python that emcc ships. It therefore needs freetype
+    # as a system gem, not only as a bundled one.
+    - name: Install freetype as a system gem
+      run: gem install freetype
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: |
+          wasm/package-lock.json
+          wasm/ui/package-lock.json
+
+    - name: Set up emscripten
+      uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: '6.0.0'
+        actions-cache-folder: emsdk-cache
+
+    # The picoruby build directory is deliberately not cached. CMake and mruby
+    # have no dependency edge from the submodule or the compile flags to
+    # libmruby.a, so a restored cache can silently link a stale VM.
+    - name: Build the browser module and the shell
+      run: bundle exec rake wasm:build
+
+    - name: Smoke-test the build
+      run: bundle exec rake wasm:test
+
+    - name: Write CNAME
+      run: echo 'try.harucom.org' > build/wasm/CNAME
+
+    - name: Upload the page
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: build/wasm
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
