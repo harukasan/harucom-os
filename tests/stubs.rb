@@ -86,11 +86,10 @@ end
 
 # Flash dictionary access for the input methods. The board defines these
 # class methods in C (harucom-os-dict gem) over the dictionary region.
-# Tests install their own table with InputMethod.tcode_table=, indexed
-# like the packed one: first stroke * 40 + second stroke.
+# Tests install their own table with InputMethod.tcode_table=, indexed the
+# way the packed one is: first stroke * key count + second stroke, over the
+# keys the layout maps.
 class InputMethod
-  TCODE_KEY_COUNT = 40
-
   def self.tcode_table=(table)
     $tcode_table = table
   end
@@ -101,7 +100,7 @@ class InputMethod
 
   def self.tcode_lookup(key1, key2)
     return nil unless $tcode_table
-    $tcode_table[key1 * TCODE_KEY_COUNT + key2]
+    $tcode_table[key1 * InputMethod::TCode::KEY_POSITIONS.size + key2]
   end
 end
 

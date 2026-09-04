@@ -3,7 +3,7 @@ require "input_method_tcode"
 
 # InputMethod::TCode turns two keystrokes into one character through the
 # 40x40 table in the flash dictionary. The table itself comes from
-# harucom-os-dict; these tests install a small one through the stub in
+# harucom-os-dict. These tests install a small one through the stub in
 # tests/stubs.rb and cover the input behavior around it: stroke pairing,
 # stroke order, the preedit, the timeout, and the keys the layout leaves out.
 class InputMethodTCodeTest < Picotest::Test
@@ -62,7 +62,7 @@ class InputMethodTCodeTest < Picotest::Test
   end
 
   def index(strokes)
-    POSITIONS[strokes[0]] * InputMethod::TCODE_KEY_COUNT + POSITIONS[strokes[1]]
+    POSITIONS[strokes[0]] * POSITIONS.size + POSITIONS[strokes[1]]
   end
 
   def press(char, printable = true)
@@ -139,12 +139,20 @@ class InputMethodTCodeTest < Picotest::Test
     assert_equal "", @composer.committed
   end
 
-  def test_a_key_outside_the_layout_flushes_a_pending_stroke
+  def test_a_key_outside_the_layout_commits_behind_a_pending_stroke
     press("h")
     assert_equal :commit, press("!")
-    assert_equal "h", @composer.committed
+    assert_equal "h!", @composer.committed
     assert_equal "", @composer.preedit
     assert @tcode.idle?
+  end
+
+  # The caller takes committed text on :commit only, so a key the layout
+  # does not cover has to come back along with the stroke it flushed.
+  def test_a_key_outside_the_layout_is_not_swallowed
+    press("h")
+    press(" ")
+    assert_equal "h ", @composer.committed
   end
 
   def test_a_non_printable_key_passes_through
