@@ -20,9 +20,6 @@
 #   audio.deinit
 
 module Board
-  AUDIO_L_PIN = 24
-  AUDIO_R_PIN = 25
-
   class PWMAudio
     SAMPLE_RATE = ::PWMAudio::SAMPLE_RATE
     CHANNELS    = ::PWMAudio::CHANNELS

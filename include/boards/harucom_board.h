@@ -11,7 +11,8 @@
 #define PICO_RP2350_PSRAM_CS_PIN 0
 
 // --- LED ---
-#define PICO_DEFAULT_LED_PIN 23
+#define PICO_DEFAULT_LED_PIN 23 // green
+#define HARUCOM_LED_RED_PIN  1  // red
 
 // --- UART ---
 #ifndef PICO_DEFAULT_UART

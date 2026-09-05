@@ -17,9 +17,6 @@
 #   left_pad.right?
 
 module Board
-  PAD0_PIN = 28
-  PAD1_PIN = 29
-
   class Pad
     # Directions
     RIGHT = 0
